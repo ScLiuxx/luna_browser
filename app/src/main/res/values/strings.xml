@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">琉璃浏览器</string>
+    <string name="app_name_short">琉璃</string>
+    <string name="privacy_title">隐私保护说明</string>
+    <string name="privacy_summary">琉璃浏览器不收集、不上传您的任何个人数据。应用仅使用网络权限来加载您访问的网页。</string>
+</resources>

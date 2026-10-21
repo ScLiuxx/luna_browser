@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.92"
+        android:scaleY="0.92"
+        android:pivotX="54"
+        android:pivotY="54">
+    <!-- contact shadow -->
+    <path
+        android:pathData="M32,85 C40,80.5 68,80.5 76,85 C68,89.5 40,89.5 32,85 Z"
+        android:fillColor="#55030A18" />
+    <!-- glass sphere -->
+    <path
+        android:pathData="M54,22 C69.46,22 82,34.54 82,50 C82,65.46 69.46,78 54,78 C38.54,78 26,65.46 26,50 C26,34.54 38.54,22 54,22 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="42"
+                android:centerY="36"
+                android:gradientRadius="46"
+                android:startColor="#FFF7FDFF"
+                android:centerColor="#FF8EE7FF"
+                android:endColor="#FF5748E8" />
+        </aapt:attr>
+    </path>
+    <!-- bottom refraction / inner shadow -->
+    <path
+        android:pathData="M28,57 C33,69 45,77 56,77 C68,77 77,69 81,57 C76,71 63,80 48,78 C38,76 31,68 28,57 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="54"
+                android:startY="56"
+                android:endX="54"
+                android:endY="81"
+                android:startColor="#00684DFF"
+                android:centerColor="#33664BFF"
+                android:endColor="#B0452BC9" />
+        </aapt:attr>
+    </path>
+    <!-- thin chrome rim -->
+    <path
+        android:pathData="M54,22 C69.46,22 82,34.54 82,50 C82,65.46 69.46,78 54,78 C38.54,78 26,65.46 26,50 C26,34.54 38.54,22 54,22 Z"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#B3FFFFFF"
+        android:strokeWidth="1.2" />
+    <path
+        android:pathData="M33,65 C42,76 59,80 72,69"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#66B7F5FF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round" />
+    <!-- liquid wave -->
+    <path
+        android:pathData="M27,55 C35,48 42,62 54,54 C64,48 72,57 81,51 L81,63 C72,68 64,59 55,64 C43,70 35,60 27,64 Z"
+        android:fillColor="#38FFFFFF" />
+    <path
+        android:pathData="M27,55 C35,48 42,62 54,54 C64,48 72,57 81,51"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#D9FFFFFF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M31,63 C40,57 48,67 59,62 C67,58 74,62 78,60"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#66FFFFFF"
+        android:strokeWidth="1.1"
+        android:strokeLineCap="round" />
+    <!-- specular highlight -->
+    <path
+        android:pathData="M38,33 C43,26 53,25.5 58,29 C51,31 45,36.5 42.5,42 C39.5,40 36,36.5 38,33 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="43"
+                android:centerY="31"
+                android:gradientRadius="18"
+                android:startColor="#F2FFFFFF"
+                android:centerColor="#80FFFFFF"
+                android:endColor="#00FFFFFF" />
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M41,35 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0"
+        android:fillColor="#F2FFFFFF" />
+    <!-- small bubbles -->
+    <path
+        android:pathData="M64,61 m-2,0 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0"
+        android:fillColor="#59FFFFFF" />
+    <path
+        android:pathData="M69.5,55 m-1.2,0 a1.2,1.2 0 1,0 2.4,0 a1.2,1.2 0 1,0 -2.4,0"
+        android:fillColor="#40FFFFFF" />
+    </group>
+</vector>
