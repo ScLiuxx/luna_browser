@@ -12,6 +12,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
@@ -61,6 +63,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -96,6 +99,9 @@ import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.web.BrowserTab
 import com.liuli.browser.web.BrowserViewModel
 import com.liuli.browser.web.agent.AgentController
+import com.liuli.browser.web.agent.AgentReport
+import com.liuli.browser.web.agent.AgentReportFormat
+import com.liuli.browser.web.agent.AgentResearchPage
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -113,6 +119,7 @@ fun BrowserScreen(
     sharedSnapshotKey: Long?,
     showSharedSnapshot: Boolean,
     onShare: (String, String) -> Unit,
+    onExportReport: (AgentReport, AgentReportFormat) -> Unit,
     onNewHomeTab: () -> Unit,
     onOpenTabs: () -> Unit,
     onOpenLibrary: () -> Unit,
@@ -434,28 +441,55 @@ fun BrowserScreen(
             )
         }
 
-        if (settings.agentEnabled && !tab.isFullscreen && !menuOpen && !shieldOpen && !agentOpen) {
+        // P7 一镜到底：Agent 球从右下角缩小隐去，面板从同一角展开，避免场景跳变。
+        AnimatedVisibility(
+            visible = settings.agentEnabled && !tab.isFullscreen && !menuOpen && !shieldOpen && !agentOpen,
+            enter = fadeIn(tween(160)) + scaleIn(
+                animationSpec = tween(180),
+                initialScale = 0.88f,
+                transformOrigin = TransformOrigin(1f, 1f)
+            ),
+            exit = fadeOut(tween(120)) + scaleOut(
+                animationSpec = tween(140),
+                targetScale = 0.88f,
+                transformOrigin = TransformOrigin(1f, 1f)
+            ),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(
+                    end = if (isTablet) 24.dp else 16.dp,
+                    bottom = if (isTablet) 24.dp else 100.dp
+                )
+        ) {
             AgentOrb(
                 backdrop = backdrop,
                 onClick = {
                     menuOpen = false
                     shieldOpen = false
                     agentOpen = true
-                },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .navigationBarsPadding()
-                    .padding(
-                        end = if (isTablet) 24.dp else 16.dp,
-                        bottom = if (isTablet) 24.dp else 100.dp
-                    )
+                }
             )
         }
 
-        if (agentOpen) {
+        AnimatedVisibility(
+            visible = agentOpen,
+            enter = fadeIn(tween(180)) + scaleIn(
+                animationSpec = spring(dampingRatio = 0.92f, stiffness = 360f),
+                initialScale = 0.94f,
+                transformOrigin = TransformOrigin(if (isTablet) 1f else 0.5f, 1f)
+            ),
+            exit = fadeOut(tween(140)) + scaleOut(
+                animationSpec = tween(140),
+                targetScale = 0.96f,
+                transformOrigin = TransformOrigin(if (isTablet) 1f else 0.5f, 1f)
+            ),
+            modifier = Modifier.fillMaxSize()
+        ) {
             AgentPanel(
                 agent = agent,
                 tabTitle = tab.pageTitle(),
+                pageUrl = tab.url,
                 isTablet = isTablet,
                 isPrivate = tab.isPrivate,
                 backdrop = backdrop,
@@ -466,7 +500,25 @@ fun BrowserScreen(
                         webView = vm.activeWebView,
                         pageTitle = tab.pageTitle(),
                         isPrivate = tab.isPrivate,
-                        tabId = tab.id
+                        tabId = tab.id,
+                        researchPages = vm.tabs
+                            .sortedWith(
+                                compareByDescending<BrowserTab> { it.id == tab.id }
+                                    .thenByDescending { it.lastUsedAt }
+                            )
+                            .mapNotNull { candidate ->
+                                if (candidate.isHome) {
+                                    null
+                                } else {
+                                    vm.webViewForTab(candidate.id)?.let { view ->
+                                        AgentResearchPage(
+                                            tabId = candidate.id,
+                                            isPrivate = candidate.isPrivate,
+                                            webView = view
+                                        )
+                                    }
+                                }
+                            }
                     )
                 },
                 onConfirmAction = { messageId ->
@@ -477,7 +529,17 @@ fun BrowserScreen(
                 },
                 onPlanCommand = { command ->
                     agent.handlePlanCommand(command, vm.activeWebView, tab.id)
-                }
+                },
+                onExportReport = onExportReport,
+                onOpenSource = { url, isPrivate ->
+                    vm.createTab(
+                        url = url,
+                        isPrivate = isPrivate || tab.isPrivate,
+                        select = true
+                    )
+                    agentOpen = false
+                },
+                onSharePage = { onShare(tab.url, tab.pageTitle()) }
             )
         }
     }

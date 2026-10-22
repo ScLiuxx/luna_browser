@@ -78,19 +78,28 @@ import com.liuli.browser.ui.theme.DarkModeOption
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.web.BrowserViewModel
+import com.liuli.browser.web.agent.AgentAuditEntry
 import com.liuli.browser.web.agent.AgentController
+import com.liuli.browser.web.agent.AgentPolicyStore
+import com.liuli.browser.web.agent.AgentSiteMode
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun SettingsScreen(
     settings: SettingsStore,
     vm: BrowserViewModel,
     agent: AgentController,
+    agentPolicies: AgentPolicyStore,
     backdrop: LayerBackdrop,
     isTablet: Boolean,
     onClose: () -> Unit,
     onRevokePrivacy: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    val activePolicyHost = AgentPolicyStore.normalizeHost(vm.activeTab?.url)
+    val activePolicy = agentPolicies.policyFor(activePolicyHost)
     var showPrivacy by rememberSaveable { mutableStateOf(false) }
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     var confirmRevoke by rememberSaveable { mutableStateOf(false) }
@@ -359,6 +368,55 @@ fun SettingsScreen(
                     backdrop = backdrop
                 )
                 Divider()
+                SettingsLabel(
+                    title = "当前站点策略",
+                    subtitle = if (activePolicyHost != null) {
+                        "$activePolicyHost · 仅保存在本机"
+                    } else {
+                        "先打开一个网页，再回到这里设置"
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AgentSiteMode.entries.forEach { mode ->
+                        GlassPillButton(
+                            label = mode.label,
+                            onClick = { agentPolicies.setMode(activePolicyHost, mode) },
+                            backdrop = backdrop,
+                            accent = activePolicy.mode == mode,
+                            enabled = activePolicyHost != null,
+                            contentPadding = PaddingValues(horizontal = 14.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                BasicText(
+                    text = if (activePolicyHost == null) {
+                        "打开网页后可选择禁止、只读或允许；策略按域名保存。"
+                    } else {
+                        activePolicy.mode.hint
+                    },
+                    style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 14.sp)
+                )
+                if (activePolicyHost != null && activePolicy.mode == AgentSiteMode.Allowed) {
+                    ToggleRow(
+                        title = "本站低风险步骤免确认",
+                        subtitle = "只自动执行滚动，点击与填写仍需逐条确认",
+                        checked = activePolicy.trustLowRisk,
+                        onCheckedChange = { agentPolicies.setTrustLowRisk(activePolicyHost, it) },
+                        backdrop = backdrop
+                    )
+                }
+                if (agentPolicies.policies.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    GlassPillButton(
+                        label = "清除全部站点策略",
+                        onClick = { agentPolicies.clear() },
+                        backdrop = backdrop,
+                        glyph = Glyph.Trash
+                    )
+                }
+                Divider()
                 ToggleRow(
                     title = "允许云端推理",
                     subtitle = "默认关闭；开启后脱敏正文可能发送到你配置的接口",
@@ -390,18 +448,64 @@ fun SettingsScreen(
                         password = true
                     )
                 }
+                Spacer(Modifier.height(8.dp))
+                val cloudState = when {
+                    !settings.agentCloudEnabled -> "本地模式"
+                    settings.agentApiKey.isBlank() -> "云端已开启，未填写 API Key"
+                    !settings.agentEndpoint.trim().startsWith("https://") ->
+                        "云端接口必须使用 HTTPS"
+                    else -> "云端模式已就绪，可生成并验证多步计划"
+                }
+                BasicText(
+                    text = buildString {
+                        append("当前模式：")
+                        append(cloudState)
+                        agent.lastCloudFailure?.takeIf { it.isNotBlank() }?.let {
+                            append("；最近失败：")
+                            append(it)
+                        }
+                    },
+                    style = TextStyle(
+                        color = colors.textTertiary,
+                        fontSize = 9.sp,
+                        lineHeight = 14.sp
+                    )
+                )
                 Spacer(Modifier.height(10.dp))
                 BasicText(
                     text = "Agent 默认在本机完成页面速览、页内查找与关键词问答。页面操作只在本地执行，" +
                         "单步动作需要你逐条确认；多步任务会先生成计划，批准后按顺序执行，执行中可暂停、重试或取消。" +
+                        "云端开启后，多步任务先由模型生成 JSON 计划，本地校验通过后才进入计划卡；" +
+                        "点击或填写后会回读页面并调用模型验证。" +
                         "不会自动提交表单，密码与文件字段始终拒绝。" +
+                        "站点策略按域名保存在本机：禁止站点完全不读取，只读站点不执行动作，" +
+                        "允许站点可单独开启低风险步骤免确认。" +
                         "云端模式必须手动开启，且仅支持 HTTPS；发送前会脱敏邮箱、手机号、证件号与长数字串。" +
                         "隐私标签始终只在本机处理。",
                     style = TextStyle(color = colors.textTertiary, fontSize = 10.sp, lineHeight = 16.sp)
                 )
+                if (agent.audit.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Divider()
+                    SettingsLabel(
+                        title = "审计记录",
+                        subtitle = "仅保存在本机内存，退出或清除对话时删除"
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    agent.audit.takeLast(6).reversed().forEach { entry ->
+                        BasicText(
+                            text = entry.displayLine(),
+                            style = TextStyle(
+                                color = colors.textTertiary,
+                                fontSize = 9.sp,
+                                lineHeight = 14.sp
+                            )
+                        )
+                    }
+                }
                 Spacer(Modifier.height(10.dp))
                 GlassPillButton(
-                    label = "清除对话",
+                    label = "清除对话与审计",
                     onClick = { agent.clear() },
                     backdrop = backdrop,
                     glyph = Glyph.Trash
@@ -881,4 +985,14 @@ private fun ConfirmClearDialog(
             }
         }
     }
+}
+
+private val AUDIT_TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
+
+private fun AgentAuditEntry.displayLine(): String {
+    val time = runCatching {
+        Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).format(AUDIT_TIME_FORMAT)
+    }.getOrDefault("")
+    val detailPart = if (detail.isBlank()) "" else " · ${detail.take(28)}"
+    return "$time · $host · ${action.take(24)} · ${outcome.label}$detailPart"
 }
