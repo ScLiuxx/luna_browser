@@ -424,7 +424,7 @@ fun SettingsScreen(
                 Divider()
                 ToggleRow(
                     title = "防浏览器指纹",
-                    subtitle = "统一 Canvas/WebGL/硬件信息、阻止 WebRTC 与媒体指纹，防止跨站关联",
+                    subtitle = "统一 Canvas/WebGL2/Client Hints/硬件/时区指纹，阻止 WebRTC、媒体与 DNS 预取，防止跨站关联",
                     checked = settings.fingerprintProtection,
                     onCheckedChange = {
                         settings.updateFingerprintProtection(it)
