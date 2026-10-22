@@ -424,7 +424,7 @@ fun SettingsScreen(
                 Divider()
                 ToggleRow(
                     title = "防浏览器指纹",
-                    subtitle = "统一 Canvas/WebGL/硬件信息、阻止 WebRTC 与媒体指纹，防止跨站关联",
+                    subtitle = "统一 Canvas/WebGL2/Client Hints/硬件/时区指纹，阻止 WebRTC、媒体与 DNS 预取，防止跨站关联",
                     checked = settings.fingerprintProtection,
                     onCheckedChange = {
                         settings.updateFingerprintProtection(it)
@@ -440,9 +440,21 @@ fun SettingsScreen(
                     onCheckedChange = { settings.updateClearOnExit(it) },
                     backdrop = backdrop
                 )
+                Divider()
+                ToggleRow(
+                    title = "禁止截屏与最近任务预览",
+                    subtitle = "阻止系统截屏、录屏与最近任务缩略图读取页面内容",
+                    checked = settings.secureScreen,
+                    onCheckedChange = {
+                        settings.updateSecureScreen(it)
+                        vm.applyPrivacySettings()
+                    },
+                    backdrop = backdrop
+                )
                 Spacer(Modifier.height(10.dp))
                 BasicText(
-                    text = "隐私护盾在本机运行，不上传网址或任何标识符。网页无法读取剪贴板、通讯录、定位、相机或麦克风。",
+                    text = "隐私护盾在本机运行，不上传网址或任何标识符。隐私标签关闭时清除该站点 Cookie。" +
+                        "网页无法读取剪贴板、通讯录、定位、相机或麦克风。",
                     style = TextStyle(color = colors.textTertiary, fontSize = 10.sp, lineHeight = 16.sp)
                 )
             }

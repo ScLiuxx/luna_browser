@@ -93,6 +93,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private val webViews = HashMap<Long, WebView>()
     private val loadedTabs = HashSet<Long>()
     private val snapshotRunnables = HashMap<Long, Runnable>()
+    private val httpUpgradeOrigins = HashMap<Long, String>()
+    private val privateVisitedHosts = HashMap<Long, LinkedHashSet<String>>()
     private var container: FrameLayout? = null
     private var nextId = 1L
 
@@ -177,6 +179,20 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     fun bindActivity(activity: ComponentActivity) {
         currentActivity = activity
+        applySecureScreen()
+    }
+
+    /** 禁止截屏与最近任务预览，避免页面内容出现在系统缩略图或录屏中。 */
+    private fun applySecureScreen() {
+        val activity = currentActivity ?: return
+        if (settings?.secureScreen == true) {
+            activity.window.setFlags(
+                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE
+            )
+        } else {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
     }
 
     fun attachContainer(frameLayout: FrameLayout) {
@@ -215,11 +231,17 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 closeTab(victim.id, keepOverlay = true)
             }
         }
+        val sanitized = if (url.isNotBlank() && settings?.privacyShield == true) {
+            TrackerBlocker.sanitize(url)
+        } else {
+            url
+        }
+        val destination = upgradeHttps(sanitized)
         val tab = BrowserTab(
             id = nextId++,
             isPrivate = isPrivate,
-            initialUrl = url,
-            initialTitle = if (url.isBlank()) "新标签页" else "",
+            initialUrl = destination,
+            initialTitle = if (destination.isBlank()) "新标签页" else "",
             initialDesktopMode = settings?.desktopModeDefault == true
         )
         tabs.add(tab)
@@ -227,13 +249,14 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             selectTabInternal(tab.id)
             webContentAlpha = 1f
         }
-        if (url.isNotBlank()) {
+        if (destination.isNotBlank()) {
+            rememberHttpUpgrade(tab.id, sanitized, destination)
             ensureWebView(tab)?.let { view ->
-                if (loadedTabs.add(tab.id)) view.loadUrl(url)
+                if (loadedTabs.add(tab.id)) view.loadUrl(destination)
             }
         }
         if (isPrivate) {
-            message = "隐私标签不会记录本地历史；Cookie 仍由系统 WebView 管理"
+            message = "隐私标签不记录历史，本地存储与脚本 Cookie 已禁用，关闭时清除该站点 Cookie"
         }
         syncWebViews()
         persistSession()
@@ -284,6 +307,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         if (index < 0) return
         if (fullscreenTabId == id) exitFullscreen()
         val tab = tabs[index]
+        // 隐私标签关闭即清理它访问过的站点 Cookie，避免与普通浏览交叉。
+        if (tab.isPrivate) clearPrivateCookies(tab.id)
         destroyWebView(id)
         tabs.removeAt(index)
         if (tabs.isEmpty()) {
@@ -326,13 +351,15 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             message = "请输入网址或搜索内容"
             return
         }
-        val destination = if (settings?.privacyShield == true) {
+        val sanitized = if (settings?.privacyShield == true) {
             TrackerBlocker.sanitize(normalized)
         } else {
             normalized
         }
+        val destination = upgradeHttps(sanitized)
         val tab = activeTab ?: return
         val view = ensureWebView(tab)
+        rememberHttpUpgrade(tab.id, sanitized, destination)
         tab.url = destination
         tab.title = tab.displayHost
         tab.progress = 0
@@ -351,7 +378,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun openUrl(url: String) {
         val tab = activeTab ?: return
         val view = ensureWebView(tab)
-        val destination = if (settings?.privacyShield == true) TrackerBlocker.sanitize(url) else url
+        val sanitized = if (settings?.privacyShield == true) TrackerBlocker.sanitize(url) else url
+        val destination = upgradeHttps(sanitized)
+        rememberHttpUpgrade(tab.id, sanitized, destination)
         tab.url = destination
         tab.title = tab.displayHost
         tab.progress = 0
@@ -452,9 +481,15 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun applyPrivacySettings() {
         privacyShieldActive = settings?.privacyShield == true
         fingerprintProtection = settings?.fingerprintProtection == true
+        applySecureScreen()
         webViews.forEach { (id, view) ->
             val tab = tabs.firstOrNull { it.id == id } ?: return@forEach
             view.settings.userAgentString = effectiveUserAgent(tab)
+            // 开关重新打开时立即对已加载页面补注入，无需手动刷新。
+            if (fingerprintProtection) {
+                PrivacyGuard.install(view)
+                if (tab.isPrivate) PrivacyGuard.installPrivate(view)
+            }
             if (tab.blockedTrackers > 0) tab.blockedTrackers = 0
         }
     }
@@ -757,6 +792,62 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         return engine.queryUrl.format(encoded)
     }
 
+    /**
+     * 将 HTTP 升级为 HTTPS，避免明文传输泄露访问记录与页面内容。
+     * 仅对 http:// 开头的主框架 URL 生效，其余保持不变。
+     */
+    private fun upgradeHttps(url: String): String =
+        if (url.startsWith("http://", ignoreCase = true)) {
+            "https://" + url.substring("http://".length)
+        } else {
+            url
+        }
+
+    /**
+     * 仅当本次导航确实把 HTTP 升级为 HTTPS 时记录来源，
+     * 以便握手失败时提示「站点不支持加密连接」而不是笼统报错。
+     */
+    private fun rememberHttpUpgrade(id: Long, source: String, destination: String) {
+        if (source.startsWith("http://", ignoreCase = true) &&
+            destination.startsWith("https://", ignoreCase = true)
+        ) {
+            httpUpgradeOrigins[id] = source
+        } else {
+            httpUpgradeOrigins.remove(id)
+        }
+    }
+
+    /** 记录隐私标签访问过的主机，关闭标签时按站点清理 Cookie。 */
+    private fun rememberPrivateHost(id: Long, url: String) {
+        val host = runCatching { Uri.parse(url).host }.getOrNull()
+            ?.lowercase()?.takeIf { it.isNotBlank() } ?: return
+        privateVisitedHosts.getOrPut(id) { LinkedHashSet() }.add(host)
+    }
+
+    /**
+     * CookieManager 没有按域名删除的 API，这里读取该站点的 Cookie 头，
+     * 再用 Max-Age=0 逐条过期。HttpOnly 或非根路径 Cookie 可能残留，属尽力而为。
+     */
+    private fun clearPrivateCookies(id: Long) {
+        val hosts = privateVisitedHosts.remove(id) ?: return
+        if (hosts.isEmpty()) return
+        val cookies = CookieManager.getInstance()
+        hosts.forEach { host ->
+            for (base in listOf("https://$host/", "http://$host/")) {
+                val header = runCatching { cookies.getCookie(base) }.getOrNull() ?: continue
+                header.split(';').forEach { pair ->
+                    val name = pair.substringBefore('=').trim()
+                    if (name.isNotEmpty()) {
+                        runCatching {
+                            cookies.setCookie(base, "$name=; Max-Age=0; Path=/")
+                        }
+                    }
+                }
+            }
+        }
+        runCatching { cookies.flush() }
+    }
+
     private fun ensureWebView(tab: BrowserTab?): WebView? {
         if (tab == null || !bound) return null
         webViews[tab.id]?.let { return it }
@@ -821,7 +912,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, !blockThirdParty)
         with(webView.settings) {
             javaScriptEnabled = true
-            domStorageEnabled = true
+            // 隐私标签在引擎层直接关闭 WebStorage，杜绝脚本抢先写入的可能。
+            domStorageEnabled = !tab.isPrivate
             @Suppress("DEPRECATION")
             databaseEnabled = false
             loadsImagesAutomatically = true
@@ -905,6 +997,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
         override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
             val tab = tabFor(view) ?: return
+            if (tab.isPrivate && !url.isNullOrBlank()) rememberPrivateHost(tab.id, url)
             // Inject the anti-fingerprint script as early as possible. It is
             // idempotent and only takes effect on the current document.
             if (fingerprintProtection) {
@@ -933,6 +1026,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             if (!url.isNullOrBlank() && !url.startsWith("about:")) {
                 tab.url = url
                 tab.isSecure = url.startsWith("https://")
+                if (tab.isSecure) {
+                    (view.tag as? Long)?.let { httpUpgradeOrigins.remove(it) }
+                }
             }
             if (tab.title.isBlank() || tab.title == "新标签页") {
                 tab.title = view.title?.takeIf { it.isNotBlank() } ?: tab.displayHost
@@ -953,9 +1049,14 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         ) {
             if (!request.isForMainFrame) return
             val tab = tabFor(view) ?: return
+            val id = view.tag as? Long
+            val upgradedFrom = id?.let { httpUpgradeOrigins.remove(it) }
             tab.isLoading = false
-            tab.errorText = error.description?.toString()?.takeIf { it.isNotBlank() }
-                ?: "无法打开网页"
+            tab.errorText = if (upgradedFrom != null) {
+                "该网站不支持 HTTPS 加密连接，为保护隐私已阻止明文访问"
+            } else {
+                error.description?.toString()?.takeIf { it.isNotBlank() } ?: "无法打开网页"
+            }
         }
 
         override fun onReceivedSslError(
@@ -966,12 +1067,19 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             // A browser must never silently bypass certificate validation.
             handler.cancel()
             val tab = tabFor(view) ?: return
+            val id = view.tag as? Long
+            val upgradedFrom = id?.let { httpUpgradeOrigins.remove(it) }
             tab.isLoading = false
-            tab.errorText = "安全连接失败，证书校验未通过，访问已被阻止"
+            tab.errorText = if (upgradedFrom != null) {
+                "该网站不支持 HTTPS 加密连接（证书校验未通过），为保护隐私已阻止明文访问"
+            } else {
+                "安全连接失败，证书校验未通过，访问已被阻止"
+            }
         }
 
         override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
             val tab = tabFor(view) ?: return
+            if (tab.isPrivate && !url.isNullOrBlank()) rememberPrivateHost(tab.id, url)
             if (!url.isNullOrBlank()) {
                 tab.url = url
                 tab.isSecure = url.startsWith("https://")
@@ -988,6 +1096,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 (view.parent as? ViewGroup)?.removeView(view)
                 webViews.remove(tab.id)
                 loadedTabs.remove(tab.id)
+                httpUpgradeOrigins.remove(tab.id)
                 view.destroy()
                 tab.isLoading = false
                 tab.progress = 0
@@ -1006,9 +1115,28 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     ): Boolean {
         val scheme = runCatching { Uri.parse(url).scheme?.lowercase() }.getOrNull()
         if (scheme == "http" || scheme == "https") {
-            // Only strip parameters on non-redirect main-frame navigation. This
-            // avoids a sanitize/redirect loop while still removing trackers from
-            // user link clicks and typed navigations.
+            // 将主框架的 HTTP 导航升级为 HTTPS，避免明文传输泄露访问记录。
+            if (scheme == "http" && mainFrame) {
+                val id = view.tag as? Long
+                // 服务器把 HTTPS 重定向回同一站点的明文地址时终止循环。
+                val pendingHost = id?.let { httpUpgradeOrigins[it] }
+                    ?.let { runCatching { Uri.parse(it).host }.getOrNull() }
+                val targetHost = runCatching { Uri.parse(url).host }.getOrNull()
+                if (isRedirect && pendingHost != null && pendingHost == targetHost) {
+                    if (id != null) httpUpgradeOrigins.remove(id)
+                    tabFor(view)?.let {
+                        it.isLoading = false
+                        it.errorText = "该网站将加密连接重定向回明文 HTTP，为保护隐私已阻止访问"
+                    }
+                    return true
+                }
+                val upgraded = upgradeHttps(url)
+                if (upgraded != url) {
+                    if (id != null) httpUpgradeOrigins[id] = url
+                    view.loadUrl(upgraded)
+                    return true
+                }
+            }
             if (mainFrame && !isRedirect && settings?.privacyShield == true) {
                 val sanitized = TrackerBlocker.sanitize(url)
                 if (sanitized != url) {
@@ -1254,6 +1382,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private fun destroyWebView(id: Long) {
         val view = webViews.remove(id) ?: return
         loadedTabs.remove(id)
+        httpUpgradeOrigins.remove(id)
         snapshotRunnables.remove(id)?.let { view.removeCallbacks(it) }
         (view.parent as? ViewGroup)?.removeView(view)
         runCatching {
@@ -1271,6 +1400,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         if (shouldClear) {
             clearPrivateData()
         } else {
+            // 即使未开启“退出即清除”，隐私标签的站点 Cookie 也不保留。
+            tabs.filter { it.isPrivate }.forEach { clearPrivateCookies(it.id) }
             persistSession()
         }
         webViews.keys.toList().forEach { destroyWebView(it) }

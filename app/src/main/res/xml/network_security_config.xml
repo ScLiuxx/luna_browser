@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- A browser must be able to open legacy http sites, but never silently
-         downgrade https traffic. Certificate validation remains enforced. -->
-    <base-config cleartextTrafficPermitted="true">
+    <!-- 隐私优先：应用内全局禁止明文 HTTP，所有网页与下载仅允许 TLS 连接。
+         证书校验始终由系统信任链强制，不存在用户绕过入口。 -->
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
