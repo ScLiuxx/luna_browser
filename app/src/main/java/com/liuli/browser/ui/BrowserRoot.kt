@@ -4,6 +4,7 @@ import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
+import android.provider.Settings
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -46,6 +47,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,6 +70,7 @@ import com.kyant.backdrop.backdrops.emptyBackdrop
 import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
 import com.liuli.browser.data.LibraryStore
 import com.liuli.browser.data.SettingsStore
+import com.liuli.browser.ui.components.EngineBaselineDialog
 import com.liuli.browser.ui.components.GlassNavigationRail
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
@@ -186,6 +189,8 @@ fun BrowserRoot(
     var contentRect by remember { mutableStateOf(Rect.Zero) }
     var showSharedSnapshot by remember { mutableStateOf(false) }
     var webRevealToken by remember { mutableIntStateOf(0) }
+    var engineWarningDismissed by rememberSaveable { mutableStateOf(false) }
+    val engineInfo = vm.engineInfo
 
     val downloadHolder = remember { mutableStateOf<DownloadRequest?>(null) }
     val downloadLauncher = rememberLauncherForActivityResult(
@@ -343,6 +348,22 @@ fun BrowserRoot(
     fun openSettings() {
         if (vm.overlay == AppOverlay.Settings) vm.closeOverlay() else vm.openOverlay(AppOverlay.Settings)
         showSharedSnapshot = false
+    }
+
+    fun openWebViewSettings() {
+        val provider = engineInfo.provider
+        val candidates = listOf(
+            Intent(Settings.ACTION_WEBVIEW_SETTINGS),
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:$provider")
+            ),
+            Intent(Settings.ACTION_SETTINGS)
+        )
+        for (intent in candidates) {
+            if (runCatching { activity.startActivity(intent) }.isSuccess) return
+        }
+        vm.showMessage("无法打开系统设置，请手动更新 WebView")
     }
 
     BackHandler(enabled = vm.overlay == AppOverlay.None) {
@@ -616,6 +637,15 @@ fun BrowserRoot(
                     }
                 }
             }
+        }
+
+        if (engineInfo.isUnsupported && !engineWarningDismissed) {
+            EngineBaselineDialog(
+                info = engineInfo,
+                backdrop = auroraBackdrop,
+                onOpenSettings = { openWebViewSettings() },
+                onDismiss = { engineWarningDismissed = true }
+            )
         }
     }
 }

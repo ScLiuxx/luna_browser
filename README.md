@@ -79,6 +79,7 @@ app/src/main/java/com/liuli/browser
 - 网页的定位/相机/麦克风请求默认拒绝。
 - 默认阻止第三方 Cookie，禁用自动填充与文件访问。
 - 退出应用时默认清除 Cookie、缓存、历史、站点存储与标签会话（书签保留）。
+- 启动时检查系统 WebView 的 Chromium 主版本，低于安全基线时提示更新；内核识别与 WebSettings 配置集中在 `BrowserEngine` 抽象层。
 - 所有拦截与过滤在本机完成，不上传访问记录或设备标识。
 
 ## 说明

@@ -23,8 +23,6 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
-import android.webkit.ReferrerPolicy
-import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -98,7 +96,14 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private var container: FrameLayout? = null
     private var nextId = 1L
 
-    private val defaultUserAgent: String = WebSettings.getDefaultUserAgent(application)
+    private val engine: BrowserEngine = SystemWebViewEngine()
+
+    /** 当前内核信息；设置页与隐私护盾读取同一份结果。 */
+    var engineInfo by mutableStateOf(engine.info(app))
+        private set
+
+    private val defaultUserAgent: String by lazy { engine.defaultUserAgent(app) }
+
     private val chromeVersion: String by lazy {
         Regex("Chrome/([0-9.]+)")
             .find(defaultUserAgent)?.groupValues?.getOrNull(1) ?: "120.0.0.0"
@@ -695,6 +700,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun resume() {
+        val currentEngine = engine.info(app)
+        if (currentEngine != engineInfo) engineInfo = currentEngine
         webViews.values.forEach { view ->
             if (view.isAttachedToWindow) view.onResume()
         }
@@ -855,7 +862,14 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         if (tab == null || !bound) return null
         webViews[tab.id]?.let { return it }
         val store = settings
-        val webView = WebView(currentActivity ?: app).apply {
+        val engineConfig = BrowserEngineConfig(
+            isPrivate = tab.isPrivate,
+            userAgent = effectiveUserAgent(tab),
+            blockThirdPartyCookies = store?.blockThirdPartyCookies ?: true,
+            textZoomPercent = (app.resources.configuration.fontScale * 100f)
+                .toInt().coerceIn(80, 220)
+        )
+        val webView = engine.create(currentActivity ?: app).apply {
             tag = tab.id
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -868,7 +882,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 (store?.darkMode == 0 && systemNight)
             setBackgroundColor(if (darkSurface) Color.rgb(12, 16, 28) else Color.WHITE)
             importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
-            configureSettings(this, tab)
+            engine.configure(this, engineConfig)
             webViewClient = createWebViewClient()
             webChromeClient = createChromeClient()
             setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
@@ -908,51 +922,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             webView.loadUrl(tab.url)
         }
         return webView
-    }
-
-    private fun configureSettings(webView: WebView, tab: BrowserTab) {
-        val blockThirdParty = settings?.blockThirdPartyCookies ?: true
-        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, !blockThirdParty)
-        with(webView.settings) {
-            javaScriptEnabled = true
-            // 隐私标签在引擎层直接关闭 WebStorage，杜绝脚本抢先写入的可能。
-            domStorageEnabled = !tab.isPrivate
-            @Suppress("DEPRECATION")
-            databaseEnabled = false
-            loadsImagesAutomatically = true
-            useWideViewPort = true
-            loadWithOverviewMode = false
-            setSupportZoom(true)
-            builtInZoomControls = true
-            displayZoomControls = false
-            mediaPlaybackRequiresUserGesture = true
-            javaScriptCanOpenWindowsAutomatically = false
-            setSupportMultipleWindows(true)
-            allowFileAccess = false
-            allowContentAccess = false
-            // Prevent the page from leaking the full URL (with tracking params)
-            // or the current site in the Referer header of cross-origin requests.
-            referrerPolicy = ReferrerPolicy.NO_REFERRER
-            @Suppress("DEPRECATION")
-            setPluginState(WebSettings.PluginState.OFF)
-            @Suppress("DEPRECATION")
-            allowFileAccessFromFileURLs = false
-            @Suppress("DEPRECATION")
-            allowUniversalAccessFromFileURLs = false
-            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            cacheMode = if (tab.isPrivate) WebSettings.LOAD_NO_CACHE else WebSettings.LOAD_DEFAULT
-            userAgentString = effectiveUserAgent(tab)
-            setGeolocationEnabled(false)
-            setNeedInitialFocus(true)
-            @Suppress("DEPRECATION")
-            setSafeBrowsingEnabled(true)
-            @Suppress("DEPRECATION")
-            setSavePassword(false)
-            @Suppress("DEPRECATION")
-            setSaveFormData(false)
-            textZoom = (app.resources.configuration.fontScale * 100f)
-                .toInt().coerceIn(80, 220)
-        }
     }
 
     private fun createWebViewClient(): WebViewClient = object : WebViewClient() {

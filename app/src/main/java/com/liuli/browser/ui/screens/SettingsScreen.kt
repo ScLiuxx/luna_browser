@@ -1,7 +1,6 @@
 package com.liuli.browser.ui.screens
 
 import android.os.Build
-import android.webkit.WebView
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
@@ -77,6 +76,7 @@ import com.liuli.browser.ui.theme.AccentPalettes
 import com.liuli.browser.ui.theme.DarkModeOption
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.web.BrowserEngineStatus
 import com.liuli.browser.web.BrowserViewModel
 import com.liuli.browser.web.agent.AgentAuditEntry
 import com.liuli.browser.web.agent.AgentController
@@ -104,21 +104,15 @@ fun SettingsScreen(
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     var confirmRevoke by rememberSaveable { mutableStateOf(false) }
     val horizontal = if (isTablet) 28.dp else 18.dp
-    val webViewPackage = remember {
-        runCatching { WebView.getCurrentWebViewPackage() }.getOrNull()
-    }
-    val webViewVersion = webViewPackage?.versionName
-    val webViewProvider = webViewPackage?.packageName ?: "系统 WebView"
-    val chromiumMajor = webViewVersion
-        ?.let { Regex("^([0-9]+)\\.").find(it)?.groupValues?.getOrNull(1) }
-    val kernelRows = remember(webViewProvider, webViewVersion) {
-        listOf(
-            "WebView 提供方" to webViewProvider,
-            "WebView 版本" to (webViewVersion ?: "未知"),
-            "Chromium 主版本" to (chromiumMajor ?: "未知"),
-            "内核形态" to "系统内置 WebView（APK 不打包 Chromium）"
-        )
-    }
+    val engineInfo = vm.engineInfo
+    val kernelRows = listOf(
+        "WebView 提供方" to engineInfo.provider,
+        "WebView 版本" to engineInfo.versionLabel,
+        "Chromium 主版本" to (engineInfo.chromiumMajor?.toString() ?: "未知"),
+        "安全基线" to "≥ ${engineInfo.minimumMajor}（建议 ≥ ${engineInfo.recommendedMajor}）",
+        "内核状态" to engineInfo.statusLabel,
+        "内核形态" to "系统内置 WebView（APK 不打包 Chromium）"
+    )
 
     BackHandler(enabled = showPrivacy) { showPrivacy = false }
     BackHandler(enabled = confirmClear) { confirmClear = false }
@@ -598,6 +592,27 @@ fun SettingsScreen(
             SettingsSection(title = "关于", backdrop = backdrop) {
                 AboutRow("应用版本", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                 kernelRows.forEach { (label, value) -> AboutRow(label, value) }
+                if (engineInfo.status == BrowserEngineStatus.Unsupported ||
+                    engineInfo.status == BrowserEngineStatus.Aging
+                ) {
+                    Spacer(Modifier.height(8.dp))
+                    BasicText(
+                        text = if (engineInfo.status == BrowserEngineStatus.Unsupported) {
+                            "当前 WebView 内核低于最低安全基线，可能存在已公开漏洞，建议先在系统设置中更新 Android System WebView。"
+                        } else {
+                            "当前 WebView 内核低于建议版本，建议在系统设置中更新 Android System WebView。"
+                        },
+                        style = TextStyle(
+                            color = if (engineInfo.status == BrowserEngineStatus.Unsupported) {
+                                colors.danger
+                            } else {
+                                colors.accent
+                            },
+                            fontSize = 11.sp,
+                            lineHeight = 17.sp
+                        )
+                    )
+                }
                 AboutRow("运行平台", "Android ${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}")
                 AboutRow("设计语言", "Liquid Glass · Backdrop (Apache-2.0)")
                 AboutRow("界面框架", "Jetpack Compose 1.12 · Kotlin 2.4")

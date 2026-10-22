@@ -96,6 +96,8 @@ import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.web.BrowserEngineInfo
+import com.liuli.browser.web.BrowserEngineStatus
 import com.liuli.browser.web.BrowserTab
 import com.liuli.browser.web.BrowserViewModel
 import com.liuli.browser.web.agent.AgentController
@@ -437,6 +439,7 @@ fun BrowserScreen(
                 isPrivate = tab.isPrivate,
                 clearOnExit = settings.clearOnExit,
                 secureScreen = settings.secureScreen,
+                engineInfo = vm.engineInfo,
                 onClose = { shieldOpen = false }
             )
         }
@@ -553,6 +556,7 @@ private fun PrivacyShieldPanel(
     isPrivate: Boolean,
     clearOnExit: Boolean,
     secureScreen: Boolean,
+    engineInfo: BrowserEngineInfo,
     onClose: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
@@ -639,6 +643,15 @@ private fun PrivacyShieldPanel(
                     if (isPrivate) colors.accentSecondary else colors.textTertiary
                 )
                 ShieldPoint("SSL 错误阻断 · 文件与本地存储访问禁用", colors.success)
+                ShieldPoint(
+                    "WebView ${engineInfo.versionLabel} · Chromium ${engineInfo.chromiumMajor ?: "未知"} · ${engineInfo.statusLabel}",
+                    when (engineInfo.status) {
+                        BrowserEngineStatus.Unsupported -> colors.danger
+                        BrowserEngineStatus.Aging -> colors.accent
+                        BrowserEngineStatus.Current -> colors.success
+                        BrowserEngineStatus.Unknown -> colors.textTertiary
+                    }
+                )
                 ShieldPoint("DNS 预取已关闭 · Do Not Track 与 GPC 已开启", colors.success)
                 ShieldPoint(
                     if (secureScreen) "截屏与最近任务预览已禁止"
