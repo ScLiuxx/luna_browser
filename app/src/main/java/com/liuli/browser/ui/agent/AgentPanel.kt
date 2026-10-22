@@ -1,5 +1,6 @@
 package com.liuli.browser.ui.agent
 
+import android.speech.tts.TextToSpeech
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -33,6 +34,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +50,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -78,6 +81,8 @@ import com.liuli.browser.web.agent.AgentPlanStatus
 import com.liuli.browser.web.agent.AgentReport
 import com.liuli.browser.web.agent.AgentReportFormat
 import com.liuli.browser.web.agent.AgentSiteMode
+import com.liuli.browser.web.agent.ResearchEngine
+import java.util.Locale
 
 @Composable
 fun AgentOrb(
@@ -139,13 +144,41 @@ fun AgentPanel(
     onCancelAction: (Long) -> Unit,
     onPlanCommand: (AgentPlanCommand) -> Unit,
     onExportReport: (AgentReport, AgentReportFormat) -> Unit,
-    onOpenSource: (String, Boolean) -> Unit
+    onOpenSource: (String, Boolean) -> Unit,
+    onSharePage: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
     var input by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+
+    // P7 语音回复：只在用户开启后朗读最新一条只读回答，不上传音频、不请求录音权限。
+    val context = LocalContext.current
+    var voiceReplies by rememberSaveable { mutableStateOf(false) }
+    var lastSpokenId by remember { mutableStateOf(-1L) }
+    val replySpeech = remember(context) { TextToSpeech(context.applicationContext) { } }
+    DisposableEffect(replySpeech) {
+        onDispose {
+            replySpeech.stop()
+            replySpeech.shutdown()
+        }
+    }
+    fun speakLatest() {
+        val reply = agent.messages.lastOrNull {
+            it.role == AgentMessageRole.Agent && it.action == null && it.text.isNotBlank()
+        } ?: return
+        // 只在出现新的 Agent 回答时朗读；用户新发消息不会重读上一条。
+        if (reply.id == lastSpokenId) return
+        lastSpokenId = reply.id
+        replySpeech.language = Locale.SIMPLIFIED_CHINESE
+        replySpeech.stop()
+        replySpeech.speak(reply.text, TextToSpeech.QUEUE_FLUSH, null, "liuli-agent-reply")
+    }
+    val lastMessageId = agent.messages.lastOrNull()?.id
+    LaunchedEffect(lastMessageId, voiceReplies) {
+        if (voiceReplies) speakLatest()
+    }
 
     val modeLabel = when {
         isPrivate -> "本机"
@@ -313,9 +346,20 @@ fun AgentPanel(
                     QuickChip("总结此页") { submit("总结此页") }
                     QuickChip("页面信息") { submit("页面信息") }
                     QuickChip("页内查找") { prepareFind() }
-                    QuickChip("向下滚动") { submit("向下滚动一屏") }
+                    QuickChip("监控此页") { submit("监控此页") }
+                    QuickChip("检查关注") { submit("检查关注") }
+                    QuickChip("页面审计") { submit("审计此页") }
+                    QuickChip("查看关注") { submit("查看关注") }
                     QuickChip("调研标签页") { submit("调研这些标签页并生成报告") }
-                    QuickChip("这个页面讲了什么？") { submit("这个页面讲了什么？") }
+                    QuickChip("开始录制") { submit("开始录制") }
+                    QuickChip("结束录制") { submit("结束录制") }
+                    QuickChip("查看宏") { submit("查看宏") }
+                    QuickChip("浏览日报") { submit("浏览日报") }
+                    QuickChip("分享此页") { onSharePage() }
+                    QuickChip(if (voiceReplies) "停止语音" else "语音回复") {
+                        voiceReplies = !voiceReplies
+                        if (!voiceReplies) replySpeech.stop()
+                    }
                 }
 
                 Spacer(Modifier.height(6.dp))
@@ -448,6 +492,21 @@ fun AgentPanel(
                     Spacer(Modifier.height(3.dp))
                     BasicText(
                         text = "审计 ${agent.audit.size} 条 · 仅本机内存，清除对话或退出时删除",
+                        style = TextStyle(
+                            color = colors.textTertiary,
+                            fontSize = 9.sp,
+                            lineHeight = 13.sp
+                        )
+                    )
+                }
+                if (agent.watches.isNotEmpty() || agent.macros.isNotEmpty() || agent.recordingMacro) {
+                    Spacer(Modifier.height(3.dp))
+                    BasicText(
+                        text = buildString {
+                            append("本机会话：关注 ${agent.watches.size} 个页面 · 宏 ${agent.macros.size} 个")
+                            if (agent.recordingMacro) append(" · 正在录制宏")
+                            append("（不后台运行）")
+                        },
                         style = TextStyle(
                             color = colors.textTertiary,
                             fontSize = 9.sp,
@@ -712,6 +771,15 @@ private fun ReportCard(
     val clipboard = LocalClipboardManager.current
     var expanded by rememberSaveable(report.createdAt) { mutableStateOf(false) }
     var copied by rememberSaveable(report.createdAt) { mutableStateOf(false) }
+    val context = LocalContext.current
+    var speaking by rememberSaveable(report.createdAt) { mutableStateOf(false) }
+    val speech = remember(context) { TextToSpeech(context.applicationContext) { } }
+    DisposableEffect(speech) {
+        onDispose {
+            speech.stop()
+            speech.shutdown()
+        }
+    }
 
     Column(
         Modifier
@@ -798,8 +866,10 @@ private fun ReportCard(
         )
         Spacer(Modifier.height(7.dp))
         report.sources.forEach { source ->
+            val credibility = ResearchEngine.assessSource(source.url, source.title, source.charCount)
             BasicText(
                 text = "[${source.id}] ${source.title} · ${source.host}" +
+                    " · 可信度 ${credibility.label} ${credibility.score}" +
                     (if (source.isPrivate) " · 隐私" else ""),
                 style = TextStyle(color = colors.textTertiary, fontSize = 9.sp),
                 maxLines = 1,
@@ -834,6 +904,24 @@ private fun ReportCard(
             }
             ActionButton("保存来源 CSV", accent = false) {
                 onExport(AgentReportFormat.Csv)
+            }
+            ActionButton("保存 PDF", accent = false) {
+                onExport(AgentReportFormat.Pdf)
+            }
+            ActionButton(if (speaking) "停止朗读" else "朗读", accent = false) {
+                if (speaking) {
+                    speech.stop()
+                    speaking = false
+                } else {
+                    speech.language = Locale.SIMPLIFIED_CHINESE
+                    val spoken = speech.speak(
+                        ResearchEngine.plainText(report.markdown),
+                        TextToSpeech.QUEUE_FLUSH,
+                        null,
+                        "liuli-report"
+                    )
+                    speaking = spoken == TextToSpeech.SUCCESS
+                }
             }
             ActionButton(if (copied) "已复制" else "复制", accent = false) {
                 clipboard.setText(AnnotatedString(report.markdown))

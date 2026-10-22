@@ -48,6 +48,27 @@ data class AgentActionResult(
     val message: String
 )
 
+/** 只读页面审计结果：只有计数与耗时，不包含正文、链接地址或输入值。 */
+data class AgentPageAudit(
+    val nodeCount: Int,
+    val imageCount: Int,
+    val imagesMissingAlt: Int,
+    val interactiveCount: Int,
+    val unnamedControls: Int,
+    val headingCount: Int,
+    val headingSkips: Int,
+    val h1Count: Int,
+    val hasLanguage: Boolean,
+    val linkCount: Int,
+    val formCount: Int,
+    val passwordFields: Int,
+    val resourceCount: Int,
+    val transferKb: Int,
+    val domReadyMs: Int,
+    val loadMs: Int,
+    val horizontalOverflow: Boolean
+)
+
 /**
  * Read-only page snapshot plus a confirmation-gated action channel.
  *
@@ -59,7 +80,7 @@ object AgentPageBridge {
 
     const val MAX_TEXT_CHARS = 12_000
 
-    private const val SCRIPT_VERSION = 4
+    private const val SCRIPT_VERSION = 5
 
     private const val READY_CHECK =
         "typeof window.__liuliAgent === 'object' && window.__liuliAgent.version === $SCRIPT_VERSION"
@@ -235,6 +256,86 @@ object AgentPageBridge {
                   message: '执行失败：' + (error && error.message ? error.message : '未知错误')
                 });
               }
+            },
+            audit: function () {
+              try {
+                var images = document.querySelectorAll('img');
+                var missingAlt = 0;
+                for (var i = 0; i < images.length; i++) {
+                  var img = images[i];
+                  if (clean(img.getAttribute('alt'))) { continue; }
+                  if (clean(img.getAttribute('aria-label')) || clean(img.getAttribute('aria-labelledby'))) { continue; }
+                  var role = clean(img.getAttribute('role'));
+                  if (role === 'presentation' || role === 'none') { continue; }
+                  missingAlt++;
+                }
+
+                var controls = document.querySelectorAll('a[href],button,input:not([type="hidden"]),select,textarea,[role="button"],[role="link"]');
+                var unnamed = 0;
+                var visibleControls = 0;
+                for (var j = 0; j < controls.length && j < 800; j++) {
+                  var el = controls[j];
+                  if (!visible(el)) { continue; }
+                  visibleControls++;
+                  var name = clean(el.getAttribute('aria-label')) ||
+                    clean(el.getAttribute('aria-labelledby')) ||
+                    clean(el.getAttribute('title')) ||
+                    clean(el.getAttribute('placeholder')) ||
+                    clean(el.innerText) || clean(el.textContent);
+                  if (!name) {
+                    var tag = (el.tagName || '').toLowerCase();
+                    var type = clean(el.getAttribute('type')).toLowerCase();
+                    if (tag === 'input' && (type === 'submit' || type === 'button' || type === 'reset')) {
+                      name = clean(el.value);
+                    }
+                  }
+                  if (!name) { unnamed++; }
+                }
+
+                var headings = document.querySelectorAll('h1,h2,h3,h4,h5,h6');
+                var skips = 0;
+                var lastLevel = 0;
+                var h1 = 0;
+                for (var k = 0; k < headings.length; k++) {
+                  var level = parseInt((headings[k].tagName || 'h6').slice(1), 10) || 6;
+                  if (level === 1) { h1++; }
+                  if (lastLevel > 0 && level > lastLevel + 1) { skips++; }
+                  lastLevel = level;
+                }
+
+                var nav = null;
+                var resources = 0;
+                try {
+                  var entries = performance.getEntriesByType ? performance.getEntriesByType('navigation') : [];
+                  nav = entries && entries.length ? entries[0] : null;
+                  resources = performance.getEntriesByType ? performance.getEntriesByType('resource').length : 0;
+                } catch (error) {}
+                var transfer = nav && typeof nav.transferSize === 'number' ? Math.round(nav.transferSize / 1024) : -1;
+                var domMs = nav && nav.domContentLoadedEventEnd ? Math.round(nav.domContentLoadedEventEnd) : -1;
+                var loadMs = nav && nav.loadEventEnd ? Math.round(nav.loadEventEnd) : -1;
+
+                return JSON.stringify({
+                  nodes: document.querySelectorAll('*').length,
+                  images: images.length,
+                  missingAlt: missingAlt,
+                  controls: visibleControls,
+                  unnamed: unnamed,
+                  headings: headings.length,
+                  skips: skips,
+                  h1: h1,
+                  lang: !!clean(document.documentElement.getAttribute('lang')),
+                  links: document.querySelectorAll('a[href]').length,
+                  forms: document.querySelectorAll('form').length,
+                  passwords: document.querySelectorAll('input[type="password"]').length,
+                  resources: resources,
+                  transferKb: transfer,
+                  domMs: domMs,
+                  loadMs: loadMs,
+                  overflow: document.documentElement.scrollWidth > window.innerWidth + 8
+                });
+              } catch (error) {
+                return 'null';
+              }
             }
           };
           return 'ready';
@@ -263,6 +364,44 @@ object AgentPageBridge {
                 if (continuation.isActive) continuation.resume(result)
             }
         }
+
+    /** 只读审计：只返回计数、耗时与布尔特征，不返回正文或链接地址。 */
+    suspend fun audit(webView: WebView): AgentPageAudit? =
+        suspendCancellableCoroutine { continuation ->
+            requestAudit(webView) { result ->
+                if (continuation.isActive) continuation.resume(result)
+            }
+        }
+
+    private fun requestAudit(webView: WebView, onResult: (AgentPageAudit?) -> Unit) {
+        webView.evaluateJavascript(READY_CHECK) { value ->
+            if (value == "true") {
+                evaluateAudit(webView, onResult)
+            } else {
+                webView.evaluateJavascript(INSTALL_SCRIPT) {
+                    evaluateAudit(webView, onResult)
+                }
+            }
+        }
+    }
+
+    private fun evaluateAudit(webView: WebView, onResult: (AgentPageAudit?) -> Unit) {
+        val script = """
+            (function () {
+              try {
+                if (!window.__liuliAgent || typeof window.__liuliAgent.audit !== 'function') {
+                  return 'null';
+                }
+                return window.__liuliAgent.audit();
+              } catch (error) {
+                return 'null';
+              }
+            })()
+        """.trimIndent()
+        webView.evaluateJavascript(script) { raw ->
+            onResult(parseAudit(raw))
+        }
+    }
 
     suspend fun execute(webView: WebView, action: AgentPageAction): AgentActionResult =
         suspendCancellableCoroutine { continuation ->
@@ -330,6 +469,29 @@ object AgentPageBridge {
             formCount = json.optInt("forms"),
             imageCount = json.optInt("images"),
             truncated = json.optBoolean("truncated")
+        )
+    }
+
+    private fun parseAudit(raw: String?): AgentPageAudit? {
+        val json = parseJson(raw) ?: return null
+        return AgentPageAudit(
+            nodeCount = json.optInt("nodes"),
+            imageCount = json.optInt("images"),
+            imagesMissingAlt = json.optInt("missingAlt"),
+            interactiveCount = json.optInt("controls"),
+            unnamedControls = json.optInt("unnamed"),
+            headingCount = json.optInt("headings"),
+            headingSkips = json.optInt("skips"),
+            h1Count = json.optInt("h1"),
+            hasLanguage = json.optBoolean("lang"),
+            linkCount = json.optInt("links"),
+            formCount = json.optInt("forms"),
+            passwordFields = json.optInt("passwords"),
+            resourceCount = json.optInt("resources"),
+            transferKb = json.optInt("transferKb", -1),
+            domReadyMs = json.optInt("domMs", -1),
+            loadMs = json.optInt("loadMs", -1),
+            horizontalOverflow = json.optBoolean("overflow")
         )
     }
 

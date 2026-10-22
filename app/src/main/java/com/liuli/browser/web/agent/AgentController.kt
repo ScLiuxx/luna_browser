@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.liuli.browser.BuildConfig
+import com.liuli.browser.data.LibraryEntry
 import com.liuli.browser.data.SettingsStore
 import com.liuli.browser.web.TrackerBlocker
 import kotlinx.coroutines.CancellationException
@@ -143,7 +144,9 @@ data class AgentAuditEntry(
  */
 class AgentController(
     private val settings: SettingsStore,
-    private val policies: AgentPolicyStore
+    private val policies: AgentPolicyStore,
+    private val localHistory: () -> List<LibraryEntry> = { emptyList() },
+    private val localBookmarks: () -> List<LibraryEntry> = { emptyList() }
 ) {
 
     val messages = mutableStateListOf<AgentMessage>()
@@ -157,6 +160,16 @@ class AgentController(
     /** 最近一份调研报告；保存位置由用户选择，Agent 不主动落盘。 */
     var report by mutableStateOf<AgentReport?>(null)
         private set
+
+    /** P5 页面关注与宏：只保存在当前会话内，退出或清除对话即删除。 */
+    val watches = mutableStateListOf<AgentWatch>()
+    val macros = mutableStateListOf<AgentMacro>()
+    var recordingMacro by mutableStateOf(false)
+        private set
+    private val recordedSteps = ArrayList<AgentPlanStep>()
+    private var recordedHost = ""
+    private var nextWatchId = 1L
+    private var nextMacroId = 1L
 
     var plan by mutableStateOf<AgentPlan?>(null)
         private set
@@ -186,6 +199,11 @@ class AgentController(
         audit.clear()
         sources.clear()
         report = null
+        watches.clear()
+        macros.clear()
+        recordedSteps.clear()
+        recordedHost = ""
+        recordingMacro = false
         plan = null
         pauseRequested = false
         busy = false
@@ -260,6 +278,10 @@ class AgentController(
                         "当前站点已被你设为禁止，Agent 不会读取这一段页面。可回到原站点或调整站点策略。",
                         AgentMode.Local
                     )
+                    return@launch
+                }
+                // P5/P6 本机能力：关注、宏、历史检索与页面审计，均在本地完成。
+                if (handleLocalAutomation(input, snapshot, view, tabId, researchPages)) {
                     return@launch
                 }
                 // P4.1 调研是只读任务：只收集已加载标签页的正文，不点击、不跳转。
@@ -695,6 +717,7 @@ class AgentController(
             }
         }
         plan = current.copy(status = AgentPlanStatus.Done)
+        appendRecordedSteps(current)
         record(
             hostOf(current.pageUrl),
             "计划完成 · ${current.goal.take(50)}",
@@ -1401,6 +1424,474 @@ class AgentController(
     }
 
     // ---------------------------------------------------------------------
+    // P5 Local automation: page watches, macros and local history
+    // P6 Read-only page audit
+    // ---------------------------------------------------------------------
+
+    /**
+     * 这些能力全部在本机完成，不调用云端，也不创建后台任务：
+     * 页面关注只在用户发送“检查关注”时对比已加载标签页；
+     * 宏只会生成待批准的计划；历史检索只读本机书签与历史。
+     */
+    private suspend fun handleLocalAutomation(
+        input: String,
+        snapshot: AgentPageSnapshot,
+        activePage: WebView,
+        tabId: Long,
+        researchPages: List<AgentResearchPage>
+    ): Boolean {
+        val host = hostOf(snapshot.url)
+        when {
+            isAuditRequest(input) -> {
+                runAudit(host, activePage)
+                return true
+            }
+            isWatchAddRequest(input) -> {
+                addWatch(host, snapshot)
+                return true
+            }
+            isWatchCheckRequest(input) -> {
+                checkWatches(snapshot, activePage, researchPages)
+                return true
+            }
+            isWatchListRequest(input) -> {
+                listWatches()
+                return true
+            }
+            isWatchStopRequest(input) -> {
+                stopWatch(host, snapshot, all = input.contains("全部"))
+                return true
+            }
+            isMacroStartRequest(input) -> {
+                beginMacroRecording(host)
+                return true
+            }
+            isMacroStopRequest(input) -> {
+                endMacroRecording()
+                return true
+            }
+            isMacroReplayRequest(input) -> {
+                replayMacro(input, snapshot, tabId)
+                return true
+            }
+            isMacroListRequest(input) -> {
+                listMacros()
+                return true
+            }
+            isLocalHistoryRequest(input) -> {
+                answerLocalHistory(input)
+                return true
+            }
+        }
+        return false
+    }
+
+    private suspend fun runAudit(host: String?, page: WebView) {
+        val audit = withTimeoutOrNull(SNAPSHOT_TIMEOUT_MS) { AgentPageBridge.audit(page) }
+        if (audit == null) {
+            addReply(
+                "暂时无法审计此页。请等待页面加载完成后再试；PDF、本地页面或受限页面不可用。",
+                AgentMode.Local
+            )
+            return
+        }
+        val issues = ArrayList<String>()
+        if (audit.imagesMissingAlt > 0) {
+            issues += "${audit.imagesMissingAlt} 张图片缺少替代文本"
+        }
+        if (audit.unnamedControls > 0) {
+            issues += "${audit.unnamedControls} 个交互元素没有可读名称"
+        }
+        if (audit.h1Count == 0) {
+            issues += "没有一级标题"
+        } else if (audit.h1Count > 1) {
+            issues += "存在多个一级标题"
+        }
+        if (audit.headingSkips > 0) {
+            issues += "${audit.headingSkips} 处标题层级跳跃"
+        }
+        if (!audit.hasLanguage) {
+            issues += "页面未声明语言（lang）"
+        }
+        if (audit.horizontalOverflow) {
+            issues += "页面存在横向溢出"
+        }
+        val text = buildString {
+            appendLine("页面审计（只读，仅本机，不执行修改）")
+            appendLine(
+                "- 结构：${audit.nodeCount} 个节点 · ${audit.headingCount} 个标题 · " +
+                    "${audit.linkCount} 个链接 · ${audit.formCount} 个表单"
+            )
+            appendLine("- 图片：${audit.imageCount} 张，缺替代文本 ${audit.imagesMissingAlt} 张")
+            appendLine(
+                "- 交互：${audit.interactiveCount} 个可见控件，" +
+                    "无可读名称 ${audit.unnamedControls} 个"
+            )
+            appendLine(
+                "- 性能：DOM 就绪 ${formatMillis(audit.domReadyMs)} · " +
+                    "加载完成 ${formatMillis(audit.loadMs)} · " +
+                    "资源 ${audit.resourceCount} 个 · 传输 ${formatKilobytes(audit.transferKb)}"
+            )
+            if (audit.passwordFields > 0) {
+                appendLine("- 检测到 ${audit.passwordFields} 个密码字段；Agent 不会读取其内容。")
+            }
+            appendLine()
+            if (issues.isEmpty()) {
+                append("未发现明显的无障碍或结构问题。审计只做启发式检查，不能替代人工测试。")
+            } else {
+                appendLine("可能的问题")
+                issues.forEach { appendLine("- $it") }
+                appendLine()
+                append("以上只是启发式提示，不会自动修改页面。")
+            }
+        }
+        record(host, "页面审计", AgentAuditOutcome.Executed, "只读 · ${audit.nodeCount} 节点")
+        addReply(text, AgentMode.Local)
+    }
+
+    private fun addWatch(host: String?, snapshot: AgentPageSnapshot) {
+        val url = watchUrl(snapshot.url)
+        if (url.isBlank()) {
+            addReply("当前页面没有可监控的地址。", AgentMode.Local)
+            return
+        }
+        if (watches.any { it.url == url }) {
+            addReply("已经在关注这个页面。发送“检查关注”可比较正文与价格变化。", AgentMode.Local)
+            return
+        }
+        if (snapshot.text.isBlank()) {
+            addReply("页面正文为空，暂时无法建立监控基线。请等待页面加载完成后再试。", AgentMode.Local)
+            return
+        }
+        if (watches.size >= AgentAutomation.MAX_WATCHES) {
+            watches.removeAt(watches.lastIndex)
+        }
+        val title = PrivacyScrubber.scrub(snapshot.title.trim().take(80))
+            .ifBlank { host ?: "当前页面" }
+        val watch = AgentWatch(
+            id = nextWatchId++,
+            url = url,
+            host = AgentPolicyStore.normalizeHost(host) ?: "本地",
+            title = title,
+            baselineHash = AgentAutomation.fingerprint(snapshot.text),
+            baselineNumbers = AgentAutomation.numbers(snapshot.text),
+            createdAt = System.currentTimeMillis()
+        )
+        watches.add(0, watch)
+        record(host, "关注页面 · ${title.take(40)}", AgentAuditOutcome.Executed, "本机会话内监控")
+        addReply(
+            "已关注“$title”。\n\n" +
+                "只保存 URL、标题、正文指纹与价格片段，不保存正文，也不会后台联网。" +
+                "发送“检查关注”时，仅在已加载的标签页中对比。",
+            AgentMode.Local
+        )
+    }
+
+    private fun listWatches() {
+        if (watches.isEmpty()) {
+            addReply("还没有关注任何页面。打开页面后发送“监控此页”。", AgentMode.Local)
+            return
+        }
+        val text = buildString {
+            appendLine("关注 ${watches.size} 个页面（仅本机会话）")
+            watches.forEach { watch ->
+                appendLine("- ${watch.title} · ${watch.host}")
+                if (watch.baselineNumbers.isNotEmpty()) {
+                    appendLine("  基线数字：${watch.baselineNumbers.joinToString("、")}")
+                }
+            }
+            appendLine()
+            append("发送“检查关注”对比已加载页面；发送“停止关注”移除当前页。")
+        }
+        addReply(text, AgentMode.Local)
+    }
+
+    private fun stopWatch(host: String?, snapshot: AgentPageSnapshot, all: Boolean) {
+        if (watches.isEmpty()) {
+            addReply("关注列表为空。", AgentMode.Local)
+            return
+        }
+        if (all) {
+            val count = watches.size
+            watches.clear()
+            record(host, "停止全部关注", AgentAuditOutcome.Executed, "$count 个页面")
+            addReply("已停止关注全部 $count 个页面。", AgentMode.Local)
+            return
+        }
+        val url = watchUrl(snapshot.url)
+        val removed = watches.removeAll { it.url == url }
+        if (removed) {
+            record(host, "停止关注", AgentAuditOutcome.Executed, "当前页面")
+            addReply("已停止关注当前页面。", AgentMode.Local)
+        } else {
+            addReply("当前页面不在关注列表中。", AgentMode.Local)
+        }
+    }
+
+    private suspend fun checkWatches(
+        activeSnapshot: AgentPageSnapshot,
+        activePage: WebView,
+        researchPages: List<AgentResearchPage>
+    ) {
+        if (watches.isEmpty()) {
+            addReply("还没有关注任何页面。打开页面后发送“监控此页”。", AgentMode.Local)
+            return
+        }
+        val texts = HashMap<String, String>()
+        texts[watchUrl(activeSnapshot.url)] = activeSnapshot.text
+        for (page in researchPages) {
+            if (page.webView === activePage) continue
+            if (policies.policyFor(hostOf(page.webView.url)).mode == AgentSiteMode.Blocked) {
+                continue
+            }
+            val snapshot = withTimeoutOrNull(SNAPSHOT_TIMEOUT_MS) {
+                AgentPageBridge.snapshot(page.webView)
+            } ?: continue
+            texts[watchUrl(snapshot.url)] = snapshot.text
+        }
+
+        val updates = ArrayList<WatchUpdate>()
+        for (index in watches.indices) {
+            val watch = watches[index]
+            val text = texts[watch.url] ?: continue
+            val update = AgentAutomation.compare(watch, text)
+            watches[index] = update.watch
+            updates += update
+        }
+        if (updates.isEmpty()) {
+            addReply(
+                "关注列表中的页面当前都没有打开。请先打开需要检查的页面，再发送“检查关注”。",
+                AgentMode.Local
+            )
+            return
+        }
+        val changed = updates.filter { it.changed }
+        val text = buildString {
+            appendLine("检查了 ${updates.size} 个已加载的关注页面。")
+            if (changed.isEmpty()) {
+                appendLine("- 暂未发现正文或价格变化。")
+            } else {
+                changed.forEach { update ->
+                    appendLine("- ${update.watch.title} · ${update.watch.host}")
+                    if (update.newNumbers.isNotEmpty()) {
+                        appendLine("  新增数字：${update.newNumbers.joinToString("、")}")
+                    }
+                    if (update.goneNumbers.isNotEmpty()) {
+                        appendLine("  消失的数字：${update.goneNumbers.joinToString("、")}")
+                    }
+                    if (update.newNumbers.isEmpty() && update.goneNumbers.isEmpty()) {
+                        appendLine("  正文有变化，未识别到价格数字变化。")
+                    }
+                }
+            }
+            val unchecked = watches.size - updates.size
+            if (unchecked > 0) appendLine("- 另有 $unchecked 个关注页面未打开，未检查。")
+            appendLine()
+            append("对比结果只用于提醒，请打开来源页面核对；监控不会后台运行。")
+        }
+        record(
+            hostOf(activeSnapshot.url),
+            "检查关注",
+            AgentAuditOutcome.Executed,
+            "${updates.size} 个页面 · ${changed.size} 个变化"
+        )
+        addReply(text, AgentMode.Local)
+    }
+
+    private fun beginMacroRecording(host: String?) {
+        if (recordingMacro) {
+            addReply("正在录制宏。发送“结束录制”保存。", AgentMode.Local)
+            return
+        }
+        recordedSteps.clear()
+        recordedHost = host.orEmpty()
+        recordingMacro = true
+        addReply(
+            "开始录制宏。接下来批准并完成的滚动与点击步骤会记录为可回放步骤；" +
+                "填写内容与元素 ref 不保存。发送“结束录制”保存，最多 ${AgentAutomation.MAX_MACRO_STEPS} 步。",
+            AgentMode.Local
+        )
+    }
+
+    private fun appendRecordedSteps(plan: AgentPlan) {
+        if (!recordingMacro) return
+        val host = hostOf(plan.pageUrl).orEmpty()
+        if (host != recordedHost) {
+            addReply("本次任务属于其他站点，未写入当前宏。", AgentMode.Local)
+            return
+        }
+        val room = AgentAutomation.MAX_MACRO_STEPS - recordedSteps.size
+        if (room <= 0) return
+        // 不保存元素 ref 与填写内容：回放时重新读取页面并按语义目标定位，
+        // 避免宏里留下用户输入过的姓名、地址等个人信息。
+        plan.steps
+            .filter { it.kind != AgentPlanStepKind.Type }
+            .take(room)
+            .forEach { recordedSteps += it.copy(ref = null, text = null) }
+    }
+
+    private fun endMacroRecording() {
+        if (!recordingMacro) {
+            addReply("当前没有在录制宏。发送“开始录制”后再执行多步任务。", AgentMode.Local)
+            return
+        }
+        recordingMacro = false
+        if (recordedSteps.isEmpty()) {
+            addReply("这次没有记录到可回放的步骤，未保存宏。", AgentMode.Local)
+            return
+        }
+        val id = nextMacroId++
+        val macro = AgentMacro(
+            id = id,
+            name = "宏 $id · ${recordedHost.ifBlank { "本地" }}",
+            host = recordedHost,
+            steps = recordedSteps.toList(),
+            createdAt = System.currentTimeMillis()
+        )
+        macros.add(0, macro)
+        while (macros.size > AgentAutomation.MAX_MACROS) {
+            macros.removeAt(macros.lastIndex)
+        }
+        recordedSteps.clear()
+        record(recordedHost, "保存宏 #$id", AgentAuditOutcome.Executed, "${macro.steps.size} 步")
+        addReply(
+            "已保存宏 #$id，共 ${macro.steps.size} 步。发送“查看宏”或“回放宏 $id”。\n\n" +
+                "回放只会生成待批准的计划，不会自动执行。",
+            AgentMode.Local
+        )
+    }
+
+    private fun listMacros() {
+        if (macros.isEmpty()) {
+            addReply("还没有宏。发送“开始录制”后执行一个多步任务，再发送“结束录制”。", AgentMode.Local)
+            return
+        }
+        val text = buildString {
+            appendLine("本机会话中的宏（${macros.size} 个）")
+            macros.forEach { macro ->
+                appendLine(
+                    "- #${macro.id} · ${macro.host} · ${macro.steps.size} 步 · " +
+                        ResearchEngine.formatTime(macro.createdAt)
+                )
+                macro.steps.forEachIndexed { index, step ->
+                    appendLine("  ${index + 1}. ${step.description}")
+                }
+            }
+            appendLine()
+            append("发送“回放宏 编号”载入计划，批准后才会执行。")
+        }
+        addReply(text, AgentMode.Local)
+    }
+
+    private fun replayMacro(input: String, snapshot: AgentPageSnapshot, tabId: Long) {
+        if (macros.isEmpty()) {
+            addReply("还没有宏可以回放。", AgentMode.Local)
+            return
+        }
+        val number = Regex("(\\d{1,3})").find(input)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        val macro = number?.let { id -> macros.firstOrNull { it.id == id.toLong() } }
+            ?: macros.first()
+        val host = hostOf(snapshot.url).orEmpty()
+        if (macro.host.isNotBlank() && host != macro.host) {
+            addReply("宏 #${macro.id} 来自 ${macro.host}，请先打开该站点再回放。", AgentMode.Local)
+            return
+        }
+        if (macro.steps.isEmpty()) {
+            addReply("宏 #${macro.id} 没有步骤。", AgentMode.Local)
+            return
+        }
+        plan = AgentPlan(
+            tabId = tabId,
+            pageUrl = snapshot.url,
+            goal = "回放宏 #${macro.id} · ${macro.host}",
+            steps = macro.steps,
+            source = AgentMode.Local
+        )
+        record(host, "载入宏 #${macro.id}", AgentAuditOutcome.Proposed, "${macro.steps.size} 步待批准")
+        addReply(
+            "已载入宏 #${macro.id}（${macro.steps.size} 步）。" +
+                "请在上方计划卡批准后执行；每步仍会复核站点策略。",
+            AgentMode.Local
+        )
+    }
+
+    private fun answerLocalHistory(input: String) {
+        val entries = localHistory()
+        val bookmarks = localBookmarks()
+        if (entries.isEmpty() && bookmarks.isEmpty()) {
+            addReply("本机书签与历史为空，暂时没有可检索的内容。", AgentMode.Local)
+            return
+        }
+        val result = when {
+            input.contains("本周") -> AgentAutomation.digest(entries, 7)
+            input.contains("找") -> {
+                val query = input.substringAfter("找")
+                    .trim()
+                    .trim('“', '”', '"', '：', ':', ' ')
+                if (query.isBlank()) {
+                    AgentAutomation.digest(entries, 1)
+                } else {
+                    // 检索范围包含本机书签；日报只统计历史访问，避免把收藏当成访问。
+                    val found = AgentAutomation.search(entries + bookmarks, query)
+                    if (found.isEmpty()) {
+                        "本机历史与书签中没有找到与“${query.take(30)}”相关的记录。"
+                    } else {
+                        buildString {
+                            appendLine("本机历史与书签中找到 ${found.size} 条相关记录（未上传）：")
+                            found.forEach { entry ->
+                                appendLine("- ${entry.title.take(60).ifBlank { entry.url.take(60) }}")
+                            }
+                        }.trim()
+                    }
+                }
+            }
+            else -> AgentAutomation.digest(entries, 1)
+        }
+        addReply(result, AgentMode.Local)
+    }
+
+    private fun watchUrl(raw: String): String =
+        PrivacyScrubber.scrub(TrackerBlocker.sanitize(raw).take(2048))
+
+    private fun formatMillis(value: Int): String = if (value < 0) "未知" else "${value}ms"
+
+    private fun formatKilobytes(value: Int): String = if (value < 0) "未知" else "$value KB"
+
+    private fun isAuditRequest(input: String): Boolean =
+        input.contains("审计") || input.contains("无障碍") ||
+            input.contains("页面性能") || input.contains("性能检查")
+
+    private fun isWatchAddRequest(input: String): Boolean =
+        input.contains("监控此页") || input.contains("关注此页") ||
+            input.contains("监控这个页面") || input.contains("关注这个页面")
+
+    private fun isWatchCheckRequest(input: String): Boolean =
+        input.contains("检查关注") || input.contains("检查监控") || input.contains("关注更新")
+
+    private fun isWatchListRequest(input: String): Boolean =
+        input.contains("查看关注") || input.contains("我的关注") || input.contains("关注列表")
+
+    private fun isWatchStopRequest(input: String): Boolean =
+        input.contains("停止关注") || input.contains("停止监控") || input.contains("取消关注")
+
+    private fun isMacroStartRequest(input: String): Boolean =
+        input.contains("开始录制") || input.contains("开始宏")
+
+    private fun isMacroStopRequest(input: String): Boolean =
+        input.contains("结束录制") || input.contains("停止录制")
+
+    private fun isMacroReplayRequest(input: String): Boolean =
+        input.contains("回放宏") || input.contains("运行宏")
+
+    private fun isMacroListRequest(input: String): Boolean =
+        input.contains("查看宏") || input.contains("我的宏")
+
+    private fun isLocalHistoryRequest(input: String): Boolean =
+        input.contains("浏览日报") || input.contains("最近看过") ||
+            input.contains("历史里找") || input.contains("历史问答") ||
+            input.contains("本周浏览")
+
+    // ---------------------------------------------------------------------
     // P4.1 Read-only multi-page research, source ledger and report
     // ---------------------------------------------------------------------
 
@@ -2029,6 +2520,15 @@ class AgentController(
                     "表单 ${snapshot.formCount} · 图片 ${snapshot.imageCount}"
             )
             if (snapshot.language.isNotBlank()) appendLine("语言：${snapshot.language}")
+            val credibility = ResearchEngine.assessSource(
+                snapshot.url,
+                snapshot.title,
+                snapshot.text.length
+            )
+            appendLine(
+                "来源：${credibility.label}可信度 ${credibility.score}/100" +
+                    "（仅按协议、域名与篇幅启发式判断，不代表事实核查）"
+            )
             if (snapshot.selection.isNotBlank()) {
                 appendLine("已选中：${snapshot.selection.take(120)}")
             }

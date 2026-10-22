@@ -1,6 +1,13 @@
 package com.liuli.browser.web.agent
 
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.pdf.PdfDocument
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import android.webkit.WebView
+import java.io.ByteArrayOutputStream
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -38,8 +45,16 @@ enum class AgentReportFormat(
 ) {
     Markdown("Markdown", "md", "text/markdown"),
     Html("HTML", "html", "text/html"),
+    Pdf("PDF", "pdf", "application/pdf"),
     Csv("CSV", "csv", "text/csv")
 }
+
+/** 本机启发式来源评估；不是事实核查，只提示协议、域名与篇幅特征。 */
+data class SourceCredibility(
+    val score: Int,
+    val label: String,
+    val notes: List<String>
+)
 
 /** 内存中的调研报告；保存位置由用户通过系统文件选择器决定。 */
 data class AgentReport(
@@ -77,6 +92,11 @@ object ResearchEngine {
     private val ORDERED_ITEM = Regex("^\\d{1,2}\\.\\s+")
     private val LINK = Regex("\\[([^\\]]+)\\]\\(([^)\\s]+)\\)")
     private val BOLD = Regex("\\*\\*([^*]+)\\*\\*")
+    private val IP_HOST = Regex("^(\\d{1,3}\\.){3}\\d{1,3}$")
+
+    private const val PDF_WIDTH = 595
+    private const val PDF_HEIGHT = 842
+    private const val PDF_MARGIN = 44f
 
     private val HTML_STYLE = """
         :root { color-scheme: light dark; }
@@ -141,6 +161,109 @@ object ResearchEngine {
             .take(MAX_POINTS_PER_SOURCE)
             .sortedBy { it.first }
             .map { it.second }
+    }
+
+    /**
+     * 只做协议、域名类型与篇幅的启发式评估，帮助用户判断“先看哪里”，
+     * 不推断内容真伪，也不替代跨来源核对。
+     */
+    fun assessSource(url: String, title: String, textLength: Int): SourceCredibility {
+        var score = 50
+        val notes = ArrayList<String>()
+        val normalized = url.trim()
+        when {
+            normalized.startsWith("https://") -> {
+                score += 18
+                notes += "HTTPS"
+            }
+            normalized.startsWith("http://") -> {
+                score -= 18
+                notes += "未使用 HTTPS"
+            }
+            else -> {
+                score -= 10
+                notes += "协议异常"
+            }
+        }
+        val host = runCatching { java.net.URI(normalized).host }.getOrNull()
+            ?.lowercase()
+            .orEmpty()
+        when {
+            host.endsWith(".gov") || host.endsWith(".gov.cn") -> {
+                score += 18
+                notes += "政府域名"
+            }
+            host.endsWith(".edu") || host.endsWith(".edu.cn") ||
+                host.endsWith(".ac.cn") -> {
+                score += 15
+                notes += "教育/科研域名"
+            }
+            host.endsWith(".org") -> {
+                score += 5
+                notes += "非营利域名"
+            }
+        }
+        if (IP_HOST.matches(host)) {
+            score -= 15
+            notes += "直接使用 IP 地址"
+        }
+        if (host.contains("xn--")) {
+            score -= 5
+            notes += "国际化域名，注意仿冒"
+        }
+        when {
+            textLength >= 3_000 -> {
+                score += 10
+                notes += "正文较长"
+            }
+            textLength >= 800 -> {
+                score += 5
+                notes += "正文篇幅一般"
+            }
+            textLength > 0 -> {
+                score -= 10
+                notes += "正文过短"
+            }
+            else -> {
+                score -= 15
+                notes += "未读取到正文"
+            }
+        }
+        if (title.trim().length < 4) {
+            score -= 5
+            notes += "标题过短"
+        }
+        val bounded = score.coerceIn(0, 100)
+        val label = when {
+            bounded >= 75 -> "较高"
+            bounded >= 55 -> "中等"
+            else -> "偏低"
+        }
+        return SourceCredibility(bounded, label, notes)
+    }
+
+    /** 去掉 Markdown 标记，供语音朗读与 PDF 逐行排版使用。 */
+    fun plainText(markdown: String): String = markdown.lineSequence()
+        .map { raw ->
+            val line = raw.trim()
+            val content = when {
+                line.startsWith("#") -> line.trimStart('#').trim()
+                line.startsWith(">") -> line.trimStart('>').trim()
+                line.startsWith("- ") || line.startsWith("* ") -> line.drop(2)
+                ORDERED_ITEM.containsMatchIn(line) -> line.replaceFirst(ORDERED_ITEM, "")
+                else -> line
+            }
+            plainInline(content)
+        }
+        .filter { it.isNotBlank() }
+        .joinToString(" ")
+        .replace(WHITESPACE, " ")
+        .trim()
+
+    private fun plainInline(markdown: String): String {
+        var value = markdown.replace("**", "")
+        value = LINK.replace(value) { it.groupValues[1] }
+        return value
     }
 
     /** 本机报告主体：逐条摘录并标注来源编号，同时给出跨来源比对。 */
@@ -270,10 +393,110 @@ object ResearchEngine {
     }
 
     /** 按指定格式渲染报告；全部在本机完成，不访问网络。 */
-    fun render(report: AgentReport, format: AgentReportFormat): String = when (format) {
-        AgentReportFormat.Markdown -> report.markdown
-        AgentReportFormat.Html -> toHtml(report)
-        AgentReportFormat.Csv -> toCsv(report.sources)
+    fun render(report: AgentReport, format: AgentReportFormat): ByteArray = when (format) {
+        AgentReportFormat.Markdown -> report.markdown.toByteArray(Charsets.UTF_8)
+        AgentReportFormat.Html -> toHtml(report).toByteArray(Charsets.UTF_8)
+        AgentReportFormat.Pdf -> toPdf(report)
+        AgentReportFormat.Csv -> toCsv(report.sources).toByteArray(Charsets.UTF_8)
+    }
+
+    /**
+     * 本机 PDF 排版：A4 纵向、纯文本分页，使用系统 PdfDocument，
+     * 不加载外部图片、不执行脚本，也不上传任何内容。
+     */
+    private fun toPdf(report: AgentReport): ByteArray {
+        val document = PdfDocument()
+        val contentWidth = (PDF_WIDTH - PDF_MARGIN * 2).toInt()
+        val body = TextPaint().apply {
+            isAntiAlias = true
+            color = Color.rgb(29, 29, 31)
+            textSize = 11f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+        }
+        val heading = TextPaint(body).apply {
+            textSize = 19f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val subheading = TextPaint(body).apply {
+            textSize = 14f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val quote = TextPaint(body).apply {
+            color = Color.rgb(110, 110, 115)
+        }
+        val footer = TextPaint(body).apply {
+            textSize = 8f
+            color = Color.rgb(142, 142, 147)
+        }
+
+        var pageNumber = 1
+        var page: PdfDocument.Page = document.startPage(
+            PdfDocument.PageInfo.Builder(PDF_WIDTH, PDF_HEIGHT, pageNumber).create()
+        )
+        var canvas = page.canvas
+        var y = PDF_MARGIN
+
+        fun finishCurrentPage() {
+            canvas.drawText(
+                "第 $pageNumber 页 · 琉璃浏览器 · 本机生成",
+                PDF_MARGIN,
+                PDF_HEIGHT - PDF_MARGIN / 2,
+                footer
+            )
+            document.finishPage(page)
+        }
+
+        fun nextPage() {
+            finishCurrentPage()
+            pageNumber++
+            page = document.startPage(
+                PdfDocument.PageInfo.Builder(PDF_WIDTH, PDF_HEIGHT, pageNumber).create()
+            )
+            canvas = page.canvas
+            y = PDF_MARGIN
+        }
+
+        fun draw(text: String, paint: TextPaint, before: Float, after: Float) {
+            if (text.isBlank()) {
+                y += after
+                return
+            }
+            val layout = StaticLayout.Builder
+                .obtain(text, 0, text.length, paint, contentWidth)
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                .setLineSpacing(0f, 1.4f)
+                .setIncludePad(false)
+                .build()
+            val height = layout.height.toFloat()
+            if (y + before + height > PDF_HEIGHT - PDF_MARGIN && y > PDF_MARGIN) {
+                nextPage()
+            }
+            y += before
+            canvas.save()
+            canvas.translate(PDF_MARGIN, y)
+            layout.draw(canvas)
+            canvas.restore()
+            y += height + after
+        }
+
+        report.markdown.lineSequence().forEach { raw ->
+            val line = raw.trimEnd()
+            when {
+                line.isBlank() -> y += 5f
+                line.startsWith("# ") -> draw(line.removePrefix("# "), heading, 2f, 10f)
+                line.startsWith("## ") -> draw(line.removePrefix("## "), subheading, 10f, 5f)
+                line.startsWith("### ") -> draw(line.removePrefix("### "), subheading, 6f, 4f)
+                line.startsWith("> ") -> draw(line.removePrefix("> "), quote, 1f, 3f)
+                line.startsWith("- ") || line.startsWith("* ") ->
+                    draw("• " + line.drop(2), body, 0f, 2f)
+                else -> draw(line, body, 1f, 2f)
+            }
+        }
+        finishCurrentPage()
+        val output = ByteArrayOutputStream()
+        document.writeTo(output)
+        document.close()
+        return output.toByteArray()
     }
 
     /** 自包含 HTML：内联样式、CSP 禁止外部资源，不执行脚本。 */

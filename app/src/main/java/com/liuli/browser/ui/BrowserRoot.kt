@@ -137,7 +137,15 @@ fun BrowserRoot(
     val colors = LocalLiuliColors.current
     val density = LocalDensity.current
     val agentPolicies = remember(activity) { AgentPolicyStore(activity.applicationContext) }
-    val agent = remember(settings, agentPolicies) { AgentController(settings, agentPolicies) }
+    // 本机历史只读传入；Agent 不会把它上传，云端路径也不读取该回调。
+    val agent = remember(settings, agentPolicies, library) {
+        AgentController(
+            settings = settings,
+            policies = agentPolicies,
+            localHistory = { library.history.toList() },
+            localBookmarks = { library.bookmarks.toList() }
+        )
+    }
 
     LaunchedEffect(vm, activity) { vm.bindActivity(activity) }
     LaunchedEffect(vm, settings, library) { vm.bind(settings, library) }
@@ -214,7 +222,7 @@ fun BrowserRoot(
                     val stream = activity.contentResolver.openOutputStream(uri)
                         ?: throw IllegalStateException("无法写入目标文件")
                     stream.use { output ->
-                        output.write(content.toByteArray(Charsets.UTF_8))
+                        output.write(content)
                     }
                 }.isSuccess
             }
@@ -233,6 +241,10 @@ fun BrowserRoot(
     )
     val csvExportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument(AgentReportFormat.Csv.mimeType),
+        saveReport
+    )
+    val pdfExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(AgentReportFormat.Pdf.mimeType),
         saveReport
     )
 
@@ -464,6 +476,7 @@ fun BrowserRoot(
                                                 AgentReportFormat.Markdown -> markdownExportLauncher
                                                 AgentReportFormat.Html -> htmlExportLauncher
                                                 AgentReportFormat.Csv -> csvExportLauncher
+                                                AgentReportFormat.Pdf -> pdfExportLauncher
                                             }
                                             runCatching {
                                                 launcher.launch(report.fileName(format))
