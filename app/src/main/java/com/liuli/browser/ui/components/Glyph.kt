@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -66,7 +67,13 @@ fun GlyphIcon(
     size: Dp = 22.dp
 ) {
     Canvas(modifier = modifier.size(size)) {
-        drawGlyph(glyph, tint, this.size.minDimension)
+        val factor = this.size.minDimension / 24f
+        if (factor <= 0f) return@Canvas
+        // Draw in a fixed 24x24 coordinate space, then scale once. Both raw
+        // path coordinates and the paths that pre-multiply by "s" stay correct.
+        scale(factor, factor, pivot = Offset.Zero) {
+            drawGlyph(glyph, tint, 24f)
+        }
     }
 }
 
