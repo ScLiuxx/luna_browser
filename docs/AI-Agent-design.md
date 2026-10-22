@@ -151,7 +151,7 @@
 
 - `BrowserViewModel` 增加 `AgentSession` 状态，不把 Agent 逻辑塞进 WebViewClient。
 - `PageBridge` 复用现有 WebView 实例；会话结束移除 JS 监听并清理临时 ref 属性。
-- Agent UI 使用现有 Backdrop 玻璃组件；Agent 球到面板使用 SharedTransitionLayout 一镜到底。
+- Agent UI 使用现有 Backdrop 玻璃组件；Agent 球到面板使用 `SharedTransitionLayout` 一镜到底。
 - 平板侧栏复用响应式断点（≥600dp），与标签页/书签侧栏一致的布局语义。
 - 隐私护盾继续生效：跟踪器拦截、权限拒绝、退出清除；Agent 额外遵守域策略。
 
