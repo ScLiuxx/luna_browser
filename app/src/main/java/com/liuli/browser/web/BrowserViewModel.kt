@@ -757,6 +757,17 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         return engine.queryUrl.format(encoded)
     }
 
+    /**
+     * 将 HTTP 升级为 HTTPS，避免明文传输泄露访问记录与页面内容。
+     * 仅对 http:// 开头的主框架 URL 生效，其余保持不变。
+     */
+    private fun upgradeHttps(url: String): String =
+        if (url.startsWith("http://", ignoreCase = true)) {
+            "https://" + url.substring("http://".length)
+        } else {
+            url
+        }
+
     private fun ensureWebView(tab: BrowserTab?): WebView? {
         if (tab == null || !bound) return null
         webViews[tab.id]?.let { return it }
@@ -1006,9 +1017,14 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     ): Boolean {
         val scheme = runCatching { Uri.parse(url).scheme?.lowercase() }.getOrNull()
         if (scheme == "http" || scheme == "https") {
-            // Only strip parameters on non-redirect main-frame navigation. This
-            // avoids a sanitize/redirect loop while still removing trackers from
-            // user link clicks and typed navigations.
+            // 将主框架的 HTTP 导航升级为 HTTPS，避免明文传输泄露访问记录。
+            if (scheme == "http" && mainFrame) {
+                val upgraded = upgradeHttps(url)
+                if (upgraded != url) {
+                    view.loadUrl(upgraded)
+                    return true
+                }
+            }
             if (mainFrame && !isRedirect && settings?.privacyShield == true) {
                 val sanitized = TrackerBlocker.sanitize(url)
                 if (sanitized != url) {
