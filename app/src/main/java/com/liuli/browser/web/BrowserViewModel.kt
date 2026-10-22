@@ -154,6 +154,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     val activeWebView: WebView?
         get() = webViews[activeId]
 
+    /** 已加载标签页的 WebView；未加载的标签页不为此处创建后台实例。 */
+    fun webViewForTab(id: Long): WebView? = webViews[id]
+
     init {
         val activityManager = app.getSystemService(Context.ACTIVITY_SERVICE)
             as? android.app.ActivityManager

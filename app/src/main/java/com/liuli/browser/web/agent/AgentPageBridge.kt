@@ -59,7 +59,7 @@ object AgentPageBridge {
 
     const val MAX_TEXT_CHARS = 12_000
 
-    private const val SCRIPT_VERSION = 2
+    private const val SCRIPT_VERSION = 4
 
     private const val READY_CHECK =
         "typeof window.__liuliAgent === 'object' && window.__liuliAgent.version === $SCRIPT_VERSION"
@@ -78,9 +78,12 @@ object AgentPageBridge {
             var rect = el.getBoundingClientRect();
             return rect.width > 1 && rect.height > 1;
           }
+          var refPrefix = 'r' + Math.random().toString(36).slice(2, 8);
           window.__liuliAgent = {
             version: __VERSION__,
-            registry: [],
+            refMap: new WeakMap(),
+            nextRef: 1,
+            byRef: new Map(),
             snapshot: function (maxChars) {
               var limit = Math.max(2000, Math.min(maxChars || 12000, 20000));
               var body = document.body;
@@ -92,7 +95,7 @@ object AgentPageBridge {
               var selector = 'a,button,input,select,textarea,[role="button"],[role="link"],[role="checkbox"],[role="radio"],[role="tab"],[contenteditable="true"]';
               var nodes = document.querySelectorAll(selector);
               var elements = [];
-              var registry = [];
+              var byRef = new Map();
               var inspected = 0;
               for (var i = 0; i < nodes.length && elements.length < 60 && inspected < 400; i++) {
                 var el = nodes[i];
@@ -111,10 +114,17 @@ object AgentPageBridge {
                 }
                 if (!name) { name = clean(el.innerText); }
                 if (!name) { name = role; }
+                // ref 在元素存活期间保持稳定，并带文档前缀，跨页面导航后不会误匹配。
+                var ref = window.__liuliAgent.refMap.get(el);
+                if (!ref) {
+                  ref = refPrefix + 'e' + window.__liuliAgent.nextRef;
+                  window.__liuliAgent.nextRef += 1;
+                  window.__liuliAgent.refMap.set(el, ref);
+                }
+                byRef.set(ref, el);
                 // Deliberately never touch el.value: existing form data stays private.
-                registry.push(el);
                 elements.push({
-                  ref: 'e' + registry.length,
+                  ref: ref,
                   role: role,
                   name: name.slice(0, 80),
                   tag: tag,
@@ -130,7 +140,7 @@ object AgentPageBridge {
               var lang = '';
               try { lang = clean(document.documentElement.getAttribute('lang')); } catch (error) {}
 
-              window.__liuliAgent.registry = registry;
+              window.__liuliAgent.byRef = byRef;
               return JSON.stringify({
                 title: clean(document.title).slice(0, 300),
                 url: String(location.href || '').slice(0, 2048),
@@ -164,8 +174,7 @@ object AgentPageBridge {
                   return JSON.stringify({ ok: true, message: '已滚动页面' });
                 }
 
-                var index = parseInt(String(ref || '').replace(/^e/, ''), 10);
-                var el = window.__liuliAgent.registry[index - 1];
+                var el = window.__liuliAgent.byRef ? window.__liuliAgent.byRef.get(String(ref || '')) : null;
                 if (!el || !el.isConnected) {
                   return JSON.stringify({ ok: false, message: '元素已失效，请重新读取页面后再试' });
                 }

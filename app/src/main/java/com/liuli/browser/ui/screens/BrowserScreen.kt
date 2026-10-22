@@ -96,6 +96,8 @@ import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.web.BrowserTab
 import com.liuli.browser.web.BrowserViewModel
 import com.liuli.browser.web.agent.AgentController
+import com.liuli.browser.web.agent.AgentReport
+import com.liuli.browser.web.agent.AgentResearchPage
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -113,6 +115,7 @@ fun BrowserScreen(
     sharedSnapshotKey: Long?,
     showSharedSnapshot: Boolean,
     onShare: (String, String) -> Unit,
+    onExportReport: (AgentReport) -> Unit,
     onNewHomeTab: () -> Unit,
     onOpenTabs: () -> Unit,
     onOpenLibrary: () -> Unit,
@@ -456,6 +459,7 @@ fun BrowserScreen(
             AgentPanel(
                 agent = agent,
                 tabTitle = tab.pageTitle(),
+                pageUrl = tab.url,
                 isTablet = isTablet,
                 isPrivate = tab.isPrivate,
                 backdrop = backdrop,
@@ -466,7 +470,25 @@ fun BrowserScreen(
                         webView = vm.activeWebView,
                         pageTitle = tab.pageTitle(),
                         isPrivate = tab.isPrivate,
-                        tabId = tab.id
+                        tabId = tab.id,
+                        researchPages = vm.tabs
+                            .sortedWith(
+                                compareByDescending<BrowserTab> { it.id == tab.id }
+                                    .thenByDescending { it.lastUsedAt }
+                            )
+                            .mapNotNull { candidate ->
+                                if (candidate.isHome) {
+                                    null
+                                } else {
+                                    vm.webViewForTab(candidate.id)?.let { view ->
+                                        AgentResearchPage(
+                                            tabId = candidate.id,
+                                            isPrivate = candidate.isPrivate,
+                                            webView = view
+                                        )
+                                    }
+                                }
+                            }
                     )
                 },
                 onConfirmAction = { messageId ->
@@ -477,7 +499,8 @@ fun BrowserScreen(
                 },
                 onPlanCommand = { command ->
                     agent.handlePlanCommand(command, vm.activeWebView, tab.id)
-                }
+                },
+                onExportReport = onExportReport
             )
         }
     }

@@ -47,11 +47,13 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -69,9 +71,12 @@ import com.liuli.browser.web.agent.AgentActionStatus
 import com.liuli.browser.web.agent.AgentController
 import com.liuli.browser.web.agent.AgentMessage
 import com.liuli.browser.web.agent.AgentMessageRole
+import com.liuli.browser.web.agent.AgentMode
 import com.liuli.browser.web.agent.AgentPlan
 import com.liuli.browser.web.agent.AgentPlanCommand
 import com.liuli.browser.web.agent.AgentPlanStatus
+import com.liuli.browser.web.agent.AgentReport
+import com.liuli.browser.web.agent.AgentSiteMode
 
 @Composable
 fun AgentOrb(
@@ -123,6 +128,7 @@ fun AgentOrb(
 fun AgentPanel(
     agent: AgentController,
     tabTitle: String,
+    pageUrl: String,
     isTablet: Boolean,
     isPrivate: Boolean,
     backdrop: Backdrop,
@@ -130,7 +136,8 @@ fun AgentPanel(
     onSubmit: (String) -> Unit,
     onConfirmAction: (Long) -> Unit,
     onCancelAction: (Long) -> Unit,
-    onPlanCommand: (AgentPlanCommand) -> Unit
+    onPlanCommand: (AgentPlanCommand) -> Unit,
+    onExportReport: (AgentReport) -> Unit
 ) {
     val colors = LocalLiuliColors.current
     var input by rememberSaveable { mutableStateOf("") }
@@ -148,10 +155,21 @@ fun AgentPanel(
         agent.cloudConfigured -> colors.accent
         else -> colors.success
     }
+    val sitePolicy = agent.sitePolicyFor(pageUrl)
+    val subtitle = when (sitePolicy.mode) {
+        AgentSiteMode.Blocked -> "本站已禁止 · 不会读取页面"
+        AgentSiteMode.ReadOnly -> "本站只读 · 不会执行动作"
+        AgentSiteMode.Allowed -> when {
+            isPrivate -> "隐私标签 · 仅本机处理"
+            sitePolicy.trustLowRisk -> "本站已批准低风险步骤"
+            else -> "读取页面；操作逐条确认"
+        }
+    }
 
-    LaunchedEffect(agent.messages.size, agent.busy, agent.plan != null) {
+    LaunchedEffect(agent.messages.size, agent.busy, agent.plan != null, agent.report?.createdAt) {
         val target = agent.messages.size +
             (if (agent.plan != null) 1 else 0) +
+            (if (agent.report != null) 1 else 0) +
             (if (agent.busy) 1 else 0)
         if (target == 0) return@LaunchedEffect
         listState.animateScrollToItem(target - 1)
@@ -246,7 +264,7 @@ fun AgentPanel(
                             )
                         )
                         BasicText(
-                            text = if (isPrivate) "隐私标签 · 仅本机处理" else "读取页面；操作逐条确认",
+                            text = subtitle,
                             style = TextStyle(color = colors.textTertiary, fontSize = 10.sp),
                             maxLines = 1
                         )
@@ -294,12 +312,14 @@ fun AgentPanel(
                     QuickChip("页面信息") { submit("页面信息") }
                     QuickChip("页内查找") { prepareFind() }
                     QuickChip("向下滚动") { submit("向下滚动一屏") }
+                    QuickChip("调研标签页") { submit("调研这些标签页并生成报告") }
                     QuickChip("这个页面讲了什么？") { submit("这个页面讲了什么？") }
                 }
 
                 Spacer(Modifier.height(6.dp))
 
                 val currentPlan = agent.plan
+                val currentReport = agent.report
                 if (currentPlan == null && agent.messages.isEmpty()) {
                     EmptyState(
                         tabTitle = tabTitle,
@@ -326,6 +346,15 @@ fun AgentPanel(
                         if (currentPlan != null) {
                             item(key = "plan") {
                                 PlanCard(plan = currentPlan, onCommand = onPlanCommand)
+                            }
+                        }
+                        if (currentReport != null) {
+                            item(key = "report-${currentReport.createdAt}") {
+                                ReportCard(
+                                    report = currentReport,
+                                    onExport = { onExportReport(currentReport) },
+                                    onDismiss = agent::dismissReport
+                                )
                             }
                         }
                         if (agent.busy) {
@@ -412,6 +441,17 @@ fun AgentPanel(
                     text = "受控操作：单步动作需逐条确认；多步任务需先批准计划，执行中可暂停或取消，不会自动提交表单。",
                     style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
                 )
+                if (agent.audit.isNotEmpty()) {
+                    Spacer(Modifier.height(3.dp))
+                    BasicText(
+                        text = "审计 ${agent.audit.size} 条 · 仅本机内存，清除对话或退出时删除",
+                        style = TextStyle(
+                            color = colors.textTertiary,
+                            fontSize = 9.sp,
+                            lineHeight = 13.sp
+                        )
+                    )
+                }
             }
         }
     }
@@ -534,7 +574,8 @@ private fun PlanCard(
                     )
                 )
                 BasicText(
-                    text = "${plan.steps.size} 步",
+                    text = "${plan.steps.size} 步 · " +
+                        "${if (plan.source == AgentMode.Cloud) "云端规划" else "本地规划"}",
                     style = TextStyle(color = colors.textTertiary, fontSize = 9.sp)
                 )
             }
@@ -654,6 +695,127 @@ private fun PlanCard(
             }
             AgentPlanStatus.Done, AgentPlanStatus.Cancelled -> Unit
         }
+    }
+}
+
+@Composable
+private fun ReportCard(
+    report: AgentReport,
+    onExport: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val colors = LocalLiuliColors.current
+    val clipboard = LocalClipboardManager.current
+    var expanded by rememberSaveable(report.createdAt) { mutableStateOf(false) }
+    var copied by rememberSaveable(report.createdAt) { mutableStateOf(false) }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(colors.success.copy(alpha = if (colors.isDark) 0.12f else 0.07f))
+            .padding(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .background(colors.success.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center
+            ) {
+                GlyphIcon(Glyph.History, colors.success, size = 14.dp)
+            }
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                BasicText(
+                    text = "调研报告",
+                    style = TextStyle(
+                        color = colors.textPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+                BasicText(
+                    text = "${report.sources.size} 个来源 · ${report.mode.label}整理 · 全部带引用",
+                    style = TextStyle(color = colors.textTertiary, fontSize = 9.sp)
+                )
+            }
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(colors.success.copy(alpha = 0.14f))
+                    .padding(horizontal = 7.dp, vertical = 3.dp)
+            ) {
+                BasicText(
+                    text = "只读",
+                    style = TextStyle(
+                        color = colors.success,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        BasicText(
+            text = report.goal,
+            style = TextStyle(color = colors.textTertiary, fontSize = 10.sp, lineHeight = 15.sp),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        if (!report.note.isNullOrBlank()) {
+            Spacer(Modifier.height(4.dp))
+            BasicText(
+                text = report.note,
+                style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
+            )
+        }
+        Spacer(Modifier.height(7.dp))
+        BasicText(
+            text = report.markdown,
+            style = TextStyle(color = colors.textSecondary, fontSize = 11.sp, lineHeight = 17.sp),
+            maxLines = if (expanded) 80 else 8,
+            overflow = TextOverflow.Ellipsis
+        )
+        BasicText(
+            text = if (expanded) "收起全文" else "展开全文",
+            style = TextStyle(
+                color = colors.accent,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium
+            ),
+            modifier = Modifier
+                .padding(top = 4.dp)
+                .clickable(
+                    role = Role.Button,
+                    onClickLabel = if (expanded) "收起全文" else "展开全文"
+                ) { expanded = !expanded }
+        )
+        Spacer(Modifier.height(7.dp))
+        report.sources.forEach { source ->
+            BasicText(
+                text = "[${source.id}] ${source.title} · ${source.host}",
+                style = TextStyle(color = colors.textTertiary, fontSize = 9.sp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(vertical = 1.dp)
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ActionButton("保存 Markdown", accent = true, onClick = onExport)
+            ActionButton(if (copied) "已复制" else "复制", accent = false) {
+                clipboard.setText(AnnotatedString(report.markdown))
+                copied = true
+            }
+            ActionButton("收起", accent = false, onClick = onDismiss)
+        }
+        Spacer(Modifier.height(5.dp))
+        BasicText(
+            text = "报告保存在本机内存，只有你选择保存位置后才会写入文件。",
+            style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
+        )
     }
 }
 

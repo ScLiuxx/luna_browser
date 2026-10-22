@@ -44,6 +44,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,7 +85,12 @@ import com.liuli.browser.web.BrowserViewModel
 import com.liuli.browser.web.DownloadRequest
 import com.liuli.browser.web.WebSnapshotBackdrop
 import com.liuli.browser.web.agent.AgentController
+import com.liuli.browser.web.agent.AgentPolicyStore
+import com.liuli.browser.web.agent.AgentReport
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class MainScreen {
     Home,
@@ -127,7 +133,8 @@ fun BrowserRoot(
     }
     val colors = LocalLiuliColors.current
     val density = LocalDensity.current
-    val agent = remember(settings) { AgentController(settings) }
+    val agentPolicies = remember(activity) { AgentPolicyStore(activity.applicationContext) }
+    val agent = remember(settings, agentPolicies) { AgentController(settings, agentPolicies) }
 
     LaunchedEffect(vm, activity) { vm.bindActivity(activity) }
     LaunchedEffect(vm, settings, library) { vm.bind(settings, library) }
@@ -186,6 +193,29 @@ fun BrowserRoot(
                 downloadHolder.value = null
                 vm.showMessage("无法打开文件保存对话框")
             }
+    }
+
+    // 调研报告只通过系统文件选择器写入用户选定的位置，Agent 不主动落盘。
+    val reportHolder = remember { mutableStateOf<AgentReport?>(null) }
+    val reportScope = rememberCoroutineScope()
+    val reportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/markdown")
+    ) { uri ->
+        val pending = reportHolder.value
+        reportHolder.value = null
+        if (uri == null || pending == null) return@rememberLauncherForActivityResult
+        reportScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                runCatching {
+                    val stream = activity.contentResolver.openOutputStream(uri)
+                        ?: throw IllegalStateException("无法写入目标文件")
+                    stream.use { output ->
+                        output.write(pending.markdown.toByteArray(Charsets.UTF_8))
+                    }
+                }.isSuccess
+            }
+            vm.showMessage(if (saved) "调研报告已保存" else "调研报告保存失败")
+        }
     }
 
     val fileChooserLauncher = rememberLauncherForActivityResult(
@@ -409,6 +439,14 @@ fun BrowserRoot(
                                                 }.onFailure { vm.showMessage("未找到可分享的应用") }
                                             }
                                         },
+                                        onExportReport = { report ->
+                                            reportHolder.value = report
+                                            runCatching { reportLauncher.launch(report.fileName) }
+                                                .onFailure {
+                                                    reportHolder.value = null
+                                                    vm.showMessage("无法打开文件保存对话框")
+                                                }
+                                        },
                                         onNewHomeTab = {
                                             vm.openHomeTab()
                                             showSharedSnapshot = false
@@ -458,6 +496,7 @@ fun BrowserRoot(
                                     settings = settings,
                                     vm = vm,
                                     agent = agent,
+                                    agentPolicies = agentPolicies,
                                     backdrop = auroraBackdrop,
                                     isTablet = isTablet,
                                     onClose = {
@@ -467,6 +506,8 @@ fun BrowserRoot(
                                     onRevokePrivacy = {
                                         vm.resetAll()
                                         settings.revokePrivacyAndReset()
+                                        agent.clear()
+                                        agentPolicies.clear()
                                     }
                                 )
                             }
