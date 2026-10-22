@@ -73,6 +73,9 @@ class SettingsStore(context: Context) {
     var privacyShield by mutableStateOf(prefs.getBoolean(KEY_SHIELD, true))
         private set
 
+    var fingerprintProtection by mutableStateOf(prefs.getBoolean(KEY_FINGERPRINT, true))
+        private set
+
     var clearOnExit by mutableStateOf(prefs.getBoolean(KEY_CLEAR_EXIT, true))
         private set
 
@@ -135,6 +138,7 @@ class SettingsStore(context: Context) {
         desktopModeDefault = false
         blockThirdPartyCookies = true
         privacyShield = true
+        fingerprintProtection = true
         clearOnExit = true
         autoHideToolbar = true
         maxTabs = 8
@@ -190,6 +194,11 @@ class SettingsStore(context: Context) {
     fun updatePrivacyShield(value: Boolean) {
         privacyShield = value
         prefs.edit().putBoolean(KEY_SHIELD, value).apply()
+    }
+
+    fun updateFingerprintProtection(value: Boolean) {
+        fingerprintProtection = value
+        prefs.edit().putBoolean(KEY_FINGERPRINT, value).apply()
     }
 
     fun updateClearOnExit(value: Boolean) {
@@ -248,6 +257,7 @@ class SettingsStore(context: Context) {
         private const val KEY_SEARCH = "search_engine"
         private const val KEY_MAX_TABS = "max_tabs"
         private const val KEY_SHIELD = "privacy_shield"
+        private const val KEY_FINGERPRINT = "fingerprint_protection"
         private const val KEY_CLEAR_EXIT = "clear_on_exit"
         private const val KEY_AUTO_HIDE = "auto_hide_toolbar"
         private const val KEY_AGENT_ENABLED = "agent_enabled"
