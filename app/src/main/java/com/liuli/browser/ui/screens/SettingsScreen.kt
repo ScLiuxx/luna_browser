@@ -423,6 +423,17 @@ fun SettingsScreen(
                 )
                 Divider()
                 ToggleRow(
+                    title = "防浏览器指纹",
+                    subtitle = "统一 Canvas/WebGL/硬件信息、阻止 WebRTC 与媒体指纹，防止跨站关联",
+                    checked = settings.fingerprintProtection,
+                    onCheckedChange = {
+                        settings.updateFingerprintProtection(it)
+                        vm.applyPrivacySettings()
+                    },
+                    backdrop = backdrop
+                )
+                Divider()
+                ToggleRow(
                     title = "退出即清除数据",
                     subtitle = "关闭应用时清除 Cookie、缓存、历史与标签会话",
                     checked = settings.clearOnExit,

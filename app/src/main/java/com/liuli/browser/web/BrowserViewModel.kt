@@ -835,6 +835,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             setSupportMultipleWindows(true)
             allowFileAccess = false
             allowContentAccess = false
+            // Prevent the page from leaking the full URL (with tracking params)
+            // or the current site in the Referer header of cross-origin requests.
+            referrerPolicy = ReferrerPolicy.NO_REFERRER
+            @Suppress("DEPRECATION")
+            setPluginState(WebSettings.PluginState.OFF)
             @Suppress("DEPRECATION")
             allowFileAccessFromFileURLs = false
             @Suppress("DEPRECATION")
@@ -900,6 +905,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
         override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
             val tab = tabFor(view) ?: return
+            // Inject the anti-fingerprint script as early as possible. It is
+            // idempotent and only takes effect on the current document.
+            if (fingerprintProtection) {
+                PrivacyGuard.install(view)
+            }
             if (url != null && url != tab.url) tab.blockedTrackers = 0
             tab.url = url ?: tab.url
             tab.isLoading = true

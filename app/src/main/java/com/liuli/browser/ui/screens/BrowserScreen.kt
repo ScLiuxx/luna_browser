@@ -426,6 +426,7 @@ fun BrowserScreen(
             PrivacyShieldPanel(
                 blocked = tab.blockedTrackers,
                 blockThirdParty = settings.blockThirdPartyCookies,
+                fingerprintProtection = settings.fingerprintProtection,
                 clearOnExit = settings.clearOnExit,
                 onClose = { shieldOpen = false }
             )
@@ -484,6 +485,7 @@ fun BrowserScreen(
 private fun PrivacyShieldPanel(
     blocked: Int,
     blockThirdParty: Boolean,
+    fingerprintProtection: Boolean,
     clearOnExit: Boolean,
     onClose: () -> Unit
 ) {
@@ -560,6 +562,11 @@ private fun PrivacyShieldPanel(
                     if (clearOnExit) colors.success else colors.textTertiary
                 )
                 ShieldPoint("通用 User-Agent，减少设备指纹", colors.success)
+                ShieldPoint(
+                    if (fingerprintProtection) "防浏览器指纹：统一 Canvas/WebGL/硬件信息、阻止 WebRTC"
+                    else "防浏览器指纹：已关闭",
+                    if (fingerprintProtection) colors.success else colors.textTertiary
+                )
                 ShieldPoint("SSL 错误阻断 · 文件与本地存储访问禁用", colors.success)
                 Spacer(Modifier.height(10.dp))
                 BasicText(
