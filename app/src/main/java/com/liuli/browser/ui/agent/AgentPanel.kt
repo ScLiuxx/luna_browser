@@ -346,6 +346,12 @@ fun AgentPanel(
                     QuickChip("总结此页") { submit("总结此页") }
                     QuickChip("页面信息") { submit("页面信息") }
                     QuickChip("页内查找") { prepareFind() }
+                    QuickChip("页面结构") { submit("页面结构") }
+                    QuickChip("高亮要点") { submit("高亮要点") }
+                    QuickChip("取消高亮") { submit("取消高亮") }
+                    QuickChip("翻译选中") { submit("翻译选中") }
+                    QuickChip("翻译此页") { submit("翻译此页") }
+                    QuickChip("对比标签页") { submit("对比标签页") }
                     QuickChip("监控此页") { submit("监控此页") }
                     QuickChip("检查关注") { submit("检查关注") }
                     QuickChip("页面审计") { submit("审计此页") }

@@ -69,6 +69,36 @@ data class AgentPageAudit(
     val horizontalOverflow: Boolean
 )
 
+/** 只读页面结构：标题、表格与链接，均在本机解析。 */
+data class AgentHeading(
+    val level: Int,
+    val text: String
+)
+
+data class AgentTable(
+    val caption: String,
+    val rows: List<List<String>>,
+    val truncated: Boolean
+)
+
+data class AgentLink(
+    val text: String,
+    val url: String
+)
+
+data class AgentPageStructure(
+    val headings: List<AgentHeading>,
+    val tables: List<AgentTable>,
+    val links: List<AgentLink>,
+    val supported: Boolean
+)
+
+/** 页面高亮结果；CSS Highlight 不修改正文节点，只叠加临时视觉标记与一个可移除的构造样式表。 */
+data class AgentHighlightResult(
+    val count: Int,
+    val supported: Boolean
+)
+
 /**
  * Read-only page snapshot plus a confirmation-gated action channel.
  *
@@ -80,7 +110,7 @@ object AgentPageBridge {
 
     const val MAX_TEXT_CHARS = 12_000
 
-    private const val SCRIPT_VERSION = 5
+    private const val SCRIPT_VERSION = 7
 
     private const val READY_CHECK =
         "typeof window.__liuliAgent === 'object' && window.__liuliAgent.version === $SCRIPT_VERSION"
@@ -336,6 +366,171 @@ object AgentPageBridge {
               } catch (error) {
                 return 'null';
               }
+            },
+            structure: function () {
+              try {
+                var headings = [];
+                var hs = document.querySelectorAll('h1,h2,h3,h4,h5,h6');
+                for (var i = 0; i < hs.length && headings.length < 60; i++) {
+                  var h = hs[i];
+                  if (!visible(h)) { continue; }
+                  var headingText = clean(h.innerText || h.textContent);
+                  if (!headingText) { continue; }
+                  headings.push({
+                    level: parseInt((h.tagName || 'h6').slice(1), 10) || 6,
+                    text: headingText.slice(0, 120)
+                  });
+                }
+
+                var tables = [];
+                var tableNodes = document.querySelectorAll('table');
+                for (var j = 0; j < tableNodes.length && tables.length < 6; j++) {
+                  var table = tableNodes[j];
+                  if (!visible(table)) { continue; }
+                  var caption = clean(table.getAttribute('aria-label')) ||
+                    clean(table.caption ? table.caption.innerText : '');
+                  var rowNodes = table.querySelectorAll('tr');
+                  var rows = [];
+                  var rowLimit = Math.min(rowNodes.length, 12);
+                  for (var r = 0; r < rowLimit; r++) {
+                    var cells = rowNodes[r].querySelectorAll('th,td');
+                    var row = [];
+                    for (var c = 0; c < cells.length && c < 8; c++) {
+                      row.push(clean(cells[c].innerText || cells[c].textContent).slice(0, 160));
+                    }
+                    if (row.length) { rows.push(row); }
+                  }
+                  if (!rows.length) { continue; }
+                  tables.push({
+                    caption: caption.slice(0, 120),
+                    rows: rows,
+                    truncated: rowNodes.length > rowLimit
+                  });
+                }
+
+                var links = [];
+                var seen = {};
+                var linkNodes = document.querySelectorAll('a[href]');
+                for (var k = 0; k < linkNodes.length && links.length < 80; k++) {
+                  var a = linkNodes[k];
+                  if (!visible(a)) { continue; }
+                  var href = '';
+                  try {
+                    var parsed = new URL(a.getAttribute('href'), location.href);
+                    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') { continue; }
+                    // 去掉查询参数与锚点，避免把跟踪参数或会话令牌带进本地结果。
+                    href = parsed.origin + parsed.pathname;
+                  } catch (error) { continue; }
+                  if (!href || seen[href]) { continue; }
+                  seen[href] = true;
+                  var linkText = clean(a.getAttribute('aria-label')) ||
+                    clean(a.getAttribute('title')) ||
+                    clean(a.innerText || a.textContent);
+                  links.push({
+                    text: (linkText || href).slice(0, 120),
+                    url: href.slice(0, 1024)
+                  });
+                }
+
+                return JSON.stringify({
+                  headings: headings,
+                  tables: tables,
+                  links: links,
+                  supported: true
+                });
+              } catch (error) {
+                return JSON.stringify({
+                  headings: [], tables: [], links: [], supported: false
+                });
+              }
+            },
+            highlight: function (phrases) {
+              try {
+                if (!window.CSS || !CSS.highlights || typeof Highlight !== 'function' ||
+                    typeof CSSStyleSheet !== 'function') {
+                  return JSON.stringify({ count: 0, supported: false });
+                }
+                CSS.highlights.delete('liuli-agent');
+                var oldStyle = document.getElementById('liuli-agent-highlight-style');
+                if (oldStyle) { oldStyle.remove(); }
+                // 构造样式表不进入 DOM 树，也不受页面 style-src CSP 限制。
+                var oldSheet = window.__liuliAgentHighlightSheet;
+                if (oldSheet) {
+                  document.adoptedStyleSheets = document.adoptedStyleSheets.filter(
+                    function (item) { return item !== oldSheet; }
+                  );
+                }
+                var sheet = new CSSStyleSheet();
+                sheet.replaceSync(
+                  '::highlight(liuli-agent){background-color:rgba(255,214,10,0.55);color:inherit;}'
+                );
+                document.adoptedStyleSheets = document.adoptedStyleSheets.concat(sheet);
+                window.__liuliAgentHighlightSheet = sheet;
+
+                var ranges = [];
+                var texts = [];
+                var walker = document.createTreeWalker(
+                  document.body || document.documentElement,
+                  NodeFilter.SHOW_TEXT,
+                  null
+                );
+                while (walker.nextNode()) { texts.push(walker.currentNode); }
+                var list = Array.isArray(phrases) ? phrases : [];
+                for (var p = 0; p < list.length && ranges.length < 20; p++) {
+                  var phrase = clean(list[p]).slice(0, 160);
+                  // 中文词组两个字即可，英文至少四个字符，避免过于宽泛的单字匹配。
+                  var minLength = /[\u4e00-\u9fa5]/.test(phrase) ? 2 : 4;
+                  if (phrase.length < minLength) { continue; }
+                  var probe = phrase.slice(0, Math.min(40, phrase.length));
+                  var perPhrase = 0;
+                  for (var t = 0; t < texts.length && ranges.length < 20 && perPhrase < 4; t++) {
+                    var node = texts[t];
+                    var parent = node.parentElement;
+                    if (!parent) { continue; }
+                    var tag = (parent.tagName || '').toLowerCase();
+                    if (tag === 'script' || tag === 'style' || tag === 'noscript' ||
+                        tag === 'textarea' || tag === 'input' || tag === 'select') { continue; }
+                    var raw = node.nodeValue || '';
+                    var index = raw.indexOf(phrase);
+                    var length = phrase.length;
+                    if (index < 0) {
+                      index = raw.indexOf(probe);
+                      length = probe.length;
+                    }
+                    if (index < 0) { continue; }
+                    var range = document.createRange();
+                    range.setStart(node, index);
+                    range.setEnd(node, index + length);
+                    ranges.push(range);
+                    perPhrase++;
+                  }
+                }
+                if (ranges.length) {
+                  CSS.highlights.set('liuli-agent', new Highlight(...ranges));
+                }
+                return JSON.stringify({ count: ranges.length, supported: true });
+              } catch (error) {
+                return JSON.stringify({ count: 0, supported: false });
+              }
+            },
+            clearHighlight: function () {
+              try {
+                if (window.CSS && CSS.highlights) {
+                  CSS.highlights.delete('liuli-agent');
+                }
+                var sheet = window.__liuliAgentHighlightSheet;
+                if (sheet && 'adoptedStyleSheets' in document) {
+                  document.adoptedStyleSheets = document.adoptedStyleSheets.filter(
+                    function (item) { return item !== sheet; }
+                  );
+                }
+                window.__liuliAgentHighlightSheet = null;
+                var style = document.getElementById('liuli-agent-highlight-style');
+                if (style) { style.remove(); }
+                return JSON.stringify({ ok: true });
+              } catch (error) {
+                return JSON.stringify({ ok: false });
+              }
             }
           };
           return 'ready';
@@ -372,6 +567,112 @@ object AgentPageBridge {
                 if (continuation.isActive) continuation.resume(result)
             }
         }
+
+    /** 只读页面结构：标题层级、表格与去掉查询参数的链接。 */
+    suspend fun structure(webView: WebView): AgentPageStructure? =
+        suspendCancellableCoroutine { continuation ->
+            requestStructure(webView) { result ->
+                if (continuation.isActive) continuation.resume(result)
+            }
+        }
+
+    /** 用 CSS Highlight 在页面上叠加临时高亮，不修改正文与 DOM 树，仅临时注册可移除样式表；禁止站点不启用。 */
+    suspend fun highlight(webView: WebView, phrases: List<String>): AgentHighlightResult? =
+        suspendCancellableCoroutine { continuation ->
+            requestHighlight(webView, phrases) { result ->
+                if (continuation.isActive) continuation.resume(result)
+            }
+        }
+
+    suspend fun clearHighlight(webView: WebView): Boolean =
+        suspendCancellableCoroutine { continuation ->
+            val script = """
+                (function () {
+                  try {
+                    if (!window.__liuliAgent || typeof window.__liuliAgent.clearHighlight !== 'function') {
+                      return JSON.stringify({ ok: false });
+                    }
+                    return window.__liuliAgent.clearHighlight();
+                  } catch (error) {
+                    return JSON.stringify({ ok: false });
+                  }
+                })()
+            """.trimIndent()
+            webView.evaluateJavascript(script) { raw ->
+                val json = parseJson(raw)
+                if (continuation.isActive) continuation.resume(json?.optBoolean("ok") == true)
+            }
+        }
+
+    private fun requestStructure(webView: WebView, onResult: (AgentPageStructure?) -> Unit) {
+        webView.evaluateJavascript(READY_CHECK) { value ->
+            if (value == "true") {
+                evaluateStructure(webView, onResult)
+            } else {
+                webView.evaluateJavascript(INSTALL_SCRIPT) {
+                    evaluateStructure(webView, onResult)
+                }
+            }
+        }
+    }
+
+    private fun evaluateStructure(webView: WebView, onResult: (AgentPageStructure?) -> Unit) {
+        val script = """
+            (function () {
+              try {
+                if (!window.__liuliAgent || typeof window.__liuliAgent.structure !== 'function') {
+                  return 'null';
+                }
+                return window.__liuliAgent.structure();
+              } catch (error) {
+                return 'null';
+              }
+            })()
+        """.trimIndent()
+        webView.evaluateJavascript(script) { raw ->
+            onResult(parseStructure(raw))
+        }
+    }
+
+    private fun requestHighlight(
+        webView: WebView,
+        phrases: List<String>,
+        onResult: (AgentHighlightResult?) -> Unit
+    ) {
+        val array = JSONArray()
+        phrases.forEach { array.put(it) }
+        webView.evaluateJavascript(READY_CHECK) { value ->
+            if (value == "true") {
+                evaluateHighlight(webView, array, onResult)
+            } else {
+                webView.evaluateJavascript(INSTALL_SCRIPT) {
+                    evaluateHighlight(webView, array, onResult)
+                }
+            }
+        }
+    }
+
+    private fun evaluateHighlight(
+        webView: WebView,
+        phrases: JSONArray,
+        onResult: (AgentHighlightResult?) -> Unit
+    ) {
+        val script = """
+            (function () {
+              try {
+                if (!window.__liuliAgent || typeof window.__liuliAgent.highlight !== 'function') {
+                  return 'null';
+                }
+                return window.__liuliAgent.highlight(${phrases});
+              } catch (error) {
+                return 'null';
+              }
+            })()
+        """.trimIndent()
+        webView.evaluateJavascript(script) { raw ->
+            onResult(parseHighlight(raw))
+        }
+    }
 
     private fun requestAudit(webView: WebView, onResult: (AgentPageAudit?) -> Unit) {
         webView.evaluateJavascript(READY_CHECK) { value ->
@@ -492,6 +793,69 @@ object AgentPageBridge {
             domReadyMs = json.optInt("domMs", -1),
             loadMs = json.optInt("loadMs", -1),
             horizontalOverflow = json.optBoolean("overflow")
+        )
+    }
+
+    private fun parseStructure(raw: String?): AgentPageStructure? {
+        val json = parseJson(raw) ?: return null
+        val headings = ArrayList<AgentHeading>()
+        json.optJSONArray("headings")?.let { array ->
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val text = item.optString("text").trim()
+                if (text.isEmpty()) continue
+                headings += AgentHeading(
+                    level = item.optInt("level", 6).coerceIn(1, 6),
+                    text = text
+                )
+            }
+        }
+        val tables = ArrayList<AgentTable>()
+        json.optJSONArray("tables")?.let { array ->
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val rows = ArrayList<List<String>>()
+                item.optJSONArray("rows")?.let { rowArray ->
+                    for (rowIndex in 0 until rowArray.length()) {
+                        val row = rowArray.optJSONArray(rowIndex) ?: continue
+                        val cells = ArrayList<String>()
+                        for (cellIndex in 0 until row.length()) {
+                            cells += row.optString(cellIndex).trim()
+                        }
+                        if (cells.isNotEmpty()) rows += cells
+                    }
+                }
+                if (rows.isEmpty()) continue
+                tables += AgentTable(
+                    caption = item.optString("caption").trim(),
+                    rows = rows,
+                    truncated = item.optBoolean("truncated")
+                )
+            }
+        }
+        val links = ArrayList<AgentLink>()
+        json.optJSONArray("links")?.let { array ->
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val url = item.optString("url").trim()
+                if (!url.startsWith("http://") && !url.startsWith("https://")) continue
+                val text = item.optString("text").trim().ifBlank { url }
+                links += AgentLink(text = text, url = url)
+            }
+        }
+        return AgentPageStructure(
+            headings = headings,
+            tables = tables,
+            links = links,
+            supported = json.optBoolean("supported", true)
+        )
+    }
+
+    private fun parseHighlight(raw: String?): AgentHighlightResult? {
+        val json = parseJson(raw) ?: return null
+        return AgentHighlightResult(
+            count = json.optInt("count").coerceAtLeast(0),
+            supported = json.optBoolean("supported")
         )
     }
 
