@@ -487,6 +487,7 @@ private fun PrivacyShieldPanel(
     blocked: Int,
     blockThirdParty: Boolean,
     fingerprintProtection: Boolean,
+    isPrivate: Boolean,
     clearOnExit: Boolean,
     onClose: () -> Unit
 ) {
@@ -569,9 +570,9 @@ private fun PrivacyShieldPanel(
                     if (fingerprintProtection) colors.success else colors.textTertiary
                 )
                 ShieldPoint(
-                    if (tab.isPrivate) "隐私标签：已隔离本地存储，不写入任何持久数据"
+                    if (isPrivate) "隐私标签：已隔离本地存储，不写入任何持久数据"
                     else "本地存储仅本机保存，退出可清除",
-                    if (tab.isPrivate) colors.accentSecondary else colors.textTertiary
+                    if (isPrivate) colors.accentSecondary else colors.textTertiary
                 )
                 ShieldPoint("SSL 错误阻断 · 文件与本地存储访问禁用", colors.success)
                 Spacer(Modifier.height(10.dp))
