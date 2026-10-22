@@ -563,9 +563,14 @@ private fun PrivacyShieldPanel(
                 )
                 ShieldPoint("通用 User-Agent，减少设备指纹", colors.success)
                 ShieldPoint(
-                    if (fingerprintProtection) "防浏览器指纹：统一 Canvas/WebGL/硬件信息、阻止 WebRTC"
+                    if (fingerprintProtection) "防浏览器指纹：统一 Canvas/WebGL/硬件信息、阻止 WebRTC 与 Service Worker"
                     else "防浏览器指纹：已关闭",
                     if (fingerprintProtection) colors.success else colors.textTertiary
+                )
+                ShieldPoint(
+                    if (tab.isPrivate) "隐私标签：已隔离本地存储，不写入任何持久数据"
+                    else "本地存储仅本机保存，退出可清除",
+                    if (tab.isPrivate) colors.accentSecondary else colors.textTertiary
                 )
                 ShieldPoint("SSL 错误阻断 · 文件与本地存储访问禁用", colors.success)
                 Spacer(Modifier.height(10.dp))

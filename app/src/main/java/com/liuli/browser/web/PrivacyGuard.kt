@@ -4,12 +4,13 @@ import android.webkit.WebView
 
 /**
  * 反浏览器指纹保护。在页面脚本执行前注入，统一 Canvas / WebGL /
- * navigator / 硬件信息等指纹维度，并阻止 WebRTC 与 MediaStream，
- * 防止真实 IP 与媒体设备特征泄露。所有注入幂等且容错。
+ * navigator / 硬件 / 媒体 / 后台服务等指纹维度，并阻止 WebRTC、
+ * Service Worker、推送与跨标签广播等追踪向量。所有注入幂等且容错。
  */
 object PrivacyGuard {
 
     const val INSTALL_FLAG = "__liuliFingerprintGuard"
+    const val PRIVATE_FLAG = "__liuliPrivateGuard"
 
     private const val SCRIPT = """
         (function () {
@@ -72,25 +73,154 @@ object PrivacyGuard {
               get: function () { return 8; }, configurable: true
             });
           } catch (e) {}
+          try {
+            Object.defineProperty(Navigator.prototype, 'maxTouchPoints', {
+              get: function () { return 0; }, configurable: true
+            });
+          } catch (e) {}
 
-          // --- WebRTC：阻止，防止 STUN/TURN 泄露真实 IP ---
+          // --- 媒体指纹与敏感 API：WebRTC / MediaStream / 剪贴板 / 语音 ---
           try {
             window.RTCPeerConnection = undefined;
             window.webkitRTCPeerConnection = undefined;
             window.RTCSessionDescription = undefined;
             window.RTCIceCandidate = undefined;
-          } catch (e) {}
-
-          // --- MediaStream：阻止 getUserMedia 之外的媒体指纹采集 ---
-          try {
             window.MediaStream = undefined;
             window.webkitMediaStream = undefined;
-            window.navigator.mediaDevices = undefined;
+            navigator.mediaDevices = undefined;
+          } catch (e) {}
+          try {
+            Object.defineProperty(Navigator.prototype, 'clipboard', {
+              get: function () { return undefined; }, configurable: true
+            });
+          } catch (e) {}
+          try {
+            window.speechSynthesis = undefined;
+          } catch (e) {}
+
+          // --- 后台服务与跨标签追踪：Service Worker / Push / Sync / 广播 ---
+          try {
+            Object.defineProperty(Navigator.prototype, 'serviceWorker', {
+              get: function () { return undefined; }, configurable: true
+            });
+          } catch (e) {}
+          try {
+            window.PushManager = undefined;
+            window.PeriodicSyncManager = undefined;
+            window.SyncManager = undefined;
+            window.BroadcastChannel = undefined;
+            window.caches = undefined;
+            window.SharedWorker = undefined;
+          } catch (e) {}
+
+          // --- 电池 / 通知 / 媒体会话 / 凭据 / 锁 / 屏幕等指纹 ---
+          try {
+            navigator.getBattery = undefined;
+          } catch (e) {}
+          try {
+            window.Notification = undefined;
+            window.ServiceWorkerNotifications = undefined;
+          } catch (e) {}
+          try {
+            Object.defineProperty(Navigator.prototype, 'mediaSession', {
+              get: function () { return null; }, configurable: true
+            });
+          } catch (e) {}
+          try {
+            Object.defineProperty(Navigator.prototype, 'credentials', {
+              get: function () { return undefined; }, configurable: true
+            });
+          } catch (e) {}
+          try {
+            Object.defineProperty(Navigator.prototype, 'locks', {
+              get: function () { return undefined; }, configurable: true
+            });
+          } catch (e) {}
+          try {
+            Object.defineProperty(Screen.prototype, 'colorDepth', {
+              get: function () { return 24; }, configurable: true
+            });
+            Object.defineProperty(Screen.prototype, 'pixelDepth', {
+              get: function () { return 24; }, configurable: true
+            });
+          } catch (e) {}
+          try {
+            window.history.length = 1;
+          } catch (e) {}
+          try {
+            window.PresentationRequest = undefined;
+            window.Presentation = undefined;
+            window.Serial = undefined;
+            window.USB = undefined;
+            window.HID = undefined;
+            window.Gamepad = undefined;
+            window.Bluetooth = undefined;
+          } catch (e) {}
+          try {
+            Object.defineProperty(Document.prototype, 'referrer', {
+              get: function () { return ''; }, configurable: true
+            });
+          } catch (e) {}
+
+          // --- 跨标签页 window.name 泄露 ---
+          try {
+            Object.defineProperty(window, 'name', {
+              get: function () { return ''; },
+              set: function () { },
+              configurable: true
+            });
+          } catch (e) {}
+        })()
+    """.trimIndent()
+
+    /**
+     * 隐私标签的存储隔离：阻止 localStorage / sessionStorage / IndexedDB /
+     * Cache / Service Worker 等任何持久化，避免隐私浏览与普通浏览交叉污染。
+     */
+    private const val PRIVATE_SCRIPT = """
+        (function () {
+          if (window.__liuliPrivateGuard) { return; }
+          window.__liuliPrivateGuard = true;
+
+          var deny = function () { throw new SecurityError('Storage is disabled in private tabs.'); };
+
+          try {
+            Object.defineProperty(window, 'localStorage', {
+              get: deny, configurable: true
+            });
+          } catch (e) {}
+          try {
+            Object.defineProperty(window, 'sessionStorage', {
+              get: deny, configurable: true
+            });
+          } catch (e) {}
+          try {
+            Object.defineProperty(window, 'indexedDB', {
+              get: function () { return undefined; }, configurable: true
+            });
+          } catch (e) {}
+          try {
+            Object.defineProperty(window, 'caches', {
+              get: function () { return undefined; }, configurable: true
+            });
+          } catch (e) {}
+          try {
+            Object.defineProperty(Navigator.prototype, 'serviceWorker', {
+              get: function () { return undefined; }, configurable: true
+            });
+          } catch (e) {}
+          try {
+            window.openDatabase = undefined;
+            window.webkitRequestFileSystem = undefined;
           } catch (e) {}
         })()
     """.trimIndent()
 
     fun install(webView: WebView) {
         webView.evaluateJavascript(SCRIPT, null)
+    }
+
+    fun installPrivate(webView: WebView) {
+        webView.evaluateJavascript(PRIVATE_SCRIPT, null)
     }
 }

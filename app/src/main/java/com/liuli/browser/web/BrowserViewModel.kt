@@ -910,6 +910,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             if (fingerprintProtection) {
                 PrivacyGuard.install(view)
             }
+            // Private tabs additionally get storage isolation so their data
+            // never mixes with regular browsing.
+            if (tab.isPrivate) {
+                PrivacyGuard.installPrivate(view)
+            }
             if (url != null && url != tab.url) tab.blockedTrackers = 0
             tab.url = url ?: tab.url
             tab.isLoading = true
