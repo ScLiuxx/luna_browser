@@ -216,6 +216,66 @@ object PrivacyGuard {
               return origOpen.apply(this, arguments);
             };
           } catch (e) {}
+
+          // --- 字体指纹：阻止 document.fonts 枚举可用字体 ---
+          try {
+            Object.defineProperty(Document.prototype, 'fonts', {
+              get: function () { return undefined; }, configurable: true
+            });
+          } catch (e) {}
+
+          // --- 网络信息指纹：固定 NetworkInformation 属性 ---
+          try {
+            Object.defineProperty(Navigator.prototype, 'connection', {
+              get: function () {
+                return { effectiveType: '4g', downlink: 10, rtt: 50, saveData: false };
+              }, configurable: true
+            });
+          } catch (e) {}
+
+          // --- 音频指纹：统一 AudioContext 参数 ---
+          try {
+            var AC = window.AudioContext || window.webkitAudioContext;
+            if (AC) {
+              var sampleRate = AC.prototype.sampleRate;
+              Object.defineProperty(AC.prototype, 'sampleRate', {
+                get: function () { return 44100; }, configurable: true
+              });
+            }
+          } catch (e) {}
+
+          // --- 存储指纹：阻止 storage.estimate 暴露容量信息 ---
+          try {
+            Object.defineProperty(Navigator.prototype, 'storage', {
+              get: function () {
+                return { estimate: function () { return Promise.resolve({ usage: 0, quota: 0 }); } };
+              }, configurable: true
+            });
+          } catch (e) {}
+
+          // --- 其他 navigator 指纹维度 ---
+          try {
+            Object.defineProperty(Navigator.prototype, 'pdfViewerEnabled', {
+              get: function () { return false; }, configurable: true
+            });
+          } catch (e) {}
+          try {
+            Object.defineProperty(Navigator.prototype, 'userActivation', {
+              get: function () { return { isActive: false, hasBeenActive: false }; }, configurable: true
+            });
+          } catch (e) {}
+          try {
+            Object.defineProperty(Navigator.prototype, 'scheduling', {
+              get: function () { return { isInputPending: function () { return false; } }; }, configurable: true
+            });
+          } catch (e) {}
+
+          // --- iframe 检测：阻止 frameElement 暴露嵌入关系 ---
+          try {
+            Object.defineProperty(Window.prototype, 'frameElement', {
+              get: function () { return null; }, configurable: true
+            });
+          } catch (e) {}
         })()
     """.trimIndent()
 
