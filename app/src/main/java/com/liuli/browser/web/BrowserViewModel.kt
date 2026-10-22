@@ -94,6 +94,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     private val loadedTabs = HashSet<Long>()
     private val snapshotRunnables = HashMap<Long, Runnable>()
     private val httpUpgradeOrigins = HashMap<Long, String>()
+    private val privateVisitedHosts = HashMap<Long, LinkedHashSet<String>>()
     private var container: FrameLayout? = null
     private var nextId = 1L
 
@@ -178,6 +179,20 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     fun bindActivity(activity: ComponentActivity) {
         currentActivity = activity
+        applySecureScreen()
+    }
+
+    /** 禁止截屏与最近任务预览，避免页面内容出现在系统缩略图或录屏中。 */
+    private fun applySecureScreen() {
+        val activity = currentActivity ?: return
+        if (settings?.secureScreen == true) {
+            activity.window.setFlags(
+                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE
+            )
+        } else {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
     }
 
     fun attachContainer(frameLayout: FrameLayout) {
@@ -241,7 +256,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             }
         }
         if (isPrivate) {
-            message = "隐私标签不记录历史，网页本地存储与脚本 Cookie 已禁用"
+            message = "隐私标签不记录历史，本地存储与脚本 Cookie 已禁用，关闭时清除该站点 Cookie"
         }
         syncWebViews()
         persistSession()
@@ -292,6 +307,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         if (index < 0) return
         if (fullscreenTabId == id) exitFullscreen()
         val tab = tabs[index]
+        // 隐私标签关闭即清理它访问过的站点 Cookie，避免与普通浏览交叉。
+        if (tab.isPrivate) clearPrivateCookies(tab.id)
         destroyWebView(id)
         tabs.removeAt(index)
         if (tabs.isEmpty()) {
@@ -464,6 +481,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     fun applyPrivacySettings() {
         privacyShieldActive = settings?.privacyShield == true
         fingerprintProtection = settings?.fingerprintProtection == true
+        applySecureScreen()
         webViews.forEach { (id, view) ->
             val tab = tabs.firstOrNull { it.id == id } ?: return@forEach
             view.settings.userAgentString = effectiveUserAgent(tab)
@@ -799,6 +817,37 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /** 记录隐私标签访问过的主机，关闭标签时按站点清理 Cookie。 */
+    private fun rememberPrivateHost(id: Long, url: String) {
+        val host = runCatching { Uri.parse(url).host }.getOrNull()
+            ?.lowercase()?.takeIf { it.isNotBlank() } ?: return
+        privateVisitedHosts.getOrPut(id) { LinkedHashSet() }.add(host)
+    }
+
+    /**
+     * CookieManager 没有按域名删除的 API，这里读取该站点的 Cookie 头，
+     * 再用 Max-Age=0 逐条过期。HttpOnly 或非根路径 Cookie 可能残留，属尽力而为。
+     */
+    private fun clearPrivateCookies(id: Long) {
+        val hosts = privateVisitedHosts.remove(id) ?: return
+        if (hosts.isEmpty()) return
+        val cookies = CookieManager.getInstance()
+        hosts.forEach { host ->
+            for (base in listOf("https://$host/", "http://$host/")) {
+                val header = runCatching { cookies.getCookie(base) }.getOrNull() ?: continue
+                header.split(';').forEach { pair ->
+                    val name = pair.substringBefore('=').trim()
+                    if (name.isNotEmpty()) {
+                        runCatching {
+                            cookies.setCookie(base, "$name=; Max-Age=0; Path=/")
+                        }
+                    }
+                }
+            }
+        }
+        runCatching { cookies.flush() }
+    }
+
     private fun ensureWebView(tab: BrowserTab?): WebView? {
         if (tab == null || !bound) return null
         webViews[tab.id]?.let { return it }
@@ -863,7 +912,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, !blockThirdParty)
         with(webView.settings) {
             javaScriptEnabled = true
-            domStorageEnabled = true
+            // 隐私标签在引擎层直接关闭 WebStorage，杜绝脚本抢先写入的可能。
+            domStorageEnabled = !tab.isPrivate
             @Suppress("DEPRECATION")
             databaseEnabled = false
             loadsImagesAutomatically = true
@@ -947,6 +997,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
         override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
             val tab = tabFor(view) ?: return
+            if (tab.isPrivate && !url.isNullOrBlank()) rememberPrivateHost(tab.id, url)
             // Inject the anti-fingerprint script as early as possible. It is
             // idempotent and only takes effect on the current document.
             if (fingerprintProtection) {
@@ -1028,6 +1079,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
         override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
             val tab = tabFor(view) ?: return
+            if (tab.isPrivate && !url.isNullOrBlank()) rememberPrivateHost(tab.id, url)
             if (!url.isNullOrBlank()) {
                 tab.url = url
                 tab.isSecure = url.startsWith("https://")
@@ -1348,6 +1400,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         if (shouldClear) {
             clearPrivateData()
         } else {
+            // 即使未开启“退出即清除”，隐私标签的站点 Cookie 也不保留。
+            tabs.filter { it.isPrivate }.forEach { clearPrivateCookies(it.id) }
             persistSession()
         }
         webViews.keys.toList().forEach { destroyWebView(it) }

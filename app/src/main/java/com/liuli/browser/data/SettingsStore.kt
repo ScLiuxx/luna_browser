@@ -79,6 +79,9 @@ class SettingsStore(context: Context) {
     var clearOnExit by mutableStateOf(prefs.getBoolean(KEY_CLEAR_EXIT, true))
         private set
 
+    var secureScreen by mutableStateOf(prefs.getBoolean(KEY_SECURE_SCREEN, true))
+        private set
+
     var autoHideToolbar by mutableStateOf(prefs.getBoolean(KEY_AUTO_HIDE, true))
         private set
 
@@ -140,6 +143,7 @@ class SettingsStore(context: Context) {
         privacyShield = true
         fingerprintProtection = true
         clearOnExit = true
+        secureScreen = true
         autoHideToolbar = true
         maxTabs = 8
         searchEngine = SearchEngine.Baidu
@@ -206,6 +210,11 @@ class SettingsStore(context: Context) {
         prefs.edit().putBoolean(KEY_CLEAR_EXIT, value).apply()
     }
 
+    fun updateSecureScreen(value: Boolean) {
+        secureScreen = value
+        prefs.edit().putBoolean(KEY_SECURE_SCREEN, value).apply()
+    }
+
     fun updateAutoHideToolbar(value: Boolean) {
         autoHideToolbar = value
         prefs.edit().putBoolean(KEY_AUTO_HIDE, value).apply()
@@ -259,6 +268,7 @@ class SettingsStore(context: Context) {
         private const val KEY_SHIELD = "privacy_shield"
         private const val KEY_FINGERPRINT = "fingerprint_protection"
         private const val KEY_CLEAR_EXIT = "clear_on_exit"
+        private const val KEY_SECURE_SCREEN = "secure_screen"
         private const val KEY_AUTO_HIDE = "auto_hide_toolbar"
         private const val KEY_AGENT_ENABLED = "agent_enabled"
         private const val KEY_AGENT_ACTIONS = "agent_actions_enabled"

@@ -429,6 +429,7 @@ fun BrowserScreen(
                 fingerprintProtection = settings.fingerprintProtection,
                 isPrivate = tab.isPrivate,
                 clearOnExit = settings.clearOnExit,
+                secureScreen = settings.secureScreen,
                 onClose = { shieldOpen = false }
             )
         }
@@ -489,6 +490,7 @@ private fun PrivacyShieldPanel(
     fingerprintProtection: Boolean,
     isPrivate: Boolean,
     clearOnExit: Boolean,
+    secureScreen: Boolean,
     onClose: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
@@ -570,12 +572,17 @@ private fun PrivacyShieldPanel(
                     if (fingerprintProtection) colors.success else colors.textTertiary
                 )
                 ShieldPoint(
-                    if (isPrivate) "隐私标签：已隔离本地存储与脚本 Cookie，不写入任何持久数据"
+                    if (isPrivate) "隐私标签：隔离本地存储与脚本 Cookie，关闭时清除该站点 Cookie"
                     else "本地存储仅本机保存，退出可清除",
                     if (isPrivate) colors.accentSecondary else colors.textTertiary
                 )
                 ShieldPoint("SSL 错误阻断 · 文件与本地存储访问禁用", colors.success)
                 ShieldPoint("DNS 预取已关闭 · Do Not Track 与 GPC 已开启", colors.success)
+                ShieldPoint(
+                    if (secureScreen) "截屏与最近任务预览已禁止"
+                    else "截屏与最近任务预览未禁止",
+                    if (secureScreen) colors.success else colors.textTertiary
+                )
                 Spacer(Modifier.height(10.dp))
                 BasicText(
                     text = "网页无法读取剪贴板、通讯录、定位、相机或麦克风。跟踪参数会在导航时自动移除，HTTP 自动升级为 HTTPS，并阻止 DNS 预取、sendBeacon 与 window.open 数据外泄。",

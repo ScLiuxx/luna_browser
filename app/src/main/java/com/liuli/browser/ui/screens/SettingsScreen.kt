@@ -440,9 +440,21 @@ fun SettingsScreen(
                     onCheckedChange = { settings.updateClearOnExit(it) },
                     backdrop = backdrop
                 )
+                Divider()
+                ToggleRow(
+                    title = "禁止截屏与最近任务预览",
+                    subtitle = "阻止系统截屏、录屏与最近任务缩略图读取页面内容",
+                    checked = settings.secureScreen,
+                    onCheckedChange = {
+                        settings.updateSecureScreen(it)
+                        vm.applyPrivacySettings()
+                    },
+                    backdrop = backdrop
+                )
                 Spacer(Modifier.height(10.dp))
                 BasicText(
-                    text = "隐私护盾在本机运行，不上传网址或任何标识符。网页无法读取剪贴板、通讯录、定位、相机或麦克风。",
+                    text = "隐私护盾在本机运行，不上传网址或任何标识符。隐私标签关闭时清除该站点 Cookie。" +
+                        "网页无法读取剪贴板、通讯录、定位、相机或麦克风。",
                     style = TextStyle(color = colors.textTertiary, fontSize = 10.sp, lineHeight = 16.sp)
                 )
             }
