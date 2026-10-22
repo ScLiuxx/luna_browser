@@ -120,7 +120,7 @@ fun HomeScreen(
     var entered by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { entered = true }
     val entrance by animateFloatAsState(
-        targetValue = if (entered && !reduceMotion) 1f else if (entered) 1f else 0f,
+        targetValue = if (entered) 1f else 0f,
         animationSpec = tween(durationMillis = if (reduceMotion) 0 else 520, easing = FastOutSlowInEasing),
         label = "home-entrance"
     )
@@ -141,10 +141,17 @@ fun HomeScreen(
                 .fillMaxSize()
                 .statusBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .graphicsLayer {
-                    alpha = entrance
-                    translationY = (1f - entrance) * 22.dp.toPx()
-                }
+                // 入场结束后撤掉整页图层，避免常驻离屏层拖慢滚动与列表重绘。
+                .then(
+                    if (entrance >= 1f) {
+                        Modifier
+                    } else {
+                        Modifier.graphicsLayer {
+                            alpha = entrance
+                            translationY = (1f - entrance) * 22.dp.toPx()
+                        }
+                    }
+                )
                 .padding(horizontal = horizontalPadding)
                 .padding(top = if (isTablet) 18.dp else 10.dp),
             horizontalAlignment = Alignment.CenterHorizontally

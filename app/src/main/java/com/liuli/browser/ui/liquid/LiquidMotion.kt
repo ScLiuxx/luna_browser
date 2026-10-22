@@ -8,6 +8,7 @@ import androidx.compose.foundation.MutatorMutex
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -36,6 +37,16 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+
+/**
+ * 全局“减弱动效”开关：由 LiuliApp 依据设置提供。开启后界面切换改为瞬时完成，
+ * 只保留必要的淡入淡出，避免长距离位移与缩放引起眩晕或掉帧。
+ */
+val LocalReduceMotion = staticCompositionLocalOf { false }
+
+/** 减弱动效时返回 0，让 tween/animate*AsState 直接落到目标值。 */
+fun motionMillis(reduceMotion: Boolean, normalMillis: Int): Int =
+    if (reduceMotion) 0 else normalMillis
 
 /**
  * Pointer-driven specular highlight from AndroidLiquidGlass's InteractiveHighlight.

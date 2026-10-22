@@ -66,6 +66,8 @@ import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.liquid.LocalReduceMotion
+import com.liuli.browser.ui.liquid.motionMillis
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.web.BrowserTab
@@ -162,7 +164,10 @@ fun TabSwitcherScreen(
                         sharedScope = sharedScope,
                         animatedScope = animatedScope,
                         onOpen = { onSelectTab(tab) },
-                        onClose = { onCloseTab(tab.id) }
+                        onClose = { onCloseTab(tab.id) },
+                        modifier = Modifier.animateItem(
+                            placementSpec = spring(dampingRatio = 0.9f, stiffness = 380f)
+                        )
                     )
                 }
             }
@@ -202,29 +207,33 @@ private fun TabCard(
     sharedScope: SharedTransitionScope,
     animatedScope: AnimatedVisibilityScope,
     onOpen: () -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val colors = LocalLiuliColors.current
+    val reduceMotion = LocalReduceMotion.current
+    val closeMillis = motionMillis(reduceMotion, 190)
     var closing by remember(tab.id) { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (closing) 0.86f else 1f,
-        animationSpec = tween(190),
+        targetValue = if (closing && !reduceMotion) 0.86f else 1f,
+        animationSpec = tween(closeMillis),
         label = "tab-card-scale"
     )
     val cardAlpha by animateFloatAsState(
         targetValue = if (closing) 0f else 1f,
-        animationSpec = tween(190),
+        animationSpec = tween(closeMillis),
         label = "tab-card-alpha"
     )
     LaunchedEffect(closing) {
         if (closing) {
-            delay(195)
+            if (closeMillis > 0) delay(closeMillis.toLong())
             onClose()
         }
     }
 
     Box(
         Modifier
+            .then(modifier)
             .fillMaxWidth()
             .aspectRatio(0.70f)
             .graphicsLayer {

@@ -12,8 +12,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -65,6 +69,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory
+import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.emptyBackdrop
 import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
@@ -76,6 +81,8 @@ import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.NavItem
 import com.liuli.browser.ui.liquid.LiquidDock
+import com.liuli.browser.ui.liquid.LocalReduceMotion
+import com.liuli.browser.ui.liquid.motionMillis
 import com.liuli.browser.ui.screens.BrowserScreen
 import com.liuli.browser.ui.screens.HomeScreen
 import com.liuli.browser.ui.screens.LibraryScreen
@@ -139,6 +146,12 @@ fun BrowserRoot(
     }
     val colors = LocalLiuliColors.current
     val density = LocalDensity.current
+    val reduceMotion = LocalReduceMotion.current
+    // 主屏切换：减弱动效时直接换页，避免长距离淡入淡出引起不适。
+    val screenTransition: ContentTransform = remember(reduceMotion) {
+        fadeIn(tween(motionMillis(reduceMotion, 220))) togetherWith
+            fadeOut(tween(motionMillis(reduceMotion, 160)))
+    }
     val agentPolicies = remember(activity) { AgentPolicyStore(activity.applicationContext) }
     // 本机历史只读传入；Agent 不会把它上传，云端路径也不读取该回调。
     val agent = remember(settings, agentPolicies, library) {
@@ -379,6 +392,30 @@ fun BrowserRoot(
         val navBottom = WindowInsets.navigationBars.getBottom(density)
         val navBottomDp = with(density) { navBottom.toDp() }
         val bottomSpace = if (isTablet) navBottomDp + 22.dp else Dimens.dockHeight + navBottomDp + 22.dp
+        val dockEnter = remember(reduceMotion) {
+            fadeIn(tween(motionMillis(reduceMotion, 200))) + slideInVertically(
+                animationSpec = if (reduceMotion) snap() else spring(dampingRatio = 0.9f, stiffness = 380f),
+                initialOffsetY = { it / 2 }
+            )
+        }
+        val dockExit = remember(reduceMotion) {
+            fadeOut(tween(motionMillis(reduceMotion, 150))) + slideOutVertically(
+                animationSpec = tween(motionMillis(reduceMotion, 150)),
+                targetOffsetY = { it / 3 }
+            )
+        }
+        val toastEnter = remember(reduceMotion) {
+            fadeIn(tween(motionMillis(reduceMotion, 180))) + slideInVertically(
+                animationSpec = if (reduceMotion) snap() else spring(dampingRatio = 0.9f, stiffness = 380f),
+                initialOffsetY = { it / 3 }
+            )
+        }
+        val toastExit = remember(reduceMotion) {
+            fadeOut(tween(motionMillis(reduceMotion, 140))) + slideOutVertically(
+                animationSpec = tween(motionMillis(reduceMotion, 140)),
+                targetOffsetY = { it / 4 }
+            )
+        }
 
         Row(Modifier.fillMaxSize()) {
             if (isTablet) {
@@ -437,9 +474,7 @@ fun BrowserRoot(
                     AnimatedContent(
                         targetState = screen,
                         modifier = Modifier.fillMaxSize(),
-                        transitionSpec = {
-                            fadeIn(tween(220)) togetherWith fadeOut(tween(160))
-                        },
+                        transitionSpec = { screenTransition },
                         label = "main-screen"
                     ) { target ->
                         val animated = this
@@ -575,16 +610,10 @@ fun BrowserRoot(
                 }
 
                 Box(Modifier.align(Alignment.BottomCenter)) {
-                    androidx.compose.animation.AnimatedVisibility(
+                    AnimatedVisibility(
                         visible = !isTablet && screen == MainScreen.Home,
-                        enter = fadeIn(tween(200)) + slideInVertically(
-                            animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f),
-                            initialOffsetY = { it / 2 }
-                        ),
-                        exit = fadeOut(tween(150)) + slideOutVertically(
-                            animationSpec = tween(150),
-                            targetOffsetY = { it / 3 }
-                        )
+                        enter = dockEnter,
+                        exit = dockExit
                     ) {
                         LiquidDock(
                             items = DockItems,
@@ -604,40 +633,20 @@ fun BrowserRoot(
                         )
                     }
                 }
-
-                val message = vm.message
-                LaunchedEffect(message) {
-                    if (message != null) {
-                        delay(2600)
-                        vm.consumeMessage()
-                    }
-                }
-                if (message != null) {
-                    Box(
-                        Modifier
-                            .align(Alignment.BottomCenter)
-                            .navigationBarsPadding()
-                            .padding(bottom = if (isTablet) 24.dp else 88.dp, start = 20.dp, end = 20.dp)
-                    ) {
-                        GlassSurface(
-                            backdrop = chromeBackdrop,
-                            modifier = Modifier.widthIn(max = 420.dp),
-                            shape = RoundedCornerShape(50),
-                            tint = colors.glassTintStrong,
-                            blurRadius = 18.dp,
-                            lensHeight = 14.dp,
-                            lensAmount = 20.dp,
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
-                        ) {
-                            BasicText(
-                                text = message,
-                                style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
-                            )
-                        }
-                    }
-                }
             }
         }
+
+        // 消息状态在子组件内部读取，避免提示条出现/消失时重组整个浏览器主界面。
+        MessageToast(
+            vm = vm,
+            backdrop = chromeBackdrop,
+            enter = toastEnter,
+            exit = toastExit,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = if (isTablet) 24.dp else 88.dp, start = 20.dp, end = 20.dp)
+        )
 
         if (engineInfo.isUnsupported && !engineWarningDismissed) {
             EngineBaselineDialog(
@@ -645,6 +654,52 @@ fun BrowserRoot(
                 backdrop = auroraBackdrop,
                 onOpenSettings = { openWebViewSettings() },
                 onDismiss = { engineWarningDismissed = true }
+            )
+        }
+    }
+}
+
+/**
+ * 底部消息提示条。消息状态只在这个组件内读取，提示出现/消失不会触发主界面重组。
+ */
+@Composable
+private fun MessageToast(
+    vm: BrowserViewModel,
+    backdrop: Backdrop,
+    enter: EnterTransition,
+    exit: ExitTransition,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalLiuliColors.current
+    val message = vm.message
+    // 保留最后一条文案，让退出动画期间仍能渲染内容而不是硬切。
+    var lastText by remember { mutableStateOf("") }
+    LaunchedEffect(message) {
+        if (message != null) {
+            lastText = message
+            delay(2600)
+            vm.consumeMessage()
+        }
+    }
+    AnimatedVisibility(
+        visible = message != null,
+        modifier = modifier,
+        enter = enter,
+        exit = exit
+    ) {
+        GlassSurface(
+            backdrop = backdrop,
+            modifier = Modifier.widthIn(max = 420.dp),
+            shape = RoundedCornerShape(50),
+            tint = colors.glassTintStrong,
+            blurRadius = 18.dp,
+            lensHeight = 14.dp,
+            lensAmount = 20.dp,
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
+        ) {
+            BasicText(
+                text = message ?: lastText,
+                style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
             )
         }
     }

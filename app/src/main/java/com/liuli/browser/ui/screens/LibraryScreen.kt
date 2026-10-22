@@ -1,6 +1,7 @@
 package com.liuli.browser.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -164,7 +165,10 @@ fun LibraryScreen(
                             onDelete = {
                                 if (section == 0) library.removeBookmark(entry.url)
                                 else library.removeHistory(entry)
-                            }
+                            },
+                            modifier = Modifier.animateItem(
+                                placementSpec = spring(dampingRatio = 0.9f, stiffness = 380f)
+                            )
                         )
                     }
                     item {
@@ -212,11 +216,13 @@ private fun LibraryRow(
     entry: LibraryEntry,
     isBookmark: Boolean,
     onClick: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val colors = LocalLiuliColors.current
     Row(
         Modifier
+            .then(modifier)
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(colors.glassTint)

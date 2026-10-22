@@ -37,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -201,13 +202,20 @@ fun AgentPanel(
         }
     }
 
+    var lastTarget by remember { mutableIntStateOf(0) }
     LaunchedEffect(agent.messages.size, agent.busy, agent.plan != null, agent.report?.createdAt) {
         val target = agent.messages.size +
             (if (agent.plan != null) 1 else 0) +
             (if (agent.report != null) 1 else 0) +
             (if (agent.busy) 1 else 0)
         if (target == 0) return@LaunchedEffect
-        listState.animateScrollToItem(target - 1)
+        // 一次新增多条内容（如报告生成）时直接跳到底部，长距离滚动动画会明显卡顿。
+        if (target - lastTarget > 2) {
+            listState.scrollToItem(target - 1)
+        } else {
+            listState.animateScrollToItem(target - 1)
+        }
+        lastTarget = target
     }
 
     fun submit(text: String) {

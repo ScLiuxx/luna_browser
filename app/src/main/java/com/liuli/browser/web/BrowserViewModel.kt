@@ -533,8 +533,18 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     fun updateWebContentAlpha(alpha: Float) {
         webContentAlpha = alpha.coerceIn(0f, 1f)
-        val view = activeWebView
-        if (view != null && view.visibility == View.VISIBLE) {
+        val view = activeWebView ?: return
+        if (view.visibility != View.VISIBLE) {
+            view.animate().cancel()
+            view.alpha = webContentAlpha
+            return
+        }
+        if (view.alpha < webContentAlpha) {
+            // 页面内容淡入，避免整页从全透明直接跳到不透明的硬切。
+            view.animate().cancel()
+            view.animate().alpha(webContentAlpha).setDuration(WEB_FADE_MS).start()
+        } else {
+            view.animate().cancel()
             view.alpha = webContentAlpha
         }
     }
@@ -1346,8 +1356,24 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         val shouldShow = overlay == AppOverlay.None && tab?.url?.isNotBlank() == true
         if (shouldShow) ensureWebView(tab)
         webViews.forEach { (id, view) ->
-            view.visibility = if (shouldShow && id == activeId) View.VISIBLE else View.GONE
-            view.alpha = if (id == activeId) webContentAlpha else 1f
+            val visible = shouldShow && id == activeId
+            val wasVisible = view.visibility == View.VISIBLE
+            val target = if (id == activeId) webContentAlpha else 1f
+            if (visible) {
+                view.visibility = View.VISIBLE
+                // 只在“已显示但内容被暂时透明化”时淡入；标签切换保持瞬时，避免闪白。
+                if (wasVisible && view.alpha < target) {
+                    view.animate().cancel()
+                    view.animate().alpha(target).setDuration(WEB_FADE_MS).start()
+                } else {
+                    view.animate().cancel()
+                    view.alpha = target
+                }
+            } else {
+                view.animate().cancel()
+                view.visibility = View.GONE
+                view.alpha = target
+            }
         }
     }
 
@@ -1356,6 +1382,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         loadedTabs.remove(id)
         httpUpgradeOrigins.remove(id)
         snapshotRunnables.remove(id)?.let { view.removeCallbacks(it) }
+        view.animate().cancel()
         (view.parent as? ViewGroup)?.removeView(view)
         runCatching {
             view.stopLoading()
@@ -1402,5 +1429,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         private const val KEY_SESSION = "session"
         private const val SNAPSHOT_SCALE = 0.45f
         private const val SNAPSHOT_DELAY_MS = 320L
+        private const val WEB_FADE_MS = 180L
     }
 }

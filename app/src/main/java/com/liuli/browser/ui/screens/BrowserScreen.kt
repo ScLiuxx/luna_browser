@@ -6,8 +6,11 @@ import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -94,6 +97,8 @@ import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.liquid.LocalReduceMotion
+import com.liuli.browser.ui.liquid.motionMillis
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.web.BrowserEngineInfo
@@ -128,6 +133,7 @@ fun BrowserScreen(
     onOpenSettings: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    val reduceMotion = LocalReduceMotion.current
     var editing by rememberSaveable(tab.id) { mutableStateOf(false) }
     var menuOpen by rememberSaveable(tab.id) { mutableStateOf(false) }
     var shieldOpen by rememberSaveable(tab.id) { mutableStateOf(false) }
@@ -176,23 +182,106 @@ fun BrowserScreen(
             resizeMode = SharedTransitionScope.ResizeMode.RemeasureToBounds
         )
     }
+    val snapshotAlphaSpec = remember(reduceMotion) {
+        tween<Float>(motionMillis(reduceMotion, 220))
+    }
+    val addressFadeSpec = remember(reduceMotion) {
+        tween<Float>(motionMillis(reduceMotion, 160))
+    }
     val snapshotAlpha by animateFloatAsState(
         targetValue = if (showSharedSnapshot) 1f else 0f,
-        animationSpec = tween(220),
+        animationSpec = snapshotAlphaSpec,
         label = "shared-snapshot-alpha"
     )
+    val barHeightSpec: AnimationSpec<Dp> = remember(reduceMotion) {
+        if (reduceMotion) snap() else spring(dampingRatio = 0.9f, stiffness = 380f)
+    }
     val barHeight by animateDpAsState(
         targetValue = when {
             editing -> 136.dp
             collapsed -> 42.dp
             else -> idleBarHeight
         },
-        animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f),
+        animationSpec = barHeightSpec,
         label = "address-morph"
     )
+    // 胶囊圆角与高度无关，使用百分比形状可避免动画每帧新建 Shape，
+    // 也让 Backdrop 的透镜/模糊参数在地址栏伸缩时保持稳定。
+    val barShape = remember { RoundedCornerShape(50) }
+    val sharedSnapshotImage = remember(sharedSnapshot) { sharedSnapshot?.asImageBitmap() }
+    val fadeInFast = remember(reduceMotion) { fadeIn(tween(motionMillis(reduceMotion, 160))) }
+    val fadeOutFast = remember(reduceMotion) { fadeOut(tween(motionMillis(reduceMotion, 120))) }
+    val dockEnter = remember(reduceMotion) {
+        fadeIn(tween(motionMillis(reduceMotion, 180))) + slideInVertically(
+            animationSpec = if (reduceMotion) snap() else spring(dampingRatio = 0.9f, stiffness = 380f),
+            initialOffsetY = { it / 2 }
+        )
+    }
+    val dockExit = remember(reduceMotion) {
+        fadeOut(tween(motionMillis(reduceMotion, 140))) + slideOutVertically(
+            animationSpec = tween(motionMillis(reduceMotion, 140)),
+            targetOffsetY = { it / 3 }
+        )
+    }
+    val menuEnter = remember(reduceMotion) {
+        slideInVertically(
+            animationSpec = if (reduceMotion) snap() else spring(dampingRatio = 0.9f, stiffness = 380f),
+            initialOffsetY = { it / 2 }
+        ) + fadeIn(tween(motionMillis(reduceMotion, 160)))
+    }
+    val menuExit = remember(reduceMotion) {
+        slideOutVertically(
+            animationSpec = tween(motionMillis(reduceMotion, 160)),
+            targetOffsetY = { it / 3 }
+        ) + fadeOut(tween(motionMillis(reduceMotion, 120)))
+    }
+    val orbOrigin = remember { TransformOrigin(1f, 1f) }
+    val orbEnter = remember(reduceMotion, orbOrigin) {
+        fadeIn(tween(motionMillis(reduceMotion, 160))) + scaleIn(
+            animationSpec = tween(motionMillis(reduceMotion, 180)),
+            initialScale = 0.88f,
+            transformOrigin = orbOrigin
+        )
+    }
+    val orbExit = remember(reduceMotion, orbOrigin) {
+        fadeOut(tween(motionMillis(reduceMotion, 120))) + scaleOut(
+            animationSpec = tween(motionMillis(reduceMotion, 140)),
+            targetScale = 0.88f,
+            transformOrigin = orbOrigin
+        )
+    }
+    val panelOrigin = remember(isTablet) {
+        TransformOrigin(if (isTablet) 1f else 0.5f, 1f)
+    }
+    val panelEnter = remember(reduceMotion, panelOrigin) {
+        fadeIn(tween(motionMillis(reduceMotion, 180))) + scaleIn(
+            animationSpec = if (reduceMotion) snap() else spring(dampingRatio = 0.92f, stiffness = 360f),
+            initialScale = 0.94f,
+            transformOrigin = panelOrigin
+        )
+    }
+    val panelExit = remember(reduceMotion, panelOrigin) {
+        fadeOut(tween(motionMillis(reduceMotion, 140))) + scaleOut(
+            animationSpec = tween(motionMillis(reduceMotion, 140)),
+            targetScale = 0.96f,
+            transformOrigin = panelOrigin
+        )
+    }
+    val shieldEnter = remember(reduceMotion) {
+        fadeIn(tween(motionMillis(reduceMotion, 150))) + scaleIn(
+            animationSpec = tween(motionMillis(reduceMotion, 170)),
+            initialScale = 0.96f
+        )
+    }
+    val shieldExit = remember(reduceMotion) {
+        fadeOut(tween(motionMillis(reduceMotion, 110))) + scaleOut(
+            animationSpec = tween(motionMillis(reduceMotion, 110)),
+            targetScale = 0.97f
+        )
+    }
 
     Box(Modifier.fillMaxSize()) {
-        if (sharedSnapshot != null && sharedSnapshotKey != null) {
+        if (sharedSnapshotImage != null && sharedSnapshotKey != null) {
             val snapshotSharedModifier = with(sharedScope) {
                 Modifier.sharedBounds(
                     sharedContentState = rememberSharedContentState(key = "tab-image-$sharedSnapshotKey"),
@@ -205,7 +294,7 @@ fun BrowserScreen(
                 )
             }
             Image(
-                bitmap = sharedSnapshot.asImageBitmap(),
+                bitmap = sharedSnapshotImage,
                 contentDescription = null,
                 modifier = snapshotSharedModifier
                     .fillMaxSize()
@@ -227,7 +316,7 @@ fun BrowserScreen(
                 modifier = addressSharedModifier
                     .fillMaxWidth()
                     .height(barHeight),
-                shape = RoundedCornerShape(barHeight / 2),
+                shape = barShape,
                 tint = colors.glassTintStrong,
                 blurRadius = 22.dp,
                 lensHeight = 18.dp,
@@ -239,7 +328,7 @@ fun BrowserScreen(
             ) {
                 Crossfade(
                     targetState = editing,
-                    animationSpec = tween(160),
+                    animationSpec = addressFadeSpec,
                     label = "address-content"
                 ) { isEditing ->
                     if (isEditing) {
@@ -280,7 +369,6 @@ fun BrowserScreen(
                             onForward = { vm.goForward() },
                             canNavigateBack = canNavigateBack,
                             shieldOn = settings.privacyShield,
-                            blockedTrackers = tab.blockedTrackers,
                             onShieldClick = {
                                 agentOpen = false
                                 shieldOpen = true
@@ -292,46 +380,15 @@ fun BrowserScreen(
                 }
             }
 
-            if (tab.isLoading || tab.progress in 1..99) {
-                val fraction by animateFloatAsState(
-                    targetValue = tab.progress.coerceIn(0, 100) / 100f,
-                    animationSpec = tween(220),
-                    label = "page-progress"
-                )
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 4.dp)
-                        .height(2.5.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(colors.textPrimary.copy(alpha = 0.08f))
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(fraction)
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(50))
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(colors.accent, colors.accentTertiary)
-                                )
-                            )
-                    )
-                }
-            }
+            // 进度状态在子组件内读取，避免每 1% 进度重绘整个浏览器界面。
+            PageProgressBar(tab = tab, reduceMotion = reduceMotion)
         }
 
         AnimatedVisibility(
             visible = !tab.isFullscreen && !isTablet && !collapsed,
             modifier = Modifier.align(Alignment.BottomCenter),
-            enter = fadeIn(tween(180)) + slideInVertically(
-                animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f),
-                initialOffsetY = { it / 2 }
-            ),
-            exit = fadeOut(tween(140)) + slideOutVertically(
-                animationSpec = tween(140),
-                targetOffsetY = { it / 3 }
-            )
+            enter = dockEnter,
+            exit = dockExit
         ) {
             BrowserDock(
                 backdrop = backdrop,
@@ -379,8 +436,8 @@ fun BrowserScreen(
 
         AnimatedVisibility(
             visible = menuOpen,
-            enter = fadeIn(tween(160)),
-            exit = fadeOut(tween(120))
+            enter = fadeInFast,
+            exit = fadeOutFast
         ) {
             Box(
                 Modifier
@@ -395,14 +452,8 @@ fun BrowserScreen(
 
         AnimatedVisibility(
             visible = menuOpen,
-            enter = slideInVertically(
-                animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f),
-                initialOffsetY = { it / 2 }
-            ) + fadeIn(tween(160)),
-            exit = slideOutVertically(
-                animationSpec = tween(160),
-                targetOffsetY = { it / 3 }
-            ) + fadeOut(tween(120)),
+            enter = menuEnter,
+            exit = menuExit,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
@@ -431,7 +482,11 @@ fun BrowserScreen(
             )
         }
 
-        if (shieldOpen) {
+        AnimatedVisibility(
+            visible = shieldOpen,
+            enter = shieldEnter,
+            exit = shieldExit
+        ) {
             PrivacyShieldPanel(
                 blocked = tab.blockedTrackers,
                 blockThirdParty = settings.blockThirdPartyCookies,
@@ -447,16 +502,8 @@ fun BrowserScreen(
         // P7 一镜到底：Agent 球从右下角缩小隐去，面板从同一角展开，避免场景跳变。
         AnimatedVisibility(
             visible = settings.agentEnabled && !tab.isFullscreen && !menuOpen && !shieldOpen && !agentOpen,
-            enter = fadeIn(tween(160)) + scaleIn(
-                animationSpec = tween(180),
-                initialScale = 0.88f,
-                transformOrigin = TransformOrigin(1f, 1f)
-            ),
-            exit = fadeOut(tween(120)) + scaleOut(
-                animationSpec = tween(140),
-                targetScale = 0.88f,
-                transformOrigin = TransformOrigin(1f, 1f)
-            ),
+            enter = orbEnter,
+            exit = orbExit,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .navigationBarsPadding()
@@ -477,16 +524,8 @@ fun BrowserScreen(
 
         AnimatedVisibility(
             visible = agentOpen,
-            enter = fadeIn(tween(180)) + scaleIn(
-                animationSpec = spring(dampingRatio = 0.92f, stiffness = 360f),
-                initialScale = 0.94f,
-                transformOrigin = TransformOrigin(if (isTablet) 1f else 0.5f, 1f)
-            ),
-            exit = fadeOut(tween(140)) + scaleOut(
-                animationSpec = tween(140),
-                targetScale = 0.96f,
-                transformOrigin = TransformOrigin(if (isTablet) 1f else 0.5f, 1f)
-            ),
+            enter = panelEnter,
+            exit = panelExit,
             modifier = Modifier.fillMaxSize()
         ) {
             AgentPanel(
@@ -697,6 +736,49 @@ private fun ShieldPoint(text: String, tint: Color) {
 }
 
 @Composable
+private fun PageProgressBar(tab: BrowserTab, reduceMotion: Boolean) {
+    val colors = LocalLiuliColors.current
+    val active = tab.isLoading || tab.progress in 1..99
+    // 载入结束后淡出，避免进度条在 100% 处突然消失。
+    val barAlpha by animateFloatAsState(
+        targetValue = if (active) 1f else 0f,
+        animationSpec = remember(reduceMotion) {
+            tween<Float>(motionMillis(reduceMotion, 140))
+        },
+        label = "page-progress-alpha"
+    )
+    if (barAlpha <= 0f) return
+    val fraction by animateFloatAsState(
+        targetValue = tab.progress.coerceIn(0, 100) / 100f,
+        animationSpec = remember(reduceMotion) {
+            tween<Float>(motionMillis(reduceMotion, 160), easing = LinearEasing)
+        },
+        label = "page-progress"
+    )
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 4.dp)
+            .height(2.5.dp)
+            .graphicsLayer { alpha = barAlpha }
+            .clip(RoundedCornerShape(50))
+            .background(colors.textPrimary.copy(alpha = 0.08f))
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth(fraction)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(50))
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(colors.accent, colors.accentTertiary)
+                    )
+                )
+        )
+    }
+}
+
+@Composable
 private fun AddressIdleContent(
     tab: BrowserTab,
     isTablet: Boolean,
@@ -707,12 +789,13 @@ private fun AddressIdleContent(
     onForward: () -> Unit,
     canNavigateBack: Boolean,
     shieldOn: Boolean,
-    blockedTrackers: Int,
     onShieldClick: () -> Unit,
     compact: Boolean,
     onExpand: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    // 在地址栏内部读取拦截计数：追踪请求密集的页面只会重绘这一行。
+    val blockedTrackers = tab.blockedTrackers
     val securityGlyph = when {
         tab.isPrivate -> Glyph.Incognito
         shieldOn -> Glyph.Shield
