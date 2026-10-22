@@ -32,6 +32,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -43,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -52,6 +55,9 @@ import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
@@ -72,11 +78,13 @@ import com.liuli.browser.ui.theme.DarkModeOption
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.web.BrowserViewModel
+import com.liuli.browser.web.agent.AgentController
 
 @Composable
 fun SettingsScreen(
     settings: SettingsStore,
     vm: BrowserViewModel,
+    agent: AgentController,
     backdrop: LayerBackdrop,
     isTablet: Boolean,
     onClose: () -> Unit,
@@ -133,7 +141,7 @@ fun SettingsScreen(
                     )
                     Spacer(Modifier.height(2.dp))
                     BasicText(
-                        text = "外观、搜索与隐私合规",
+                        text = "外观、搜索、AI 与隐私合规",
                         style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
                     )
                 }
@@ -329,6 +337,74 @@ fun SettingsScreen(
                         if (!it) vm.expandToolbar()
                     },
                     backdrop = backdrop
+                )
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            SettingsSection(title = "AI 页面助手", backdrop = backdrop) {
+                ToggleRow(
+                    title = "启用 Agent 浮球",
+                    subtitle = "读取正文与页面结构，可提议受控操作",
+                    checked = settings.agentEnabled,
+                    onCheckedChange = { settings.updateAgentEnabled(it) },
+                    backdrop = backdrop
+                )
+                Divider()
+                ToggleRow(
+                    title = "允许提议页面操作",
+                    subtitle = "单步操作逐条确认；多步任务需批准计划后执行，可暂停或取消",
+                    checked = settings.agentActionsEnabled,
+                    onCheckedChange = { settings.updateAgentActionsEnabled(it) },
+                    backdrop = backdrop
+                )
+                Divider()
+                ToggleRow(
+                    title = "允许云端推理",
+                    subtitle = "默认关闭；开启后脱敏正文可能发送到你配置的接口",
+                    checked = settings.agentCloudEnabled,
+                    onCheckedChange = { settings.updateAgentCloudEnabled(it) },
+                    backdrop = backdrop
+                )
+                if (settings.agentCloudEnabled) {
+                    Spacer(Modifier.height(10.dp))
+                    SettingsField(
+                        label = "接口地址（OpenAI 兼容）",
+                        value = settings.agentEndpoint,
+                        placeholder = SettingsStore.DEFAULT_AGENT_ENDPOINT,
+                        onValueChange = { settings.updateAgentEndpoint(it) }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    SettingsField(
+                        label = "模型名称",
+                        value = settings.agentModel,
+                        placeholder = SettingsStore.DEFAULT_AGENT_MODEL,
+                        onValueChange = { settings.updateAgentModel(it) }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    SettingsField(
+                        label = "API Key（仅本次会话）",
+                        value = settings.agentApiKey,
+                        placeholder = "不写入磁盘，退出应用即失效",
+                        onValueChange = { settings.updateAgentApiKey(it) },
+                        password = true
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                BasicText(
+                    text = "Agent 默认在本机完成页面速览、页内查找与关键词问答。页面操作只在本地执行，" +
+                        "单步动作需要你逐条确认；多步任务会先生成计划，批准后按顺序执行，执行中可暂停、重试或取消。" +
+                        "不会自动提交表单，密码与文件字段始终拒绝。" +
+                        "云端模式必须手动开启，且仅支持 HTTPS；发送前会脱敏邮箱、手机号、证件号与长数字串。" +
+                        "隐私标签始终只在本机处理。",
+                    style = TextStyle(color = colors.textTertiary, fontSize = 10.sp, lineHeight = 16.sp)
+                )
+                Spacer(Modifier.height(10.dp))
+                GlassPillButton(
+                    label = "清除对话",
+                    onClick = { agent.clear() },
+                    backdrop = backdrop,
+                    glyph = Glyph.Trash
                 )
             }
 
@@ -610,6 +686,55 @@ private fun Divider() {
 }
 
 @Composable
+private fun SettingsField(
+    label: String,
+    value: String,
+    placeholder: String,
+    onValueChange: (String) -> Unit,
+    password: Boolean = false
+) {
+    val colors = LocalLiuliColors.current
+    Column {
+        BasicText(
+            text = label,
+            style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
+        )
+        Spacer(Modifier.height(4.dp))
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(colors.textPrimary.copy(alpha = 0.06f))
+                .padding(horizontal = 12.dp, vertical = 11.dp),
+            textStyle = TextStyle(color = colors.textPrimary, fontSize = 13.sp),
+            cursorBrush = SolidColor(colors.accent),
+            singleLine = true,
+            visualTransformation = if (password) {
+                PasswordVisualTransformation()
+            } else {
+                VisualTransformation.None
+            },
+            keyboardOptions = KeyboardOptions(
+                keyboardType = if (password) KeyboardType.Password else KeyboardType.Uri
+            ),
+            decorationBox = { innerTextField ->
+                Box {
+                    if (value.isEmpty()) {
+                        BasicText(
+                            text = placeholder,
+                            style = TextStyle(color = colors.textTertiary, fontSize = 13.sp)
+                        )
+                    }
+                    innerTextField()
+                }
+            }
+        )
+    }
+}
+
+@Composable
 private fun ConfirmRevokeDialog(
     onConfirm: () -> Unit,
     onCancel: () -> Unit
@@ -734,5 +859,3 @@ private fun ConfirmClearDialog(
         }
     }
 }
-
-
