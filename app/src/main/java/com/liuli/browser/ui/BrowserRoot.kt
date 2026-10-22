@@ -83,6 +83,7 @@ import com.liuli.browser.web.BrowserTab
 import com.liuli.browser.web.BrowserViewModel
 import com.liuli.browser.web.DownloadRequest
 import com.liuli.browser.web.WebSnapshotBackdrop
+import com.liuli.browser.web.agent.AgentController
 import kotlinx.coroutines.delay
 
 private enum class MainScreen {
@@ -126,12 +127,14 @@ fun BrowserRoot(
     }
     val colors = LocalLiuliColors.current
     val density = LocalDensity.current
+    val agent = remember(settings) { AgentController(settings) }
 
     LaunchedEffect(vm, activity) { vm.bindActivity(activity) }
     LaunchedEffect(vm, settings, library) { vm.bind(settings, library) }
     LaunchedEffect(density.fontScale) { vm.updateTextZoom(density.fontScale) }
     LaunchedEffect(settings.maxTabs) { vm.applyMaxTabs(settings.maxTabs) }
     LaunchedEffect(settings.privacyShield) { vm.applyPrivacySettings() }
+    DisposableEffect(agent) { onDispose { agent.dispose() } }
     LaunchedEffect(incomingUrl) {
         if (!incomingUrl.isNullOrBlank()) {
             vm.createTab(url = incomingUrl, select = true)
@@ -384,6 +387,7 @@ fun BrowserRoot(
                                         vm = vm,
                                         tab = tab,
                                         settings = settings,
+                                        agent = agent,
                                         backdrop = chromeBackdrop,
                                         isTablet = isTablet,
                                         sharedScope = shared,
@@ -453,6 +457,7 @@ fun BrowserRoot(
                                 SettingsScreen(
                                     settings = settings,
                                     vm = vm,
+                                    agent = agent,
                                     backdrop = auroraBackdrop,
                                     isTablet = isTablet,
                                     onClose = {
