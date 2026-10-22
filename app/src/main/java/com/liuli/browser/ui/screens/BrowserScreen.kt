@@ -427,6 +427,7 @@ fun BrowserScreen(
                 blocked = tab.blockedTrackers,
                 blockThirdParty = settings.blockThirdPartyCookies,
                 fingerprintProtection = settings.fingerprintProtection,
+                isPrivate = tab.isPrivate,
                 clearOnExit = settings.clearOnExit,
                 onClose = { shieldOpen = false }
             )
