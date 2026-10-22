@@ -577,7 +577,7 @@ private fun PrivacyShieldPanel(
                 ShieldPoint("SSL 错误阻断 · 文件与本地存储访问禁用", colors.success)
                 Spacer(Modifier.height(10.dp))
                 BasicText(
-                    text = "网页无法读取剪贴板、通讯录、定位、相机或麦克风。跟踪参数会在导航时自动移除。",
+                    text = "网页无法读取剪贴板、通讯录、定位、相机或麦克风。跟踪参数会在导航时自动移除，HTTP 自动升级为 HTTPS，并阻止 sendBeacon 数据外泄。",
                     style = TextStyle(
                         color = colors.textTertiary,
                         fontSize = 10.sp,
