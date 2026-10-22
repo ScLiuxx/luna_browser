@@ -170,6 +170,52 @@ object PrivacyGuard {
               configurable: true
             });
           } catch (e) {}
+
+          // --- 阻止 sendBeacon 跨站数据外泄 ---
+          try {
+            navigator.sendBeacon = undefined;
+          } catch (e) {}
+
+          // --- 拦截 window.open 到已知跟踪域名 ---
+          try {
+            var TRACKERS = [
+              'doubleclick', 'googlesyndication', 'google-analytics', 'googletagmanager',
+              'googleadservices', 'adservice.google', 'analytics.', 'facebook.net',
+              'connect.facebook', 'twitter.com', 'criteo', 'taboola', 'outbrain',
+              'scorecardresearch', 'quantserve', 'quantcount', 'hm.baidu', 'pos.baidu',
+              'cpro.baidu', 'eclick.baidu', 'mobads.baidu', 'cnzz', 'umeng', 'umengcloud',
+              'talkingdata', 'adjust', 'appsflyer', 'branch.io', 'bugly.qq', 'pingjs.qq',
+              'beacon.qq', 'hotjar', 'mixpanel', 'segment', 'amplitude', 'sentry.io',
+              'newrelic', 'mc.yandex', 'top.mail.ru', 'ads.yahoo', 'amazon-adsystem',
+              'rubiconproject', 'pubmatic', 'openx.net', 'casalemedia', 'adnxs',
+              '33across', 'mathtag', 'bluekai', 'demdex', 'omtrdc', 'everesttech',
+              'agkn', 'crwdcntrl', 'lijit', 'rlcdn', 'sharethrough', 'teads.tv',
+              'smartadserver', 'adform', 'adsrvr', 'zeotap', 'id5-sync',
+              'adsafeprotected', 'moatads', 'doubleverify', 'research.de',
+              'fullstory', 'logrocket', 'bugsnag', 'rollbar', 'airbrake', 'posthog',
+              'heap.io', 'heapanalytics', 'countly', 'plausible.io', 'fathom.co',
+              'simpleanalytics', 'clarity.ms', 'mouseflow', 'freshmarketer', 'adroll',
+              'permutive', 'parsely', 'leadfeeder', 'clearbit', 'statsig',
+              'launchdarkly', 'split.io', 'optimizely', 'dynamicyield', 'sitecatalyst',
+              'adobe.io', 'sharedid', 'eyeota', 'braze', 'iterable', 'customer.io',
+              'onesignal', 'pushwoosh', 'urbanairship', 'appcenter', 'hockeyapp',
+              'fabric.io', 'crashlytics', 'instabug', 'mgid', 'triplelift', 'bshift',
+              '3lift', 'revcontent', 'statcounter', 'clicky', 'statowl',
+              'contentsquare', 'smartlook', 'mail.ru', '2domain'
+            ];
+            var origOpen = window.open;
+            window.open = function (url) {
+              try {
+                if (url) {
+                  var lower = String(url).toLowerCase();
+                  for (var i = 0; i < TRACKERS.length; i++) {
+                    if (lower.indexOf(TRACKERS[i]) >= 0) { return null; }
+                  }
+                }
+              } catch (e) {}
+              return origOpen.apply(this, arguments);
+            };
+          } catch (e) {}
         })()
     """.trimIndent()
 

@@ -326,11 +326,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             message = "请输入网址或搜索内容"
             return
         }
-        val destination = if (settings?.privacyShield == true) {
+        val destination = upgradeHttps(if (settings?.privacyShield == true) {
             TrackerBlocker.sanitize(normalized)
         } else {
             normalized
-        }
+        })
         val tab = activeTab ?: return
         val view = ensureWebView(tab)
         tab.url = destination
