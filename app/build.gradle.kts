@@ -19,8 +19,8 @@ android {
         applicationId = "com.liuli.browser"
         minSdk = 26
         targetSdk = 37
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 6
+        versionName = "1.0.5"
         androidResources.localeFilters += arrayOf("zh", "en")
         ndk {
             // 64-bit-only packaging: AndroidLiquidGlass/Backdrop and Compose are

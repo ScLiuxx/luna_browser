@@ -23,13 +23,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.boundsInParent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -101,6 +107,19 @@ fun GlassNavigationRail(
     tabCount: Int = 0
 ) {
     val colors = LocalLiuliColors.current
+    val density = LocalDensity.current
+    val itemBounds = remember { mutableStateMapOf<Int, Rect>() }
+    val selectedBounds = itemBounds[selectedIndex]
+    val indicatorTop by animateDpAsState(
+        targetValue = selectedBounds?.top?.let { with(density) { it.toDp() } } ?: 0.dp,
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f),
+        label = "rail-indicator-top"
+    )
+    val indicatorHeight by animateDpAsState(
+        targetValue = selectedBounds?.height?.let { with(density) { it.toDp() } } ?: 0.dp,
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f),
+        label = "rail-indicator-height"
+    )
     GlassSurface(
         backdrop = backdrop,
         modifier = modifier
@@ -117,67 +136,95 @@ fun GlassNavigationRail(
             modifier = Modifier
                 .fillMaxHeight()
                 .padding(vertical = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             BrandOrb(size = 38.dp)
             Spacer(Modifier.height(10.dp))
-            items.forEachIndexed { index, item ->
-                val selected = index == selectedIndex
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                if (indicatorHeight > 0.dp) {
+                    GlassSurface(
+                        backdrop = backdrop,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .offset(y = indicatorTop)
+                            .width(58.dp)
+                            .height(indicatorHeight),
+                        shape = RoundedCornerShape(18.dp),
+                        tint = colors.accent.copy(alpha = if (colors.isDark) 0.22f else 0.13f),
+                        blurRadius = 14.dp,
+                        lensHeight = 12.dp,
+                        lensAmount = 16.dp,
+                        shadow = false
+                    ) {}
+                }
                 Column(
-                    modifier = Modifier
-                        .width(58.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(
-                            if (selected) colors.accent.copy(alpha = if (colors.isDark) 0.24f else 0.14f)
-                            else Color.Transparent
-                        )
-                        .semantics {
-                            contentDescription = item.label
-                            role = Role.Button
-                        }
-                        .clickable(role = Role.Button, onClickLabel = item.label) { onSelect(index) }
-                        .padding(vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                    Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        GlyphIcon(
-                            glyph = item.glyph,
-                            tint = if (selected) colors.accent else colors.textSecondary,
-                            size = 22.dp
-                        )
-                        if (item.glyph == Glyph.Tabs && tabCount > 0) {
-                            Box(
-                                Modifier
-                                    .offset(x = 11.dp, y = (-8).dp)
-                                    .size(15.dp)
-                                    .clip(CircleShape)
-                                    .background(colors.accent),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                BasicText(
-                                    text = tabCount.coerceAtMost(99).toString(),
-                                    style = TextStyle(
-                                        color = Color.White,
-                                        fontSize = 8.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                    items.forEachIndexed { index, item ->
+                        val selected = index == selectedIndex
+                        Column(
+                            modifier = Modifier
+                                .width(58.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .onGloballyPositioned { coordinates ->
+                                    itemBounds[index] = coordinates.boundsInParent()
+                                }
+                                .semantics {
+                                    contentDescription = item.label
+                                    role = Role.Button
+                                }
+                                .clickable(role = Role.Button, onClickLabel = item.label) {
+                                    onSelect(index)
+                                }
+                                .padding(vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                GlyphIcon(
+                                    glyph = item.glyph,
+                                    tint = if (selected) colors.accent else colors.textSecondary,
+                                    size = 22.dp
                                 )
+                                if (item.glyph == Glyph.Tabs && tabCount > 0) {
+                                    Box(
+                                        Modifier
+                                            .offset(x = 11.dp, y = (-8).dp)
+                                            .size(15.dp)
+                                            .clip(CircleShape)
+                                            .background(colors.accent),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        BasicText(
+                                            text = tabCount.coerceAtMost(99).toString(),
+                                            style = TextStyle(
+                                                color = Color.White,
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        )
+                                    }
+                                }
                             }
+                            Spacer(Modifier.height(4.dp))
+                            BasicText(
+                                text = item.label,
+                                style = TextStyle(
+                                    color = if (selected) colors.accent else colors.textTertiary,
+                                    fontSize = 10.sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            )
                         }
                     }
-                    Spacer(Modifier.height(4.dp))
-                    BasicText(
-                        text = item.label,
-                        style = TextStyle(
-                            color = if (selected) colors.accent else colors.textTertiary,
-                            fontSize = 10.sp,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                        )
-                    )
                 }
             }
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(6.dp))
             Box(
                 Modifier
                     .size(48.dp)

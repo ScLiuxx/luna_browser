@@ -85,6 +85,29 @@ class SettingsStore(context: Context) {
     var searchEngine by mutableStateOf(SearchEngine.fromId(prefs.getString(KEY_SEARCH, null)))
         private set
 
+    var agentEnabled by mutableStateOf(prefs.getBoolean(KEY_AGENT_ENABLED, true))
+        private set
+
+    var agentActionsEnabled by mutableStateOf(prefs.getBoolean(KEY_AGENT_ACTIONS, true))
+        private set
+
+    var agentCloudEnabled by mutableStateOf(prefs.getBoolean(KEY_AGENT_CLOUD, false))
+        private set
+
+    var agentEndpoint by mutableStateOf(
+        prefs.getString(KEY_AGENT_ENDPOINT, DEFAULT_AGENT_ENDPOINT) ?: DEFAULT_AGENT_ENDPOINT
+    )
+        private set
+
+    var agentModel by mutableStateOf(
+        prefs.getString(KEY_AGENT_MODEL, DEFAULT_AGENT_MODEL) ?: DEFAULT_AGENT_MODEL
+    )
+        private set
+
+    /** Kept in memory only: it is never written to SharedPreferences. */
+    var agentApiKey by mutableStateOf("")
+        private set
+
     val darkModeOption: DarkModeOption
         get() = when (darkMode) {
             1 -> DarkModeOption.Light
@@ -116,6 +139,12 @@ class SettingsStore(context: Context) {
         autoHideToolbar = true
         maxTabs = 8
         searchEngine = SearchEngine.Baidu
+        agentEnabled = true
+        agentActionsEnabled = true
+        agentCloudEnabled = false
+        agentEndpoint = DEFAULT_AGENT_ENDPOINT
+        agentModel = DEFAULT_AGENT_MODEL
+        agentApiKey = ""
     }
 
     fun updateDarkMode(value: Int) {
@@ -173,6 +202,35 @@ class SettingsStore(context: Context) {
         prefs.edit().putBoolean(KEY_AUTO_HIDE, value).apply()
     }
 
+    fun updateAgentEnabled(value: Boolean) {
+        agentEnabled = value
+        prefs.edit().putBoolean(KEY_AGENT_ENABLED, value).apply()
+    }
+
+    fun updateAgentActionsEnabled(value: Boolean) {
+        agentActionsEnabled = value
+        prefs.edit().putBoolean(KEY_AGENT_ACTIONS, value).apply()
+    }
+
+    fun updateAgentCloudEnabled(value: Boolean) {
+        agentCloudEnabled = value
+        prefs.edit().putBoolean(KEY_AGENT_CLOUD, value).apply()
+    }
+
+    fun updateAgentEndpoint(value: String) {
+        agentEndpoint = value.take(200)
+        prefs.edit().putString(KEY_AGENT_ENDPOINT, agentEndpoint).apply()
+    }
+
+    fun updateAgentModel(value: String) {
+        agentModel = value.take(80)
+        prefs.edit().putString(KEY_AGENT_MODEL, agentModel).apply()
+    }
+
+    fun updateAgentApiKey(value: String) {
+        agentApiKey = value.trim().take(300)
+    }
+
     private fun defaultMaxTabs(context: Context): Int {
         val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
         return if (manager?.isLowRamDevice == true) 4 else 8
@@ -192,5 +250,13 @@ class SettingsStore(context: Context) {
         private const val KEY_SHIELD = "privacy_shield"
         private const val KEY_CLEAR_EXIT = "clear_on_exit"
         private const val KEY_AUTO_HIDE = "auto_hide_toolbar"
+        private const val KEY_AGENT_ENABLED = "agent_enabled"
+        private const val KEY_AGENT_ACTIONS = "agent_actions_enabled"
+        private const val KEY_AGENT_CLOUD = "agent_cloud_enabled"
+        private const val KEY_AGENT_ENDPOINT = "agent_endpoint"
+        private const val KEY_AGENT_MODEL = "agent_model"
+
+        const val DEFAULT_AGENT_ENDPOINT = "https://api.openai.com/v1"
+        const val DEFAULT_AGENT_MODEL = "gpt-4o-mini"
     }
 }
