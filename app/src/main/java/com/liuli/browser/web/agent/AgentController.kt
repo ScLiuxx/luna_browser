@@ -1544,6 +1544,7 @@ class AgentController(
                 title = PrivacyScrubber.scrub(title),
                 url = PrivacyScrubber.scrub(TrackerBlocker.sanitize(rawUrl).take(2048)),
                 host = AgentPolicyStore.normalizeHost(host) ?: host,
+                isPrivate = page.isPrivate,
                 accessedAt = System.currentTimeMillis(),
                 charCount = snapshot.text.length,
                 keyPoints = points.map { PrivacyScrubber.scrub(it) }

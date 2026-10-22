@@ -3,6 +3,7 @@ package com.liuli.browser.ui
 import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.content.res.Configuration
+import android.net.Uri
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -87,6 +88,8 @@ import com.liuli.browser.web.WebSnapshotBackdrop
 import com.liuli.browser.web.agent.AgentController
 import com.liuli.browser.web.agent.AgentPolicyStore
 import com.liuli.browser.web.agent.AgentReport
+import com.liuli.browser.web.agent.AgentReportFormat
+import com.liuli.browser.web.agent.ResearchEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -197,26 +200,41 @@ fun BrowserRoot(
 
     // 调研报告只通过系统文件选择器写入用户选定的位置，Agent 不主动落盘。
     val reportHolder = remember { mutableStateOf<AgentReport?>(null) }
+    var reportFormat by remember { mutableStateOf(AgentReportFormat.Markdown) }
     val reportScope = rememberCoroutineScope()
-    val reportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/markdown")
-    ) { uri ->
+    val saveReport: (Uri?) -> Unit = save@{ uri ->
         val pending = reportHolder.value
+        val format = reportFormat
         reportHolder.value = null
-        if (uri == null || pending == null) return@rememberLauncherForActivityResult
+        if (uri == null || pending == null) return@save
         reportScope.launch {
             val saved = withContext(Dispatchers.IO) {
                 runCatching {
+                    val content = ResearchEngine.render(pending, format)
                     val stream = activity.contentResolver.openOutputStream(uri)
                         ?: throw IllegalStateException("无法写入目标文件")
                     stream.use { output ->
-                        output.write(pending.markdown.toByteArray(Charsets.UTF_8))
+                        output.write(content.toByteArray(Charsets.UTF_8))
                     }
                 }.isSuccess
             }
-            vm.showMessage(if (saved) "调研报告已保存" else "调研报告保存失败")
+            vm.showMessage(
+                if (saved) "调研报告已保存（${format.label}）" else "调研报告保存失败"
+            )
         }
     }
+    val markdownExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(AgentReportFormat.Markdown.mimeType),
+        saveReport
+    )
+    val htmlExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(AgentReportFormat.Html.mimeType),
+        saveReport
+    )
+    val csvExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(AgentReportFormat.Csv.mimeType),
+        saveReport
+    )
 
     val fileChooserLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -439,13 +457,20 @@ fun BrowserRoot(
                                                 }.onFailure { vm.showMessage("未找到可分享的应用") }
                                             }
                                         },
-                                        onExportReport = { report ->
+                                        onExportReport = { report, format ->
                                             reportHolder.value = report
-                                            runCatching { reportLauncher.launch(report.fileName) }
-                                                .onFailure {
-                                                    reportHolder.value = null
-                                                    vm.showMessage("无法打开文件保存对话框")
-                                                }
+                                            reportFormat = format
+                                            val launcher = when (format) {
+                                                AgentReportFormat.Markdown -> markdownExportLauncher
+                                                AgentReportFormat.Html -> htmlExportLauncher
+                                                AgentReportFormat.Csv -> csvExportLauncher
+                                            }
+                                            runCatching {
+                                                launcher.launch(report.fileName(format))
+                                            }.onFailure {
+                                                reportHolder.value = null
+                                                vm.showMessage("无法打开文件保存对话框")
+                                            }
                                         },
                                         onNewHomeTab = {
                                             vm.openHomeTab()

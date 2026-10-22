@@ -97,6 +97,7 @@ import com.liuli.browser.web.BrowserTab
 import com.liuli.browser.web.BrowserViewModel
 import com.liuli.browser.web.agent.AgentController
 import com.liuli.browser.web.agent.AgentReport
+import com.liuli.browser.web.agent.AgentReportFormat
 import com.liuli.browser.web.agent.AgentResearchPage
 import kotlinx.coroutines.delay
 
@@ -115,7 +116,7 @@ fun BrowserScreen(
     sharedSnapshotKey: Long?,
     showSharedSnapshot: Boolean,
     onShare: (String, String) -> Unit,
-    onExportReport: (AgentReport) -> Unit,
+    onExportReport: (AgentReport, AgentReportFormat) -> Unit,
     onNewHomeTab: () -> Unit,
     onOpenTabs: () -> Unit,
     onOpenLibrary: () -> Unit,
@@ -500,7 +501,15 @@ fun BrowserScreen(
                 onPlanCommand = { command ->
                     agent.handlePlanCommand(command, vm.activeWebView, tab.id)
                 },
-                onExportReport = onExportReport
+                onExportReport = onExportReport,
+                onOpenSource = { url, isPrivate ->
+                    vm.createTab(
+                        url = url,
+                        isPrivate = isPrivate || tab.isPrivate,
+                        select = true
+                    )
+                    agentOpen = false
+                }
             )
         }
     }

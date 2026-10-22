@@ -24,10 +24,22 @@ data class AgentSource(
     val title: String,
     val url: String,
     val host: String,
+    val isPrivate: Boolean,
     val accessedAt: Long,
     val charCount: Int,
     val keyPoints: List<String>
 )
+
+/** 报告导出格式；HTML 与 CSV 完全在本机生成。 */
+enum class AgentReportFormat(
+    val label: String,
+    val extension: String,
+    val mimeType: String
+) {
+    Markdown("Markdown", "md", "text/markdown"),
+    Html("HTML", "html", "text/html"),
+    Csv("CSV", "csv", "text/csv")
+}
 
 /** 内存中的调研报告；保存位置由用户通过系统文件选择器决定。 */
 data class AgentReport(
@@ -38,7 +50,8 @@ data class AgentReport(
     val mode: AgentMode,
     val note: String? = null
 ) {
-    val fileName: String get() = ResearchEngine.fileName(goal)
+    fun fileName(format: AgentReportFormat = AgentReportFormat.Markdown): String =
+        ResearchEngine.fileName(goal, format)
 }
 
 /**
@@ -61,6 +74,28 @@ object ResearchEngine {
     private val HAN_CHAR = Regex("[\\u4e00-\\u9fa5]")
     private val CITATION = Regex("\\[(\\d{1,2})\\]")
     private val FILE_ILLEGAL = Regex("[\\\\/:*?\"<>|\\s]+")
+    private val ORDERED_ITEM = Regex("^\\d{1,2}\\.\\s+")
+    private val LINK = Regex("\\[([^\\]]+)\\]\\(([^)\\s]+)\\)")
+    private val BOLD = Regex("\\*\\*([^*]+)\\*\\*")
+
+    private val HTML_STYLE = """
+        :root { color-scheme: light dark; }
+        body { margin: 0; padding: 24px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans CJK SC", sans-serif; line-height: 1.75; color: #1d1d1f; background: #f7f7fa; }
+        main { max-width: 760px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 28px 30px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06); }
+        h1 { font-size: 26px; line-height: 1.3; margin: 0 0 12px; }
+        h2 { font-size: 18px; margin: 26px 0 10px; }
+        h3 { font-size: 15px; margin: 18px 0 8px; }
+        p, li { font-size: 14px; }
+        blockquote { margin: 0 0 8px; padding: 8px 14px; border-left: 3px solid #8e8e93; color: #636366; background: #f2f2f7; border-radius: 0 8px 8px 0; }
+        ul, ol { padding-left: 22px; }
+        a { color: #0a84ff; word-break: break-all; }
+        @media (prefers-color-scheme: dark) {
+            body { color: #f5f5f7; background: #111114; }
+            main { background: #1c1c1e; box-shadow: none; }
+            blockquote { background: #2c2c2e; color: #aeaeb2; }
+            a { color: #409cff; }
+        }
+    """.trimIndent()
 
     private val REPORT_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
     private val FILE_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmm")
@@ -234,10 +269,162 @@ object ResearchEngine {
         return true
     }
 
-    fun fileName(goal: String): String {
+    /** 按指定格式渲染报告；全部在本机完成，不访问网络。 */
+    fun render(report: AgentReport, format: AgentReportFormat): String = when (format) {
+        AgentReportFormat.Markdown -> report.markdown
+        AgentReportFormat.Html -> toHtml(report)
+        AgentReportFormat.Csv -> toCsv(report.sources)
+    }
+
+    /** 自包含 HTML：内联样式、CSP 禁止外部资源，不执行脚本。 */
+    private fun toHtml(report: AgentReport): String {
+        val title = escapeHtml(report.goal.take(80).ifBlank { "网页调研" })
+        return buildString {
+            appendLine("<!doctype html>")
+            appendLine("<html lang=\"zh-CN\">")
+            appendLine("<head>")
+            appendLine("<meta charset=\"utf-8\">")
+            appendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")
+            appendLine(
+                "<meta http-equiv=\"Content-Security-Policy\" " +
+                    "content=\"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'\">"
+            )
+            appendLine("<title>$title</title>")
+            appendLine("<style>")
+            appendLine(HTML_STYLE)
+            appendLine("</style>")
+            appendLine("</head>")
+            appendLine("<body>")
+            appendLine("<main>")
+            append(markdownToHtml(report.markdown))
+            appendLine("</main>")
+            appendLine("</body>")
+            appendLine("</html>")
+        }
+    }
+
+    private fun markdownToHtml(markdown: String): String {
+        val out = StringBuilder()
+        var listTag: String? = null
+        fun closeList() {
+            val open = listTag ?: return
+            out.appendLine("</$open>")
+            listTag = null
+        }
+        markdown.lineSequence().forEach { raw ->
+            val line = raw.trimEnd()
+            val ordered = ORDERED_ITEM.find(line)
+            when {
+                line.isBlank() -> closeList()
+                line.startsWith("# ") -> {
+                    closeList()
+                    out.appendLine("<h1>${inlineHtml(line.removePrefix("# "))}</h1>")
+                }
+                line.startsWith("## ") -> {
+                    closeList()
+                    out.appendLine("<h2>${inlineHtml(line.removePrefix("## "))}</h2>")
+                }
+                line.startsWith("### ") -> {
+                    closeList()
+                    out.appendLine("<h3>${inlineHtml(line.removePrefix("### "))}</h3>")
+                }
+                line.startsWith("> ") -> {
+                    closeList()
+                    out.appendLine("<blockquote>${inlineHtml(line.removePrefix("> "))}</blockquote>")
+                }
+                line.startsWith("- ") || line.startsWith("* ") -> {
+                    if (listTag != "ul") {
+                        closeList()
+                        out.appendLine("<ul>")
+                        listTag = "ul"
+                    }
+                    out.appendLine("<li>${inlineHtml(line.drop(2))}</li>")
+                }
+                ordered != null -> {
+                    if (listTag != "ol") {
+                        closeList()
+                        out.appendLine("<ol>")
+                        listTag = "ol"
+                    }
+                    out.appendLine("<li>${inlineHtml(line.substring(ordered.range.last + 1))}</li>")
+                }
+                else -> {
+                    closeList()
+                    out.appendLine("<p>${inlineHtml(line.trim())}</p>")
+                }
+            }
+        }
+        closeList()
+        return out.toString()
+    }
+
+    private fun inlineHtml(markdown: String): String {
+        var html = escapeHtml(markdown)
+        html = LINK.replace(html) { match ->
+            val label = match.groupValues[1]
+            val href = match.groupValues[2]
+            // 只允许 http(s) 链接，避免页面文本注入 javascript: 等协议。
+            if (href.startsWith("http://") || href.startsWith("https://")) {
+                "<a href=\"$href\" rel=\"noreferrer noopener\">$label</a>"
+            } else {
+                match.value
+            }
+        }
+        html = BOLD.replace(html) { "<strong>${it.groupValues[1]}</strong>" }
+        return html
+    }
+
+    private fun escapeHtml(raw: String): String = raw
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+
+    /** 来源台账 CSV，带 UTF-8 BOM 以便表格软件识别中文。 */
+    private fun toCsv(sources: List<AgentSource>): String {
+        val out = StringBuilder("\uFEFF")
+        out.appendLine("id,title,url,host,private,accessedAt,charCount,keyPoints")
+        sources.forEach { source ->
+            val cells = listOf(
+                source.id.toString(),
+                source.title,
+                source.url,
+                source.host,
+                if (source.isPrivate) "1" else "0",
+                formatTime(source.accessedAt),
+                source.charCount.toString(),
+                source.keyPoints.joinToString(" | ")
+            )
+            out.appendLine(cells.joinToString(",") { csvCell(it) })
+        }
+        return out.toString()
+    }
+
+    private fun csvCell(raw: String): String {
+        val value = raw.replace("\r", " ").replace("\n", " ")
+        // 防止表格软件把页面标题当作公式执行。
+        val first = value.firstOrNull()
+        val guarded = if (first == '=' || first == '+' || first == '-' ||
+            first == '@' || first == '\t'
+        ) {
+            "'$value"
+        } else {
+            value
+        }
+        return if (guarded.contains(',') || guarded.contains('"')) {
+            "\"${guarded.replace("\"", "\"\"")}\""
+        } else {
+            guarded
+        }
+    }
+
+    fun fileName(
+        goal: String,
+        format: AgentReportFormat = AgentReportFormat.Markdown
+    ): String {
         val stamp = LocalDateTime.now().format(FILE_TIME)
         val slug = goal.replace(FILE_ILLEGAL, "-").trim('-').take(40).ifBlank { "report" }
-        return "liuli-$stamp-$slug.md"
+        return "liuli-$stamp-$slug.${format.extension}"
     }
 
     fun formatTime(timestamp: Long): String = runCatching {

@@ -76,6 +76,7 @@ import com.liuli.browser.web.agent.AgentPlan
 import com.liuli.browser.web.agent.AgentPlanCommand
 import com.liuli.browser.web.agent.AgentPlanStatus
 import com.liuli.browser.web.agent.AgentReport
+import com.liuli.browser.web.agent.AgentReportFormat
 import com.liuli.browser.web.agent.AgentSiteMode
 
 @Composable
@@ -137,7 +138,8 @@ fun AgentPanel(
     onConfirmAction: (Long) -> Unit,
     onCancelAction: (Long) -> Unit,
     onPlanCommand: (AgentPlanCommand) -> Unit,
-    onExportReport: (AgentReport) -> Unit
+    onExportReport: (AgentReport, AgentReportFormat) -> Unit,
+    onOpenSource: (String, Boolean) -> Unit
 ) {
     val colors = LocalLiuliColors.current
     var input by rememberSaveable { mutableStateOf("") }
@@ -352,7 +354,8 @@ fun AgentPanel(
                             item(key = "report-${currentReport.createdAt}") {
                                 ReportCard(
                                     report = currentReport,
-                                    onExport = { onExportReport(currentReport) },
+                                    onExport = { format -> onExportReport(currentReport, format) },
+                                    onOpenSource = onOpenSource,
                                     onDismiss = agent::dismissReport
                                 )
                             }
@@ -701,7 +704,8 @@ private fun PlanCard(
 @Composable
 private fun ReportCard(
     report: AgentReport,
-    onExport: () -> Unit,
+    onExport: (AgentReportFormat) -> Unit,
+    onOpenSource: (String, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
@@ -795,16 +799,42 @@ private fun ReportCard(
         Spacer(Modifier.height(7.dp))
         report.sources.forEach { source ->
             BasicText(
-                text = "[${source.id}] ${source.title} · ${source.host}",
+                text = "[${source.id}] ${source.title} · ${source.host}" +
+                    (if (source.isPrivate) " · 隐私" else ""),
                 style = TextStyle(color = colors.textTertiary, fontSize = 9.sp),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(vertical = 1.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(
+                        role = Role.Button,
+                        onClickLabel = "在新标签页打开来源 ${source.id}"
+                    ) { onOpenSource(source.url, source.isPrivate) }
+                    .padding(vertical = 2.dp)
             )
         }
+        BasicText(
+            text = "点按来源可在新标签页打开；隐私来源保持为隐私标签。",
+            style = TextStyle(color = colors.textTertiary, fontSize = 8.sp, lineHeight = 12.sp),
+            modifier = Modifier.padding(top = 2.dp)
+        )
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ActionButton("保存 Markdown", accent = true, onClick = onExport)
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            ActionButton("保存 Markdown", accent = true) {
+                onExport(AgentReportFormat.Markdown)
+            }
+            ActionButton("保存 HTML", accent = false) {
+                onExport(AgentReportFormat.Html)
+            }
+            ActionButton("保存来源 CSV", accent = false) {
+                onExport(AgentReportFormat.Csv)
+            }
             ActionButton(if (copied) "已复制" else "复制", accent = false) {
                 clipboard.setText(AnnotatedString(report.markdown))
                 copied = true
