@@ -23,6 +23,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import android.webkit.ReferrerPolicy
 import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
@@ -85,6 +86,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     @Volatile
     private var privacyShieldActive = true
+
+    @Volatile
+    private var fingerprintProtection = true
 
     private val webViews = HashMap<Long, WebView>()
     private val loadedTabs = HashSet<Long>()
@@ -164,6 +168,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         this.library = library
         this.maxTabs = settings.maxTabs
         this.privacyShieldActive = settings.privacyShield
+        this.fingerprintProtection = settings.fingerprintProtection
         bound = true
         CookieManager.getInstance().setAcceptCookie(true)
         if (tabs.isEmpty()) createDefaultTab()
@@ -446,6 +451,7 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
 
     fun applyPrivacySettings() {
         privacyShieldActive = settings?.privacyShield == true
+        fingerprintProtection = settings?.fingerprintProtection == true
         webViews.forEach { (id, view) ->
             val tab = tabs.firstOrNull { it.id == id } ?: return@forEach
             view.settings.userAgentString = effectiveUserAgent(tab)
