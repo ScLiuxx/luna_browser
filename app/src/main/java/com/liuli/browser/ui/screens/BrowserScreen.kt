@@ -84,6 +84,8 @@ import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
 import com.liuli.browser.data.SearchEngine
 import com.liuli.browser.data.SettingsStore
+import com.liuli.browser.ui.agent.AgentOrb
+import com.liuli.browser.ui.agent.AgentPanel
 import com.liuli.browser.ui.components.GlassIconButton
 import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
@@ -93,6 +95,7 @@ import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.web.BrowserTab
 import com.liuli.browser.web.BrowserViewModel
+import com.liuli.browser.web.agent.AgentController
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -101,6 +104,7 @@ fun BrowserScreen(
     vm: BrowserViewModel,
     tab: BrowserTab,
     settings: SettingsStore,
+    agent: AgentController,
     backdrop: Backdrop,
     isTablet: Boolean,
     sharedScope: SharedTransitionScope,
@@ -118,6 +122,7 @@ fun BrowserScreen(
     var editing by rememberSaveable(tab.id) { mutableStateOf(false) }
     var menuOpen by rememberSaveable(tab.id) { mutableStateOf(false) }
     var shieldOpen by rememberSaveable(tab.id) { mutableStateOf(false) }
+    var agentOpen by rememberSaveable(tab.id) { mutableStateOf(false) }
     var editValue by remember { mutableStateOf(TextFieldValue(tab.url)) }
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -125,6 +130,8 @@ fun BrowserScreen(
     LaunchedEffect(tab.id) {
         editing = false
         menuOpen = false
+        agentOpen = false
+        agent.onTabChanged(tab.id)
         editValue = TextFieldValue(tab.url)
     }
     LaunchedEffect(tab.url) {
@@ -146,6 +153,7 @@ fun BrowserScreen(
     }
     BackHandler(enabled = shieldOpen) { shieldOpen = false }
     BackHandler(enabled = tab.isFullscreen) { vm.exitFullscreen() }
+    BackHandler(enabled = agentOpen) { agentOpen = false }
 
     val fontScale = LocalDensity.current.fontScale
     val idleBarHeight = if (fontScale > 1.3f) 76.dp else 64.dp
@@ -256,6 +264,7 @@ fun BrowserScreen(
                             },
                             onMenu = {
                                 vm.expandToolbar()
+                                agentOpen = false
                                 menuOpen = true
                             },
                             onBack = { vm.handleBack() },
@@ -263,7 +272,10 @@ fun BrowserScreen(
                             canNavigateBack = canNavigateBack,
                             shieldOn = settings.privacyShield,
                             blockedTrackers = tab.blockedTrackers,
-                            onShieldClick = { shieldOpen = true },
+                            onShieldClick = {
+                                agentOpen = false
+                                shieldOpen = true
+                            },
                             compact = collapsed,
                             onExpand = { vm.expandToolbar() }
                         )
@@ -416,6 +428,53 @@ fun BrowserScreen(
                 blockThirdParty = settings.blockThirdPartyCookies,
                 clearOnExit = settings.clearOnExit,
                 onClose = { shieldOpen = false }
+            )
+        }
+
+        if (settings.agentEnabled && !tab.isFullscreen && !menuOpen && !shieldOpen && !agentOpen) {
+            AgentOrb(
+                backdrop = backdrop,
+                onClick = {
+                    menuOpen = false
+                    shieldOpen = false
+                    agentOpen = true
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(
+                        end = if (isTablet) 24.dp else 16.dp,
+                        bottom = if (isTablet) 24.dp else 100.dp
+                    )
+            )
+        }
+
+        if (agentOpen) {
+            AgentPanel(
+                agent = agent,
+                tabTitle = tab.pageTitle(),
+                isTablet = isTablet,
+                isPrivate = tab.isPrivate,
+                backdrop = backdrop,
+                onClose = { agentOpen = false },
+                onSubmit = { text ->
+                    agent.send(
+                        rawInput = text,
+                        webView = vm.activeWebView,
+                        pageTitle = tab.pageTitle(),
+                        isPrivate = tab.isPrivate,
+                        tabId = tab.id
+                    )
+                },
+                onConfirmAction = { messageId ->
+                    agent.confirmAction(messageId, vm.activeWebView, tab.id)
+                },
+                onCancelAction = { messageId ->
+                    agent.cancelAction(messageId)
+                },
+                onPlanCommand = { command ->
+                    agent.handlePlanCommand(command, vm.activeWebView, tab.id)
+                }
             )
         }
     }
