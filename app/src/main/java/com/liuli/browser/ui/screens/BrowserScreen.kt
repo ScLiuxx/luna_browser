@@ -99,6 +99,8 @@ import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.web.BrowserTab
 import com.liuli.browser.web.BrowserViewModel
 import com.liuli.browser.web.agent.AgentController
+import com.liuli.browser.web.agent.AgentCreation
+import com.liuli.browser.web.agent.AgentCreationFormat
 import com.liuli.browser.web.agent.AgentReport
 import com.liuli.browser.web.agent.AgentReportFormat
 import com.liuli.browser.web.agent.AgentResearchPage
@@ -120,6 +122,9 @@ fun BrowserScreen(
     showSharedSnapshot: Boolean,
     onShare: (String, String) -> Unit,
     onExportReport: (AgentReport, AgentReportFormat) -> Unit,
+    onExportCreation: (AgentCreation, AgentCreationFormat) -> Unit,
+    onShareCreation: (AgentCreation) -> Unit,
+    onShareCreationCard: (AgentCreation) -> Unit,
     onNewHomeTab: () -> Unit,
     onOpenTabs: () -> Unit,
     onOpenLibrary: () -> Unit,
@@ -531,6 +536,9 @@ fun BrowserScreen(
                     agent.handlePlanCommand(command, vm.activeWebView, tab.id)
                 },
                 onExportReport = onExportReport,
+                onExportCreation = onExportCreation,
+                onShareCreation = onShareCreation,
+                onShareCreationCard = onShareCreationCard,
                 onOpenSource = { url, isPrivate ->
                     vm.createTab(
                         url = url,

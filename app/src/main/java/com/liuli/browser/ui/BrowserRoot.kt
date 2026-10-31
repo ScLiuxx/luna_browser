@@ -68,6 +68,7 @@ import com.kyant.backdrop.backdrops.emptyBackdrop
 import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
 import com.liuli.browser.data.LibraryStore
 import com.liuli.browser.data.SettingsStore
+import com.liuli.browser.ui.agent.AgentShareCard
 import com.liuli.browser.ui.components.GlassNavigationRail
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
@@ -86,9 +87,12 @@ import com.liuli.browser.web.BrowserViewModel
 import com.liuli.browser.web.DownloadRequest
 import com.liuli.browser.web.WebSnapshotBackdrop
 import com.liuli.browser.web.agent.AgentController
+import com.liuli.browser.web.agent.AgentCreation
+import com.liuli.browser.web.agent.AgentCreationFormat
 import com.liuli.browser.web.agent.AgentPolicyStore
 import com.liuli.browser.web.agent.AgentReport
 import com.liuli.browser.web.agent.AgentReportFormat
+import com.liuli.browser.web.agent.CreationEngine
 import com.liuli.browser.web.agent.ResearchEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -246,6 +250,43 @@ fun BrowserRoot(
     val pdfExportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument(AgentReportFormat.Pdf.mimeType),
         saveReport
+    )
+
+    // P4.3 创作产物同样只写到用户选定位置，Agent 不主动落盘。
+    val creationHolder = remember { mutableStateOf<AgentCreation?>(null) }
+    var creationFormat by remember { mutableStateOf(AgentCreationFormat.Markdown) }
+    val saveCreation: (Uri?) -> Unit = save@{ uri ->
+        val pending = creationHolder.value
+        val format = creationFormat
+        creationHolder.value = null
+        if (uri == null || pending == null) return@save
+        reportScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                runCatching {
+                    val content = CreationEngine.render(pending, format)
+                    val stream = activity.contentResolver.openOutputStream(uri)
+                        ?: throw IllegalStateException("无法写入目标文件")
+                    stream.use { output ->
+                        output.write(content)
+                    }
+                }.isSuccess
+            }
+            vm.showMessage(
+                if (saved) "创作产物已保存（${format.label}）" else "创作产物保存失败"
+            )
+        }
+    }
+    val creationMarkdownLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(AgentCreationFormat.Markdown.mimeType),
+        saveCreation
+    )
+    val creationHtmlLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(AgentCreationFormat.Html.mimeType),
+        saveCreation
+    )
+    val creationTextLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument(AgentCreationFormat.Text.mimeType),
+        saveCreation
     )
 
     val fileChooserLauncher = rememberLauncherForActivityResult(
@@ -483,6 +524,66 @@ fun BrowserRoot(
                                             }.onFailure {
                                                 reportHolder.value = null
                                                 vm.showMessage("无法打开文件保存对话框")
+                                            }
+                                        },
+                                        onExportCreation = { creation, format ->
+                                            creationHolder.value = creation
+                                            creationFormat = format
+                                            val launcher = when (format) {
+                                                AgentCreationFormat.Markdown -> creationMarkdownLauncher
+                                                AgentCreationFormat.Html -> creationHtmlLauncher
+                                                AgentCreationFormat.Text -> creationTextLauncher
+                                            }
+                                            runCatching {
+                                                launcher.launch(creation.fileName(format))
+                                            }.onFailure {
+                                                creationHolder.value = null
+                                                vm.showMessage("无法打开文件保存对话框")
+                                            }
+                                        },
+                                        onShareCreation = { creation ->
+                                            val text = buildString {
+                                                appendLine(creation.title)
+                                                appendLine()
+                                                append(CreationEngine.plainText(creation))
+                                                if (creation.sourceUrl.isNotBlank()) {
+                                                    appendLine()
+                                                    appendLine(creation.sourceUrl)
+                                                }
+                                            }
+                                            val send = Intent(Intent.ACTION_SEND).apply {
+                                                type = "text/plain"
+                                                putExtra(Intent.EXTRA_TEXT, text)
+                                                putExtra(Intent.EXTRA_SUBJECT, creation.title)
+                                            }
+                                            runCatching {
+                                                activity.startActivity(Intent.createChooser(send, "分享创作产物"))
+                                            }.onFailure { vm.showMessage("未找到可分享的应用") }
+                                        },
+                                        onShareCreationCard = { creation ->
+                                            reportScope.launch {
+                                                val uri = withContext(Dispatchers.IO) {
+                                                    runCatching {
+                                                        val file = AgentShareCard.writeToCache(activity, creation)
+                                                        AgentShareCard.uriFor(activity, file)
+                                                    }.getOrNull()
+                                                }
+                                                if (uri == null) {
+                                                    vm.showMessage("分享卡片生成失败")
+                                                    return@launch
+                                                }
+                                                val send = Intent(Intent.ACTION_SEND).apply {
+                                                    type = "image/png"
+                                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                                    putExtra(Intent.EXTRA_TITLE, creation.title)
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                }
+                                                val chooser = Intent.createChooser(send, "分享卡片").apply {
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                }
+                                                runCatching {
+                                                    activity.startActivity(chooser)
+                                                }.onFailure { vm.showMessage("未找到可分享的应用") }
                                             }
                                         },
                                         onNewHomeTab = {

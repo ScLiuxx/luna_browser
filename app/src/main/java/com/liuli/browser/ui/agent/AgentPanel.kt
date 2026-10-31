@@ -72,6 +72,9 @@ import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.web.agent.AgentActionStatus
 import com.liuli.browser.web.agent.AgentController
+import com.liuli.browser.web.agent.AgentCreation
+import com.liuli.browser.web.agent.AgentCreationFormat
+import com.liuli.browser.web.agent.AgentCreationKind
 import com.liuli.browser.web.agent.AgentMessage
 import com.liuli.browser.web.agent.AgentMessageRole
 import com.liuli.browser.web.agent.AgentMode
@@ -81,6 +84,7 @@ import com.liuli.browser.web.agent.AgentPlanStatus
 import com.liuli.browser.web.agent.AgentReport
 import com.liuli.browser.web.agent.AgentReportFormat
 import com.liuli.browser.web.agent.AgentSiteMode
+import com.liuli.browser.web.agent.CreationEngine
 import com.liuli.browser.web.agent.ResearchEngine
 import java.util.Locale
 
@@ -144,6 +148,9 @@ fun AgentPanel(
     onCancelAction: (Long) -> Unit,
     onPlanCommand: (AgentPlanCommand) -> Unit,
     onExportReport: (AgentReport, AgentReportFormat) -> Unit,
+    onExportCreation: (AgentCreation, AgentCreationFormat) -> Unit,
+    onShareCreation: (AgentCreation) -> Unit,
+    onShareCreationCard: (AgentCreation) -> Unit,
     onOpenSource: (String, Boolean) -> Unit,
     onSharePage: () -> Unit
 ) {
@@ -201,10 +208,17 @@ fun AgentPanel(
         }
     }
 
-    LaunchedEffect(agent.messages.size, agent.busy, agent.plan != null, agent.report?.createdAt) {
+    LaunchedEffect(
+        agent.messages.size,
+        agent.busy,
+        agent.plan != null,
+        agent.report?.createdAt,
+        agent.creation?.createdAt
+    ) {
         val target = agent.messages.size +
             (if (agent.plan != null) 1 else 0) +
             (if (agent.report != null) 1 else 0) +
+            (if (agent.creation != null) 1 else 0) +
             (if (agent.busy) 1 else 0)
         if (target == 0) return@LaunchedEffect
         listState.animateScrollToItem(target - 1)
@@ -366,6 +380,7 @@ fun AgentPanel(
 
                 val currentPlan = agent.plan
                 val currentReport = agent.report
+                val currentCreation = agent.creation
                 if (currentPlan == null && agent.messages.isEmpty()) {
                     EmptyState(
                         tabTitle = tabTitle,
@@ -401,6 +416,17 @@ fun AgentPanel(
                                     onExport = { format -> onExportReport(currentReport, format) },
                                     onOpenSource = onOpenSource,
                                     onDismiss = agent::dismissReport
+                                )
+                            }
+                        }
+                        if (currentCreation != null) {
+                            item(key = "creation-${currentCreation.createdAt}") {
+                                CreationCard(
+                                    creation = currentCreation,
+                                    onExport = { format -> onExportCreation(currentCreation, format) },
+                                    onShare = { onShareCreation(currentCreation) },
+                                    onShareCard = { onShareCreationCard(currentCreation) },
+                                    onDismiss = agent::dismissCreation
                                 )
                             }
                         }
@@ -932,6 +958,135 @@ private fun ReportCard(
         Spacer(Modifier.height(5.dp))
         BasicText(
             text = "报告保存在本机内存，只有你选择保存位置后才会写入文件。",
+            style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
+        )
+    }
+}
+
+/** P4.3 创作产物：展示写作/改写/大纲/分享卡片，并提供复制、导出与分享动作。 */
+@Composable
+private fun CreationCard(
+    creation: AgentCreation,
+    onExport: (AgentCreationFormat) -> Unit,
+    onShare: () -> Unit,
+    onShareCard: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val colors = LocalLiuliColors.current
+    val clipboard = LocalClipboardManager.current
+    var copied by rememberSaveable(creation.createdAt) { mutableStateOf(false) }
+    // 正文预览：去掉 Markdown 标记后取前几行。
+    val preview = remember(creation.body) {
+        creation.body.lineSequence()
+            .map { raw ->
+                val line = raw.trim()
+                val content = when {
+                    line.startsWith("#") || line.startsWith(">") -> line.trimStart('#', '>').trim()
+                    line.startsWith("- ") || line.startsWith("* ") || line.startsWith("+ ") ->
+                        line.drop(2).trim()
+                    else -> line
+                }
+                content.replace("**", "").replace("`", "").trim()
+            }
+            .filter { it.isNotBlank() }
+            .take(6)
+            .joinToString("\n")
+    }
+    val kindGlyph = when (creation.kind) {
+        AgentCreationKind.Write, AgentCreationKind.Rewrite -> Glyph.Edit
+        AgentCreationKind.Outline -> Glyph.History
+        AgentCreationKind.Card -> Glyph.Share
+        else -> Glyph.Edit
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(colors.accentSecondary.copy(alpha = if (colors.isDark) 0.12f else 0.07f))
+            .padding(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .background(colors.accentSecondary.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center
+            ) {
+                GlyphIcon(kindGlyph, colors.accentSecondary, size = 14.dp)
+            }
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                BasicText(
+                    text = creation.kind.label,
+                    style = TextStyle(
+                        color = colors.textPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+                BasicText(
+                    text = creation.title,
+                    style = TextStyle(color = colors.textTertiary, fontSize = 9.sp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(colors.accentSecondary.copy(alpha = 0.14f))
+                    .padding(horizontal = 7.dp, vertical = 3.dp)
+            ) {
+                BasicText(
+                    text = creation.mode.label,
+                    style = TextStyle(
+                        color = colors.accentSecondary,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        BasicText(
+            text = preview,
+            style = TextStyle(color = colors.textSecondary, fontSize = 11.sp, lineHeight = 17.sp),
+            maxLines = 6,
+            overflow = TextOverflow.Ellipsis
+        )
+        if (!creation.note.isNullOrBlank()) {
+            Spacer(Modifier.height(4.dp))
+            BasicText(
+                text = creation.note,
+                style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            ActionButton(if (copied) "已复制" else "复制", accent = true) {
+                clipboard.setText(AnnotatedString(CreationEngine.plainText(creation)))
+                copied = true
+            }
+            ActionButton("Markdown", accent = false) {
+                onExport(AgentCreationFormat.Markdown)
+            }
+            ActionButton("HTML", accent = false) {
+                onExport(AgentCreationFormat.Html)
+            }
+            ActionButton("分享", accent = false) { onShare() }
+            ActionButton("卡片", accent = false) { onShareCard() }
+            ActionButton("收起", accent = false, onClick = onDismiss)
+        }
+        Spacer(Modifier.height(5.dp))
+        BasicText(
+            text = "创作产物保存在本机内存，导出或分享前不会写入文件。",
             style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
         )
     }
