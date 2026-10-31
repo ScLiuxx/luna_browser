@@ -94,6 +94,8 @@ fun LiquidToggle(
                 } else {
                     fraction = if (selected()) 0f else 1f
                     onSelect(fraction == 1f)
+                    // fraction 变化会被下面的 snapshotFlow 捕获，
+                    // 由 updateValue 用液态弹簧把拇指送到位，这里不再重复驱动。
                 }
             },
             onDrag = { _, dragAmount ->
@@ -110,7 +112,14 @@ fun LiquidToggle(
         )
     }
     LaunchedEffect(dampedDragAnimation) {
-        snapshotFlow { fraction }.collectLatest { dampedDragAnimation.updateValue(it) }
+        snapshotFlow { fraction }.collectLatest { current ->
+            // 拖动路径已经用 snapValue 跟手了，这里不能再叠加一次弹簧动画，
+            // 否则两者会互相打断，拇指出现抖动。
+            // targetValue 与 fraction 一致说明拖拽自己已经同步过了，跳过。
+            if (!didDrag && current != dampedDragAnimation.targetValue) {
+                dampedDragAnimation.updateValue(current)
+            }
+        }
     }
     LaunchedEffect(selected) {
         snapshotFlow { selected() }.collectLatest { isSelected ->

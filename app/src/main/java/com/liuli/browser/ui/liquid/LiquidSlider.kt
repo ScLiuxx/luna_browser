@@ -101,6 +101,8 @@ fun LiquidSlider(
                         onValueChange(dragValue)
                         animateToValue(dragValue)
                     }
+                    // 必须复位：否则之后的外部赋值（比如重置按钮）会被当成拖拽中而不再动。
+                    didDrag = false
                 },
                 onDrag = { _, dragAmount ->
                     if (!didDrag) didDrag = dragAmount.x != 0f
@@ -118,7 +120,10 @@ fun LiquidSlider(
         }
         LaunchedEffect(dampedDragAnimation) {
             snapshotFlow { value() }.collectLatest { current ->
-                if (!didDrag && dampedDragAnimation.targetValue != current) {
+                // 拖动路径已经用 snapValue 跟手了，这里不能再叠加一次弹簧动画，
+                // 否则两者会互相打断，拇指出现抖动。
+                // dragValue 与外部值一致说明这次变化就是拖拽自己造成的，跳过。
+                if (!didDrag && current != dragValue) {
                     dragValue = current
                     dampedDragAnimation.updateValue(current)
                 }

@@ -3,6 +3,7 @@ package com.liuli.browser.ui.screens
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +47,7 @@ import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.components.PrivacyPolicyDialog
+import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
@@ -131,12 +133,12 @@ fun PrivacyGate(
                         style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
                     )
                     Spacer(Modifier.height(10.dp))
-                    GatePoint("不收集、不上传任何浏览数据")
-                    GatePoint("仅申请联网权限")
-                    GatePoint("网页的定位、相机、麦克风请求默认拒绝")
-                    GatePoint("隐私护盾默认开启：拦截跟踪器与跟踪参数")
-                    GatePoint("退出应用时自动清除 Cookie、缓存与历史")
-                    GatePoint("书签与设置只保存在本机，可随时清除")
+                    GatePoint("不收集、不上传任何浏览数据", 0)
+                    GatePoint("仅申请联网权限", 1)
+                    GatePoint("网页的定位、相机、麦克风请求默认拒绝", 2)
+                    GatePoint("隐私护盾默认开启：拦截跟踪器与跟踪参数", 3)
+                    GatePoint("退出应用时自动清除 Cookie、缓存与历史", 4)
+                    GatePoint("书签与设置只保存在本机，可随时清除", 5)
 
                     Spacer(Modifier.height(16.dp))
 
@@ -183,10 +185,13 @@ fun PrivacyGate(
                             .heightIn(min = 48.dp)
                             .clip(RoundedCornerShape(50))
                             .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
                                 role = Role.Button,
                                 onClickLabel = "不同意并退出",
                                 onClick = onDecline
-                            ),
+                            )
+                            .pressScale(pressedScale = 0.94f),
                         contentAlignment = Alignment.Center
                     ) {
                         BasicText(
@@ -225,10 +230,28 @@ private fun GateBadge(label: String, glyph: Glyph) {
 }
 
 @Composable
-private fun GatePoint(text: String) {
+private fun GatePoint(text: String, index: Int = 0) {
     val colors = LocalLiuliColors.current
+    // 隐私要点逐条浮现：六条同时亮起会让人抓不住重点。
+    val stagger = MotionSpec.staggerDelay(index, stepMillis = 22)
+    var appeared by remember(text) { mutableStateOf(false) }
+    LaunchedEffect(text) {
+        if (stagger > 0) kotlinx.coroutines.delay(stagger.toLong())
+        appeared = true
+    }
+    val alpha by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0f,
+        animationSpec = MotionSpec.value(Motion.Normal),
+        label = "gate-point-alpha"
+    )
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+            .graphicsLayer {
+                this.alpha = alpha
+                translationX = (1f - alpha) * 12.dp.toPx()
+            },
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(

@@ -5,6 +5,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -15,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.IntOffset
 import com.liuli.browser.ui.theme.MotionSpec
 
 /**
@@ -35,11 +38,17 @@ fun LiquidDialog(
     panelModifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
+    // 规格先在组合作用域算好：动画参数位不是 @Composable 上下文。
+    val fadeInSpec = MotionSpec.enter()
+    val fadeOutSpec = MotionSpec.exit()
+    val scaleSpec = MotionSpec.pageSpring()
+    val slideSpec = MotionSpec.pageSpring(IntOffset.Zero)
+
     Box(modifier.fillMaxSize()) {
         AnimatedVisibility(
             visible = visible,
-            enter = fadeIn(MotionSpec.enter()),
-            exit = fadeOut(MotionSpec.exit())
+            enter = fadeIn(animationSpec = fadeInSpec),
+            exit = fadeOut(animationSpec = fadeOutSpec)
         ) {
             Box(
                 Modifier
@@ -53,13 +62,20 @@ fun LiquidDialog(
         }
         AnimatedVisibility(
             visible = visible,
-            enter = fadeIn(MotionSpec.enter()) + scaleIn(
-                animationSpec = MotionSpec.pageSpring(),
+            // 面板从下方轻轻升起并缩放到位：比单纯缩放更有"被拿起来"的重量感。
+            enter = fadeIn(animationSpec = fadeInSpec) + scaleIn(
+                animationSpec = scaleSpec,
                 initialScale = 0.92f
+            ) + slideInVertically(
+                animationSpec = slideSpec,
+                initialOffsetY = { it / 8 }
             ),
-            exit = fadeOut(MotionSpec.exit()) + scaleOut(
-                animationSpec = MotionSpec.pageSpring(),
+            exit = fadeOut(animationSpec = fadeOutSpec) + scaleOut(
+                animationSpec = scaleSpec,
                 targetScale = 0.95f
+            ) + slideOutVertically(
+                animationSpec = slideSpec,
+                targetOffsetY = { it / 10 }
             ),
             modifier = Modifier.align(Alignment.Center)
         ) {

@@ -8,6 +8,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.ReadOnlyComposable
@@ -164,6 +165,10 @@ object MotionSpec {
     fun intValue(reduced: Boolean, durationMillis: Int = Motion.Normal): FiniteAnimationSpec<Int> =
         tween(durationMillis, easing = Motion.Enter)
 
+    /** 尺寸补间动画（用于 expandVertically 等 IntSize 规格）。 */
+    fun sizeValue(reduced: Boolean, durationMillis: Int = Motion.Normal): FiniteAnimationSpec<IntSize> =
+        tween(durationMillis, easing = Motion.Enter)
+
     /** 颜色过渡（用于 animateColorAsState）。 */
     fun color(reduced: Boolean, durationMillis: Int = Motion.Quick): FiniteAnimationSpec<Color> =
         tween(durationMillis, easing = Motion.Enter)
@@ -217,6 +222,11 @@ object MotionSpec {
     @Composable
     fun intValue(durationMillis: Int = Motion.Normal): FiniteAnimationSpec<Int> =
         intValue(reduceMotion, durationMillis)
+
+    /** 尺寸补间动画（用于 expandVertically 等 IntSize 规格）。 */
+    @Composable
+    fun sizeValue(durationMillis: Int = Motion.Normal): FiniteAnimationSpec<IntSize> =
+        sizeValue(reduceMotion, durationMillis)
 
     /** 颜色过渡（用于 animateColorAsState）。 */
     @Composable

@@ -8,8 +8,10 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -38,6 +40,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -172,7 +175,7 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(18.dp))
 
-            SettingsSection(title = "外观", backdrop = backdrop) {
+            SettingsSection(title = "外观", backdrop = backdrop, index = 0) {
                 SettingsLabel("主题色", "液态玻璃的折射色调")
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -293,7 +296,7 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(14.dp))
 
-            SettingsSection(title = "搜索", backdrop = backdrop) {
+            SettingsSection(title = "搜索", backdrop = backdrop, index = 1) {
                 SettingsLabel("默认搜索引擎", "地址栏输入非网址内容时使用")
                 Spacer(Modifier.height(10.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -361,7 +364,7 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(14.dp))
 
-            SettingsSection(title = "浏览", backdrop = backdrop) {
+            SettingsSection(title = "浏览", backdrop = backdrop, index = 2) {
                 SettingsLabel("标签页上限", "达到上限后自动回收最久未使用的标签")
                 Spacer(Modifier.height(4.dp))
                 Row(
@@ -424,7 +427,7 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(14.dp))
 
-            SettingsSection(title = "AI 页面助手", backdrop = backdrop) {
+            SettingsSection(title = "AI 页面助手", backdrop = backdrop, index = 3) {
                 ToggleRow(
                     title = "启用 Agent 浮球",
                     subtitle = "读取正文与页面结构，可提议受控操作",
@@ -471,7 +474,16 @@ fun SettingsScreen(
                     },
                     style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 14.sp)
                 )
-                if (activePolicyHost != null && activePolicy.mode == AgentSiteMode.Allowed) {
+                // 低风险免确认只在"允许"站点出现，出现与收起都有过渡。
+                AnimatedVisibility(
+                    visible = activePolicyHost != null && activePolicy.mode == AgentSiteMode.Allowed,
+                    enter = fadeIn(MotionSpec.enter()) + expandVertically(
+                        animationSpec = MotionSpec.sizeValue()
+                    ),
+                    exit = fadeOut(MotionSpec.exit()) + shrinkVertically(
+                        animationSpec = MotionSpec.sizeValue()
+                    )
+                ) {
                     ToggleRow(
                         title = "本站低风险步骤免确认",
                         subtitle = "只自动执行滚动，点击与填写仍需逐条确认",
@@ -497,29 +509,40 @@ fun SettingsScreen(
                     onCheckedChange = { settings.updateAgentCloudEnabled(it) },
                     backdrop = backdrop
                 )
-                if (settings.agentCloudEnabled) {
-                    Spacer(Modifier.height(10.dp))
-                    SettingsField(
-                        label = "接口地址（OpenAI 兼容）",
-                        value = settings.agentEndpoint,
-                        placeholder = SettingsStore.DEFAULT_AGENT_ENDPOINT,
-                        onValueChange = { settings.updateAgentEndpoint(it) }
+                // 云端配置区：展开云端推理后才出现，展开/收起有过渡。
+                AnimatedVisibility(
+                    visible = settings.agentCloudEnabled,
+                    enter = fadeIn(MotionSpec.enter()) + expandVertically(
+                        animationSpec = MotionSpec.sizeValue()
+                    ),
+                    exit = fadeOut(MotionSpec.exit()) + shrinkVertically(
+                        animationSpec = MotionSpec.sizeValue()
                     )
-                    Spacer(Modifier.height(8.dp))
-                    SettingsField(
-                        label = "模型名称",
-                        value = settings.agentModel,
-                        placeholder = SettingsStore.DEFAULT_AGENT_MODEL,
-                        onValueChange = { settings.updateAgentModel(it) }
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    SettingsField(
-                        label = "API Key（仅本次会话）",
-                        value = settings.agentApiKey,
-                        placeholder = "不写入磁盘，退出应用即失效",
-                        onValueChange = { settings.updateAgentApiKey(it) },
-                        password = true
-                    )
+                ) {
+                    Column {
+                        Spacer(Modifier.height(10.dp))
+                        SettingsField(
+                            label = "接口地址（OpenAI 兼容）",
+                            value = settings.agentEndpoint,
+                            placeholder = SettingsStore.DEFAULT_AGENT_ENDPOINT,
+                            onValueChange = { settings.updateAgentEndpoint(it) }
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        SettingsField(
+                            label = "模型名称",
+                            value = settings.agentModel,
+                            placeholder = SettingsStore.DEFAULT_AGENT_MODEL,
+                            onValueChange = { settings.updateAgentModel(it) }
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        SettingsField(
+                            label = "API Key（仅本次会话）",
+                            value = settings.agentApiKey,
+                            placeholder = "不写入磁盘，退出应用即失效",
+                            onValueChange = { settings.updateAgentApiKey(it) },
+                            password = true
+                        )
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 val cloudState = when {
@@ -587,7 +610,7 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(14.dp))
 
-            SettingsSection(title = "隐私护盾", backdrop = backdrop) {
+            SettingsSection(title = "隐私护盾", backdrop = backdrop, index = 4) {
                 ToggleRow(
                     title = "隐私护盾",
                     subtitle = "拦截跟踪器、去除跟踪参数、使用通用 User-Agent",
@@ -638,7 +661,7 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(14.dp))
 
-            SettingsSection(title = "金标联盟 · 隐私与合规", backdrop = backdrop) {
+            SettingsSection(title = "金标联盟 · 隐私与合规", backdrop = backdrop, index = 5) {
                 ComplianceRow("权限最小化", "仅 INTERNET，无存储、定位、相机、通讯录等敏感权限")
                 ComplianceRow("隐私首启同意", "首次启动展示说明，同意后才创建 WebView 与联网")
                 ComplianceRow("无第三方 SDK", "零统计、零广告、零账号；书签与历史仅存本机")
@@ -668,7 +691,7 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(14.dp))
 
-            SettingsSection(title = "关于", backdrop = backdrop) {
+            SettingsSection(title = "关于", backdrop = backdrop, index = 6) {
                 AboutRow("应用版本", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                 kernelRows.forEach { (label, value) -> AboutRow(label, value) }
                 AboutRow("运行平台", "Android ${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}")
@@ -721,10 +744,30 @@ fun SettingsScreen(
 private fun SettingsSection(
     title: String,
     backdrop: LayerBackdrop,
+    index: Int = 0,
     content: @Composable () -> Unit
 ) {
     val colors = LocalLiuliColors.current
-    Column(Modifier.fillMaxWidth()) {
+    // 整屏七段设置分区逐段浮现：一次全亮会让人找不到起点。
+    val stagger = MotionSpec.staggerDelay(index, stepMillis = 26)
+    var appeared by remember(title) { mutableStateOf(false) }
+    LaunchedEffect(title) {
+        if (stagger > 0) kotlinx.coroutines.delay(stagger.toLong())
+        appeared = true
+    }
+    val alpha by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0f,
+        animationSpec = MotionSpec.value(Motion.Normal),
+        label = "settings-section-alpha"
+    )
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                this.alpha = alpha
+                translationY = (1f - alpha) * 16.dp.toPx()
+            }
+    ) {
         BasicText(
             text = title,
             style = TextStyle(
