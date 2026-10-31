@@ -76,6 +76,11 @@ fun LiquidSlider(
         val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
         val animationScope = rememberCoroutineScope()
         var didDrag by remember { mutableStateOf(false) }
+        // 拖拽期间的即时值：手指按下到松手之间，拇指必须 1:1 跟手。
+        var dragValue by remember { mutableFloatStateOf(value()) }
+        val interactiveHighlight = remember(animationScope) {
+            InteractiveHighlight(animationScope = animationScope)
+        }
         val dampedDragAnimation = remember(animationScope) {
             DampedDragAnimation(
                 animationScope = animationScope,
@@ -84,23 +89,36 @@ fun LiquidSlider(
                 visibilityThreshold = visibilityThreshold,
                 initialScale = 1f,
                 pressedScale = 1.5f,
-                onDragStarted = {},
+                // 松手回弹允许轻微过冲，液态感更强。
+                valueDampingRatio = 0.7f,
+                valueStiffness = 600f,
+                onDragStarted = {
+                    dragValue = dampedDragAnimation.value
+                },
                 onDragStopped = {
-                    if (didDrag) onValueChange(targetValue)
+                    if (didDrag) {
+                        onValueChange(dragValue)
+                        dampedDragAnimation.animateToValue(dragValue)
+                    }
                 },
                 onDrag = { _, dragAmount ->
                     if (!didDrag) didDrag = dragAmount.x != 0f
                     val delta = (valueRange.endInclusive - valueRange.start) * (dragAmount.x / trackWidth)
-                    onValueChange(
-                        if (isLtr) (targetValue + delta).coerceIn(valueRange)
-                        else (targetValue - delta).coerceIn(valueRange)
-                    )
+                    dragValue = if (isLtr) {
+                        (dragValue + delta).coerceIn(valueRange)
+                    } else {
+                        (dragValue - delta).coerceIn(valueRange)
+                    }
+                    // 直接落到新位置，避免弹簧让拇指落后于手指。
+                    dampedDragAnimation.snapValue(dragValue)
+                    if (didDrag) onValueChange(dragValue)
                 }
             )
         }
         LaunchedEffect(dampedDragAnimation) {
             snapshotFlow { value() }.collectLatest { current ->
-                if (dampedDragAnimation.targetValue != current) {
+                if (!didDrag && dampedDragAnimation.targetValue != current) {
+                    dragValue = current
                     dampedDragAnimation.updateValue(current)
                 }
             }

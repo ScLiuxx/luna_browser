@@ -222,6 +222,17 @@ class DampedDragAnimation(
         }
     }
 
+    /**
+     * 直接跳到目标值，不走弹簧。
+     * 拖拽过程中必须用它，否则拇指会落后于手指半拍。
+     */
+    fun snapValue(value: Float) {
+        val targetValue = value.coerceIn(valueRange)
+        animationScope.launch {
+            valueAnimation.snapTo(targetValue)
+        }
+    }
+
     fun animateToValue(value: Float) {
         animationScope.launch {
             mutatorMutex.mutate {
