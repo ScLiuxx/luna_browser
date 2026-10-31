@@ -67,7 +67,11 @@ fun LiquidToggle(
     val dragWidth = with(density) { 20f.dp.toPx() }
     val animationScope = rememberCoroutineScope()
     var didDrag by remember { mutableStateOf(false) }
+    // 拖拽期间的即时值，保证拇指跟手；松手后才由弹簧接管。
     var fraction by remember { mutableFloatStateOf(if (selected()) 1f else 0f) }
+    val interactiveHighlight = remember(animationScope) {
+        InteractiveHighlight(animationScope = animationScope)
+    }
     val dampedDragAnimation = remember(animationScope) {
         DampedDragAnimation(
             animationScope = animationScope,
@@ -76,7 +80,12 @@ fun LiquidToggle(
             visibilityThreshold = 0.001f,
             initialScale = 1f,
             pressedScale = 1.5f,
-            onDragStarted = {},
+            // 拨动到位时允许轻微过冲，开关才有"啪"的液态回弹。
+            valueDampingRatio = 0.68f,
+            valueStiffness = 620f,
+            onDragStarted = {
+                // fraction 已经是当前状态，拖动直接以它为基准接着走。
+            },
             onDragStopped = {
                 if (didDrag) {
                     fraction = if (targetValue >= 0.5f) 1f else 0f
@@ -95,6 +104,8 @@ fun LiquidToggle(
                 } else {
                     (fraction - delta).fastCoerceIn(0f, 1f)
                 }
+                // 拖动中直接跟随手指，松手才回弹。
+                snapValue(fraction)
             }
         )
     }
@@ -142,6 +153,8 @@ fun LiquidToggle(
                     this.contentDescription = contentDescription
                 }
                 .then(dampedDragAnimation.modifier)
+                .then(interactiveHighlight.modifier)
+                .then(interactiveHighlight.gestureModifier)
                 .drawBackdrop(
                     backdrop = rememberCombinedBackdrop(
                         backdrop,

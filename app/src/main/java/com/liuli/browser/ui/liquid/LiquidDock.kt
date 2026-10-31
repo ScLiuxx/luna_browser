@@ -1,13 +1,12 @@
 package com.liuli.browser.ui.liquid
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOut
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -86,16 +85,20 @@ fun RowScope.LiquidBottomTab(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val scale = LocalLiquidBottomTabScale.current
+    // 自身管理 interactionSource，让按下时图标有轻微缩放反馈。
+    val interaction = remember { MutableInteractionSource() }
     val base = modifier
         .clip(Capsule())
         .then(
             if (interactive) {
-                Modifier.clickable(
-                    interactionSource = null,
-                    indication = null,
-                    role = Role.Tab,
-                    onClick = onClick
-                )
+                Modifier
+                    .clickable(
+                        interactionSource = interaction,
+                        indication = null,
+                        role = Role.Tab,
+                        onClick = onClick
+                    )
+                    .pressScale(pressedScale = 0.88f, interactionSource = interaction)
             } else {
                 Modifier
             }
@@ -172,7 +175,7 @@ fun LiquidDock(
                     currentIndex = targetIndex
                     animateToValue(targetIndex.toFloat())
                     animationScope.launch {
-                        offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f))
+                        offsetAnimation.animateTo(0f, Motion.GlideSpring.spring(0.5f))
                     }
                     onSelected(targetIndex)
                 },
@@ -367,23 +370,37 @@ private fun RowScope.DockItems(
                     tint = iconTint,
                     size = 22.dp
                 )
-                if (item.glyph == Glyph.Tabs && tabCount > 0) {
+                if (item.glyph == Glyph.Tabs) {
+                    // 角标常驻在组合里，靠缩放控制显隐：
+                    // 新增标签时从 0 弹到 1，给一个轻微的弹性提示。
+                    val badgeScale by animateFloatAsState(
+                        targetValue = if (tabCount > 0) 1f else 0f,
+                        animationSpec = MotionSpec.pageSpring(),
+                        label = "dock-badge-scale"
+                    )
                     Box(
                         Modifier
-                            .graphicsLayer { translationX = 10.dp.toPx(); translationY = (-7).dp.toPx() }
+                            .graphicsLayer {
+                                translationX = 10.dp.toPx()
+                                translationY = (-7).dp.toPx()
+                                scaleX = badgeScale
+                                scaleY = badgeScale
+                            }
                             .size(12.dp)
                             .clip(Capsule())
                             .background(colors.accent),
                         contentAlignment = Alignment.Center
                     ) {
-                        BasicText(
-                            text = tabCount.coerceAtMost(99).toString(),
-                            style = TextStyle(
-                                color = Color.White,
-                                fontSize = 7.sp,
-                                fontWeight = FontWeight.Bold
+                        if (tabCount > 0) {
+                            BasicText(
+                                text = tabCount.coerceAtMost(99).toString(),
+                                style = TextStyle(
+                                    color = Color.White,
+                                    fontSize = 7.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }

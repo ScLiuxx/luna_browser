@@ -2,10 +2,11 @@ package com.liuli.browser.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -33,13 +34,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -51,14 +55,13 @@ import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.liuli.browser.data.LibraryEntry
 import com.liuli.browser.data.LibraryStore
 import com.liuli.browser.ui.components.GlassIconButton
-import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
-import com.liuli.browser.ui.theme.reduceMotion
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -76,6 +79,16 @@ fun LibraryScreen(
     var section by rememberSaveable { mutableIntStateOf(0) }
     val list = if (section == 0) library.bookmarks else library.history
     val horizontal = if (isTablet) 26.dp else 18.dp
+    // 已经演过入场动画的条目：滚动出去再回来不重播。
+    val revealedKeys = remember { mutableStateListOf<String>() }
+    // 空状态首次出现时淡入上移。
+    var contentVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { contentVisible = true }
+    val contentAlpha by animateFloatAsState(
+        targetValue = if (contentVisible) 1f else 0f,
+        animationSpec = MotionSpec.value(Motion.Slow),
+        label = "library-content"
+    )
 
     BackHandler(onBack = onDismiss)
 
@@ -156,7 +169,12 @@ fun LibraryScreen(
             if (list.isEmpty()) {
                 EmptyLibrary(
                     isBookmarks = section == 0,
-                    modifier = Modifier.padding(horizontal = horizontal, vertical = 56.dp)
+                    modifier = Modifier
+                        .padding(horizontal = horizontal, vertical = 56.dp)
+                        .graphicsLayer {
+                            alpha = contentAlpha
+                            translationY = (1f - contentAlpha) * 14.dp.toPx()
+                        }
                 )
             } else {
                 LazyColumn(
@@ -169,16 +187,47 @@ fun LibraryScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(list, key = { it.url + it.timestamp }) { entry ->
-                        LibraryRow(
-                            entry = entry,
-                            isBookmark = section == 0,
-                            onClick = { onOpenUrl(entry.url) },
-                            onDelete = {
-                                if (section == 0) library.removeBookmark(entry.url)
-                                else library.removeHistory(entry)
+                    itemsIndexed(
+                        list,
+                        key = { _, entry -> entry.url + entry.timestamp }
+                    ) { index, entry ->
+                        val rowKey = entry.url + entry.timestamp
+                        // 规格先在组合作用域里算好：fadeIn / LaunchedEffect 的参数位
+                        // 不是 @Composable 上下文，不能直接调用 MotionSpec 的组合版本。
+                        val stagger = MotionSpec.staggerDelay(index)
+                        val fadeInSpec = MotionSpec.enter()
+                        val fadeOutSpec = MotionSpec.exit()
+                        val slideSpec = MotionSpec.pageSpring(IntOffset.Zero)
+                        var revealed by remember(rowKey) {
+                            mutableStateOf(rowKey in revealedKeys)
+                        }
+                        LaunchedEffect(rowKey) {
+                            if (!revealed) {
+                                delay(stagger.toLong())
+                                revealed = true
+                                if (rowKey !in revealedKeys) revealedKeys.add(rowKey)
                             }
-                        )
+                        }
+                        AnimatedVisibility(
+                            visible = revealed,
+                            enter = fadeIn(
+                                animationSpec = fadeInSpec
+                            ) + slideInVertically(
+                                animationSpec = slideSpec,
+                                initialOffsetY = { it / 5 }
+                            ),
+                            exit = fadeOut(animationSpec = fadeOutSpec)
+                        ) {
+                            LibraryRow(
+                                entry = entry,
+                                isBookmark = section == 0,
+                                onClick = { onOpenUrl(entry.url) },
+                                onDelete = {
+                                    if (section == 0) library.removeBookmark(entry.url)
+                                    else library.removeHistory(entry)
+                                }
+                            )
+                        }
                     }
                     item {
                         Spacer(Modifier.navigationBarsPadding())
@@ -196,23 +245,34 @@ private fun LibraryTab(
     onClick: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val background by animateColorAsState(
+        targetValue = if (selected) colors.glassTintStrong else Color.Transparent,
+        animationSpec = MotionSpec.color(),
+        label = "tab-bg"
+    )
+    val labelColor by animateColorAsState(
+        targetValue = if (selected) colors.textPrimary else colors.textSecondary,
+        animationSpec = MotionSpec.color(),
+        label = "tab-label"
+    )
     Box(
         Modifier
             .clip(RoundedCornerShape(50))
-            .background(
-                if (selected) {
-                    colors.glassTintStrong
-                } else {
-                    Color.Transparent
-                }
+            .background(background)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Tab,
+                onClick = onClick
             )
-            .clickable(role = Role.Tab, onClick = onClick)
+            .pressScale(pressedScale = 0.92f, interactionSource = interactionSource)
             .padding(horizontal = 16.dp, vertical = 9.dp)
     ) {
         BasicText(
             text = label,
             style = TextStyle(
-                color = if (selected) colors.textPrimary else colors.textSecondary,
+                color = labelColor,
                 fontSize = 13.sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
             )
@@ -228,12 +288,21 @@ private fun LibraryRow(
     onDelete: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    val rowInteraction = remember { MutableInteractionSource() }
+    val deleteInteraction = remember { MutableInteractionSource() }
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(colors.glassTint)
-            .clickable(role = Role.Button, onClickLabel = entry.title, onClick = onClick)
+            .clickable(
+                interactionSource = rowInteraction,
+                indication = null,
+                role = Role.Button,
+                onClickLabel = entry.title,
+                onClick = onClick
+            )
+            .pressScale(pressedScale = 0.97f, interactionSource = rowInteraction)
             .padding(start = 12.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -273,7 +342,14 @@ private fun LibraryRow(
         Box(
             Modifier
                 .size(Dimens.minTouch)
-                .clickable(role = Role.Button, onClickLabel = "删除", onClick = onDelete),
+                .clickable(
+                    interactionSource = deleteInteraction,
+                    indication = null,
+                    role = Role.Button,
+                    onClickLabel = "删除",
+                    onClick = onDelete
+                )
+                .pressScale(pressedScale = 0.82f, interactionSource = deleteInteraction),
             contentAlignment = Alignment.Center
         ) {
             GlyphIcon(Glyph.Close, colors.textTertiary, size = 16.dp)

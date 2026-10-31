@@ -3,12 +3,14 @@ package com.liuli.browser.ui.screens
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,7 +28,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -67,9 +69,13 @@ import com.liuli.browser.ui.components.GlassIconButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.Motion
+import com.liuli.browser.ui.theme.MotionSpec
 import com.liuli.browser.web.BrowserTab
+import kotlinx.coroutines.delay
 
 private data class QuickLink(
     val label: String,
@@ -108,22 +114,41 @@ fun HomeScreen(
     onOpenSettings: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    // sharedBounds 的 boundsTransform 不是组合上下文，规格要在外面先算好。
+    val addressBoundsSpec = MotionSpec.sharedSpring(reduceMotion, Rect(0f, 0f, 0f, 0f))
     val addressSharedModifier = with(sharedScope) {
         Modifier.sharedBounds(
             sharedContentState = rememberSharedContentState(key = "address-bar"),
             animatedVisibilityScope = animatedScope,
-            boundsTransform = { _, _ -> spring(dampingRatio = 1f, stiffness = 342f) },
+            boundsTransform = { _, _ -> addressBoundsSpec },
             resizeMode = SharedTransitionScope.ResizeMode.RemeasureToBounds
         )
     }
     var query by rememberSaveable { mutableStateOf("") }
     var entered by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { entered = true }
+    // 整屏入场：淡入 + 上移。规格统一取自 MotionSpec；
+    // "减少动态效果"时直接落位，不做补间。
+    val entranceSpec: FiniteAnimationSpec<Float> = if (reduceMotion) {
+        tween(durationMillis = 0)
+    } else {
+        MotionSpec.value(Motion.Slow)
+    }
     val entrance by animateFloatAsState(
-        targetValue = if (entered && !reduceMotion) 1f else if (entered) 1f else 0f,
-        animationSpec = tween(durationMillis = if (reduceMotion) 0 else 520, easing = FastOutSlowInEasing),
+        targetValue = if (entered) 1f else 0f,
+        animationSpec = entranceSpec,
         label = "home-entrance"
     )
+    // 最近标签逐张浮现：淡入用补间，缩放用弹簧；
+    // 规格先在组合作用域算好，动画参数位不能直接调用组合版 MotionSpec。
+    val cardFadeSpec: FiniteAnimationSpec<Float> = if (reduceMotion) {
+        tween(durationMillis = 0)
+    } else {
+        MotionSpec.value(Motion.Slow)
+    }
+    val cardScaleSpec: FiniteAnimationSpec<Float> = MotionSpec.pageSpring(reduceMotion)
+    // 已经演过入场动画的最近标签：横向滚出去再回来不重播。
+    val revealedTabIds = remember { mutableStateListOf<Long>() }
 
     val recentTabs = tabs.filter { !it.isPrivate && it.url.isNotBlank() }
         .sortedByDescending { it.lastUsedAt }

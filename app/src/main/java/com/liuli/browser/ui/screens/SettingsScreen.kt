@@ -4,7 +4,9 @@ import android.os.Build
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -74,10 +76,13 @@ import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.components.PrivacyPolicyDialog
 import com.liuli.browser.ui.liquid.LiquidSlider
 import com.liuli.browser.ui.liquid.LiquidToggle
+import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.AccentPalettes
 import com.liuli.browser.ui.theme.DarkModeOption
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.Motion
+import com.liuli.browser.ui.theme.MotionSpec
 import com.liuli.browser.web.BrowserViewModel
 import com.liuli.browser.web.agent.AgentAuditEntry
 import com.liuli.browser.web.agent.AgentController
@@ -173,13 +178,29 @@ fun SettingsScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     AccentPalettes.forEachIndexed { index, palette ->
                         val selected = settings.accentIndex == index
+                        val interaction = remember { MutableInteractionSource() }
+                        // 选中圈缩放淡入，未选中淡出：切换主题色时有一眼可见的反馈。
+                        val markScale by animateFloatAsState(
+                            targetValue = if (selected) 1f else 0.4f,
+                            animationSpec = MotionSpec.pageSpring(),
+                            label = "accent-mark"
+                        )
+                        val markAlpha by animateFloatAsState(
+                            targetValue = if (selected) 1f else 0f,
+                            animationSpec = MotionSpec.value(Motion.Quick),
+                            label = "accent-mark-alpha"
+                        )
                         Box(
                             Modifier
                                 .size(Dimens.minTouch)
                                 .clip(CircleShape)
-                                .clickable(role = Role.Button, onClickLabel = palette.label) {
-                                    settings.updateAccentIndex(index)
-                                },
+                                .clickable(
+                                    interactionSource = interaction,
+                                    indication = null,
+                                    role = Role.Button,
+                                    onClickLabel = palette.label
+                                ) { settings.updateAccentIndex(index) }
+                                .pressScale(pressedScale = 0.86f, interactionSource = interaction),
                             contentAlignment = Alignment.Center
                         ) {
                             Box(
@@ -193,9 +214,15 @@ fun SettingsScreen(
                                     ),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (selected) {
-                                    GlyphIcon(Glyph.Check, Color.White, size = 16.dp)
-                                }
+                                GlyphIcon(
+                                    glyph = Glyph.Check,
+                                    tint = Color.White.copy(alpha = markAlpha),
+                                    modifier = Modifier.graphicsLayer {
+                                        scaleX = markScale
+                                        scaleY = markScale
+                                    },
+                                    size = 16.dp
+                                )
                             }
                         }
                     }
@@ -212,19 +239,33 @@ fun SettingsScreen(
                 ) {
                     DarkModeOption.entries.forEachIndexed { index, option ->
                         val selected = settings.darkMode == index
+                        val interaction = remember { MutableInteractionSource() }
+                        val background by animateColorAsState(
+                            targetValue = if (selected) colors.glassTintStrong else Color.Transparent,
+                            animationSpec = MotionSpec.color(),
+                            label = "dark-mode-bg"
+                        )
+                        val labelColor by animateColorAsState(
+                            targetValue = if (selected) colors.textPrimary else colors.textSecondary,
+                            animationSpec = MotionSpec.color(),
+                            label = "dark-mode-label"
+                        )
                         Box(
                             Modifier
                                 .clip(RoundedCornerShape(50))
-                                .background(
-                                    if (selected) colors.glassTintStrong else Color.Transparent
-                                )
-                                .clickable(role = Role.RadioButton) { settings.updateDarkMode(index) }
+                                .background(background)
+                                .clickable(
+                                    interactionSource = interaction,
+                                    indication = null,
+                                    role = Role.RadioButton
+                                ) { settings.updateDarkMode(index) }
+                                .pressScale(pressedScale = 0.92f, interactionSource = interaction)
                                 .padding(horizontal = 14.dp, vertical = 8.dp)
                         ) {
                             BasicText(
                                 text = option.label,
                                 style = TextStyle(
-                                    color = if (selected) colors.textPrimary else colors.textSecondary,
+                                    color = labelColor,
                                     fontSize = 12.sp,
                                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                                 )
@@ -257,29 +298,60 @@ fun SettingsScreen(
                 Spacer(Modifier.height(10.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     SearchEngine.entries.forEach { engine ->
+                        val selected = settings.searchEngine == engine
+                        val interaction = remember { MutableInteractionSource() }
+                        // 勾选标记缩放淡入，行文字颜色交叉过渡。
+                        val markScale by animateFloatAsState(
+                            targetValue = if (selected) 1f else 0.5f,
+                            animationSpec = MotionSpec.pageSpring(),
+                            label = "engine-mark"
+                        )
+                        val markAlpha by animateFloatAsState(
+                            targetValue = if (selected) 1f else 0f,
+                            animationSpec = MotionSpec.value(Motion.Quick),
+                            label = "engine-mark-alpha"
+                        )
+                        val labelColor by animateColorAsState(
+                            targetValue = if (selected) colors.accent else colors.textPrimary,
+                            animationSpec = MotionSpec.color(),
+                            label = "engine-label"
+                        )
                         Row(
                             Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = Dimens.minTouch)
                                 .clip(RoundedCornerShape(14.dp))
-                                .clickable(role = Role.RadioButton) {
-                                    settings.updateSearchEngine(engine)
-                                }
+                                .clickable(
+                                    interactionSource = interaction,
+                                    indication = null,
+                                    role = Role.RadioButton
+                                ) { settings.updateSearchEngine(engine) }
+                                .pressScale(pressedScale = 0.98f, interactionSource = interaction)
                                 .padding(horizontal = 6.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            GlyphIcon(
-                                glyph = if (settings.searchEngine == engine) Glyph.Check else Glyph.Search,
-                                tint = if (settings.searchEngine == engine) colors.accent else colors.textTertiary,
-                                size = 17.dp
-                            )
+                            Box(Modifier.size(17.dp), contentAlignment = Alignment.Center) {
+                                GlyphIcon(
+                                    glyph = if (selected) Glyph.Check else Glyph.Search,
+                                    tint = if (selected) {
+                                        colors.accent.copy(alpha = markAlpha)
+                                    } else {
+                                        colors.textTertiary
+                                    },
+                                    modifier = Modifier.graphicsLayer {
+                                        scaleX = markScale
+                                        scaleY = markScale
+                                    },
+                                    size = 17.dp
+                                )
+                            }
                             Spacer(Modifier.width(10.dp))
                             BasicText(
                                 text = engine.label,
                                 style = TextStyle(
-                                    color = if (settings.searchEngine == engine) colors.accent else colors.textPrimary,
+                                    color = labelColor,
                                     fontSize = 14.sp,
-                                    fontWeight = if (settings.searchEngine == engine) FontWeight.SemiBold else FontWeight.Normal
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                                 )
                             )
                         }
@@ -710,6 +782,7 @@ private fun ToggleRow(
     backdrop: Backdrop
 ) {
     val colors = LocalLiuliColors.current
+    val interaction = remember { MutableInteractionSource() }
     Row(
         Modifier
             .fillMaxWidth()
@@ -720,7 +793,12 @@ private fun ToggleRow(
         Column(
             Modifier
                 .weight(1f)
-                .clickable(role = Role.Switch) { onCheckedChange(!checked) }
+                .clickable(
+                    interactionSource = interaction,
+                    indication = null,
+                    role = Role.Switch
+                ) { onCheckedChange(!checked) }
+                .pressScale(pressedScale = 0.98f, interactionSource = interaction)
         ) {
             BasicText(
                 text = title,

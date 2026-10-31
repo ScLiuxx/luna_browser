@@ -1,6 +1,19 @@
 package com.liuli.browser.ui.agent
 
 import android.speech.tts.TextToSpeech
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -24,7 +37,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -37,6 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -49,6 +63,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -68,8 +83,12 @@ import com.liuli.browser.ui.components.GlassIconButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.Motion
+import com.liuli.browser.ui.theme.MotionSpec
+import com.liuli.browser.ui.theme.reduceMotion
 import com.liuli.browser.web.agent.AgentActionStatus
 import com.liuli.browser.web.agent.AgentController
 import com.liuli.browser.web.agent.AgentCreation
@@ -86,6 +105,7 @@ import com.liuli.browser.web.agent.AgentReportFormat
 import com.liuli.browser.web.agent.AgentSiteMode
 import com.liuli.browser.web.agent.CreationEngine
 import com.liuli.browser.web.agent.ResearchEngine
+import kotlinx.coroutines.delay
 import java.util.Locale
 
 @Composable
@@ -95,6 +115,7 @@ fun AgentOrb(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalLiuliColors.current
+    val interaction = remember { MutableInteractionSource() }
     GlassSurface(
         backdrop = backdrop,
         modifier = modifier
@@ -105,10 +126,13 @@ fun AgentOrb(
                 role = Role.Button
             }
             .clickable(
+                interactionSource = interaction,
+                indication = null,
                 role = Role.Button,
                 onClickLabel = "打开琉璃 Agent",
                 onClick = onClick
-            ),
+            )
+            .pressScale(pressedScale = 0.90f, interactionSource = interaction),
         shape = CircleShape,
         tint = colors.glassTintStrong,
         blurRadius = 20.dp,
@@ -159,6 +183,8 @@ fun AgentPanel(
     val listState = rememberLazyListState()
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+    // 已经演过入场动画的消息：滚出去再回来不重播。
+    val revealedMessageIds = remember { mutableStateListOf<Long>() }
 
     // P7 语音回复：只在用户开启后朗读最新一条只读回答，不上传音频、不请求录音权限。
     val context = LocalContext.current
@@ -239,9 +265,18 @@ fun AgentPanel(
     }
 
     Box(Modifier.fillMaxSize()) {
+        // 遮罩淡入：面板展开时背景不该瞬间变暗。
+        var scrimVisible by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) { scrimVisible = true }
+        val scrimAlpha by animateFloatAsState(
+            targetValue = if (scrimVisible) 1f else 0f,
+            animationSpec = MotionSpec.value(Motion.Quick),
+            label = "agent-scrim"
+        )
         Box(
             Modifier
                 .fillMaxSize()
+                .graphicsLayer { alpha = scrimAlpha }
                 .background(Color.Black.copy(alpha = 0.20f))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -389,6 +424,12 @@ fun AgentPanel(
                             .fillMaxWidth()
                     )
                 } else {
+                    // 规格先在组合作用域算好：fadeIn / scaleIn 的参数位不是
+                    // @Composable 上下文，不能直接调用 MotionSpec 的组合版本。
+                    val fadeInSpec = MotionSpec.enter()
+                    val fadeOutSpec = MotionSpec.exit()
+                    val scaleInSpec = MotionSpec.pageSpring()
+                    val slideSpec = MotionSpec.pageSpring(androidx.compose.ui.unit.IntOffset.Zero)
                     LazyColumn(
                         state = listState,
                         modifier = Modifier
@@ -397,37 +438,127 @@ fun AgentPanel(
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                         contentPadding = PaddingValues(vertical = 4.dp)
                     ) {
-                        items(agent.messages, key = { it.id }) { message ->
-                            MessageBubble(
-                                message = message,
-                                onConfirm = { onConfirmAction(message.id) },
-                                onCancel = { onCancelAction(message.id) }
-                            )
+                        itemsIndexed(agent.messages, key = { _, item -> item.id }) { index, message ->
+                            // 逐条浮现：新消息到达时轻轻滑入。
+                            // 用户消息从右侧滑入，Agent 回答从下方升起，方向与来源一致。
+                            val stagger = MotionSpec.staggerDelay(index, stepMillis = 18)
+                            val alreadyShown = message.id in revealedMessageIds
+                            var appeared by remember(message.id) {
+                                mutableStateOf(alreadyShown)
+                            }
+                            LaunchedEffect(message.id) {
+                                if (!alreadyShown) {
+                                    if (stagger > 0) delay(stagger.toLong())
+                                    revealedMessageIds.add(message.id)
+                                }
+                                appeared = true
+                            }
+                            val isUserMessage = message.role == AgentMessageRole.User
+                            val enterTransition: EnterTransition = if (isUserMessage) {
+                                fadeIn(animationSpec = fadeInSpec) +
+                                    slideInHorizontally(
+                                        animationSpec = slideSpec,
+                                        initialOffsetX = { it / 4 }
+                                    )
+                            } else {
+                                fadeIn(animationSpec = fadeInSpec) +
+                                    slideInVertically(
+                                        animationSpec = slideSpec,
+                                        initialOffsetY = { it / 6 }
+                                    )
+                            }
+                            AnimatedVisibility(
+                                visible = appeared,
+                                enter = enterTransition,
+                                exit = fadeOut(animationSpec = fadeOutSpec)
+                            ) {
+                                MessageBubble(
+                                    message = message,
+                                    onConfirm = { onConfirmAction(message.id) },
+                                    onCancel = { onCancelAction(message.id) }
+                                )
+                            }
                         }
                         if (currentPlan != null) {
                             item(key = "plan") {
-                                PlanCard(plan = currentPlan, onCommand = onPlanCommand)
+                                // 计划没有独立 id，用目标文本作为身份标识：
+                                // 换了目标就是新计划，重新播一次入场动画。
+                                var appeared by remember(currentPlan.goal) {
+                                    mutableStateOf(false)
+                                }
+                                LaunchedEffect(currentPlan.goal) { appeared = true }
+                                AnimatedVisibility(
+                                    visible = appeared,
+                                    enter = fadeIn(animationSpec = fadeInSpec) +
+                                        scaleIn(
+                                            animationSpec = scaleInSpec,
+                                            initialScale = 0.94f
+                                        ),
+                                    exit = fadeOut(animationSpec = fadeOutSpec) +
+                                        scaleOut(
+                                            animationSpec = scaleInSpec,
+                                            targetScale = 0.96f
+                                        )
+                                ) {
+                                    PlanCard(plan = currentPlan, onCommand = onPlanCommand)
+                                }
                             }
                         }
                         if (currentReport != null) {
                             item(key = "report-${currentReport.createdAt}") {
-                                ReportCard(
-                                    report = currentReport,
-                                    onExport = { format -> onExportReport(currentReport, format) },
-                                    onOpenSource = onOpenSource,
-                                    onDismiss = agent::dismissReport
-                                )
+                                var appeared by remember(currentReport.createdAt) {
+                                    mutableStateOf(false)
+                                }
+                                LaunchedEffect(currentReport.createdAt) { appeared = true }
+                                AnimatedVisibility(
+                                    visible = appeared,
+                                    enter = fadeIn(animationSpec = fadeInSpec) +
+                                        scaleIn(
+                                            animationSpec = scaleInSpec,
+                                            initialScale = 0.94f
+                                        ),
+                                    exit = fadeOut(animationSpec = fadeOutSpec) +
+                                        scaleOut(
+                                            animationSpec = scaleInSpec,
+                                            targetScale = 0.96f
+                                        )
+                                ) {
+                                    ReportCard(
+                                        report = currentReport,
+                                        onExport = { format -> onExportReport(currentReport, format) },
+                                        onOpenSource = onOpenSource,
+                                        onDismiss = agent::dismissReport
+                                    )
+                                }
                             }
                         }
                         if (currentCreation != null) {
                             item(key = "creation-${currentCreation.createdAt}") {
-                                CreationCard(
-                                    creation = currentCreation,
-                                    onExport = { format -> onExportCreation(currentCreation, format) },
-                                    onShare = { onShareCreation(currentCreation) },
-                                    onShareCard = { onShareCreationCard(currentCreation) },
-                                    onDismiss = agent::dismissCreation
-                                )
+                                var appeared by remember(currentCreation.createdAt) {
+                                    mutableStateOf(false)
+                                }
+                                LaunchedEffect(currentCreation.createdAt) { appeared = true }
+                                AnimatedVisibility(
+                                    visible = appeared,
+                                    enter = fadeIn(animationSpec = fadeInSpec) +
+                                        scaleIn(
+                                            animationSpec = scaleInSpec,
+                                            initialScale = 0.94f
+                                        ),
+                                    exit = fadeOut(animationSpec = fadeOutSpec) +
+                                        scaleOut(
+                                            animationSpec = scaleInSpec,
+                                            targetScale = 0.96f
+                                        )
+                                ) {
+                                    CreationCard(
+                                        creation = currentCreation,
+                                        onExport = { format -> onExportCreation(currentCreation, format) },
+                                        onShare = { onShareCreation(currentCreation) },
+                                        onShareCard = { onShareCreationCard(currentCreation) },
+                                        onDismiss = agent::dismissCreation
+                                    )
+                                }
                             }
                         }
                         if (agent.busy) {
@@ -481,29 +612,41 @@ fun AgentPanel(
                     }
                     Spacer(Modifier.width(8.dp))
                     val canSend = input.isNotBlank() && !agent.busy
+                    val sendInteraction = remember { MutableInteractionSource() }
+                    val sendBackground by animateColorAsState(
+                        targetValue = if (canSend) colors.accent
+                        else colors.textPrimary.copy(alpha = 0.06f),
+                        animationSpec = MotionSpec.color(),
+                        label = "send-bg"
+                    )
+                    val sendTint by animateColorAsState(
+                        targetValue = if (canSend) Color.White else colors.textTertiary,
+                        animationSpec = MotionSpec.color(),
+                        label = "send-tint"
+                    )
                     Box(
                         Modifier
                             .size(Dimens.minTouch)
                             .clip(CircleShape)
-                            .background(
-                                if (canSend) colors.accent
-                                else colors.textPrimary.copy(alpha = 0.06f)
-                            )
+                            .background(sendBackground)
                             .semantics {
                                 contentDescription = "发送"
                                 role = Role.Button
                             }
                             .clickable(
+                                interactionSource = sendInteraction,
+                                indication = null,
                                 enabled = canSend,
                                 role = Role.Button,
                                 onClickLabel = "发送",
                                 onClick = { submit(input) }
-                            ),
+                            )
+                            .pressScale(pressedScale = 0.88f, interactionSource = sendInteraction),
                         contentAlignment = Alignment.Center
                     ) {
                         GlyphIcon(
                             glyph = Glyph.Sparkle,
-                            tint = if (canSend) Color.White else colors.textTertiary,
+                            tint = sendTint,
                             size = 20.dp
                         )
                     }
@@ -548,11 +691,19 @@ fun AgentPanel(
 @Composable
 private fun QuickChip(label: String, onClick: () -> Unit) {
     val colors = LocalLiuliColors.current
+    val interaction = remember { MutableInteractionSource() }
     Box(
         Modifier
             .clip(RoundedCornerShape(50))
             .background(colors.textPrimary.copy(alpha = 0.06f))
-            .clickable(role = Role.Button, onClickLabel = label, onClick = onClick)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onClickLabel = label,
+                onClick = onClick
+            )
+            .pressScale(pressedScale = 0.90f, interactionSource = interaction)
             .padding(horizontal = 11.dp, vertical = 6.dp)
     ) {
         BasicText(
@@ -565,8 +716,19 @@ private fun QuickChip(label: String, onClick: () -> Unit) {
 @Composable
 private fun EmptyState(tabTitle: String, modifier: Modifier = Modifier) {
     val colors = LocalLiuliColors.current
+    // 面板打开时内容淡入上移，避免"啪"地一下出现。
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+    val emptyAlpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = MotionSpec.value(Motion.Slow),
+        label = "agent-empty-alpha"
+    )
     Column(
-        modifier,
+        modifier.graphicsLayer {
+            alpha = emptyAlpha
+            translationY = (1f - emptyAlpha) * 12.dp.toPx()
+        },
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -667,16 +829,22 @@ private fun PlanCard(
                     style = TextStyle(color = colors.textTertiary, fontSize = 9.sp)
                 )
             }
+            // 状态徽标：待批准→执行中→已完成，颜色交叉过渡而不是瞬时换色。
+            val badgeTint by animateColorAsState(
+                targetValue = statusTint,
+                animationSpec = MotionSpec.color(),
+                label = "plan-status-tint"
+            )
             Box(
                 Modifier
                     .clip(RoundedCornerShape(50))
-                    .background(statusTint.copy(alpha = 0.14f))
+                    .background(badgeTint.copy(alpha = 0.14f))
                     .padding(horizontal = 7.dp, vertical = 3.dp)
             ) {
                 BasicText(
                     text = statusLabel,
                     style = TextStyle(
-                        color = statusTint,
+                        color = badgeTint,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -702,6 +870,18 @@ private fun PlanCard(
                 current -> colors.accent
                 else -> colors.textTertiary
             }
+            // 步骤状态在"待办→执行中→已完成"之间流转，颜色交叉过渡而不是瞬时跳变。
+            val tint by animateColorAsState(
+                targetValue = stepTint,
+                animationSpec = MotionSpec.color(),
+                label = "plan-step-tint"
+            )
+            // 当前步骤的箭头轻轻脉动，提示"卡在这里"。
+            val markerScale by animateFloatAsState(
+                targetValue = if (current) 1f else 0f,
+                animationSpec = MotionSpec.pageSpring(),
+                label = "plan-step-marker"
+            )
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -712,13 +892,13 @@ private fun PlanCard(
                     Modifier
                         .size(18.dp)
                         .clip(CircleShape)
-                        .background(stepTint.copy(alpha = 0.14f)),
+                        .background(tint.copy(alpha = 0.14f)),
                     contentAlignment = Alignment.Center
                 ) {
                     BasicText(
                         text = "${index + 1}",
                         style = TextStyle(
-                            color = stepTint,
+                            color = tint,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -738,7 +918,15 @@ private fun PlanCard(
                 when {
                     completed -> GlyphIcon(Glyph.Check, colors.success, size = 12.dp)
                     failed -> GlyphIcon(Glyph.Info, colors.danger, size = 12.dp)
-                    current -> GlyphIcon(Glyph.ChevronRight, colors.accent, size = 12.dp)
+                    current -> GlyphIcon(
+                        glyph = Glyph.ChevronRight,
+                        tint = colors.accent,
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = markerScale
+                            scaleY = markerScale
+                        },
+                        size = 12.dp
+                    )
                     else -> Unit
                 }
             }
@@ -797,6 +985,13 @@ private fun ReportCard(
     val clipboard = LocalClipboardManager.current
     var expanded by rememberSaveable(report.createdAt) { mutableStateOf(false) }
     var copied by rememberSaveable(report.createdAt) { mutableStateOf(false) }
+    // "已复制"提示 1.6 秒后自动复原，避免用户误以为状态卡住。
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1600)
+            copied = false
+        }
+    }
     val context = LocalContext.current
     var speaking by rememberSaveable(report.createdAt) { mutableStateOf(false) }
     val speech = remember(context) { TextToSpeech(context.applicationContext) { } }
@@ -870,12 +1065,19 @@ private fun ReportCard(
             )
         }
         Spacer(Modifier.height(7.dp))
+        // 行数用动画插值：展开/收起时正文连续生长，而不是"啪"地跳一下。
+        val maxLines by animateIntAsState(
+            targetValue = if (expanded) 80 else 8,
+            animationSpec = MotionSpec.intValue(Motion.Slow),
+            label = "report-expand"
+        )
         BasicText(
             text = report.markdown,
             style = TextStyle(color = colors.textSecondary, fontSize = 11.sp, lineHeight = 17.sp),
-            maxLines = if (expanded) 80 else 8,
+            maxLines = maxLines,
             overflow = TextOverflow.Ellipsis
         )
+        val expandInteraction = remember { MutableInteractionSource() }
         BasicText(
             text = if (expanded) "收起全文" else "展开全文",
             style = TextStyle(
@@ -886,9 +1088,12 @@ private fun ReportCard(
             modifier = Modifier
                 .padding(top = 4.dp)
                 .clickable(
+                    interactionSource = expandInteraction,
+                    indication = null,
                     role = Role.Button,
                     onClickLabel = if (expanded) "收起全文" else "展开全文"
                 ) { expanded = !expanded }
+                .pressScale(pressedScale = 0.94f, interactionSource = expandInteraction)
         )
         Spacer(Modifier.height(7.dp))
         report.sources.forEach { source ->
@@ -975,6 +1180,13 @@ private fun CreationCard(
     val colors = LocalLiuliColors.current
     val clipboard = LocalClipboardManager.current
     var copied by rememberSaveable(creation.createdAt) { mutableStateOf(false) }
+    // "已复制"提示 1.6 秒后自动复原。
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1600)
+            copied = false
+        }
+    }
     // 正文预览：去掉 Markdown 标记后取前几行。
     val preview = remember(creation.body) {
         creation.body.lineSequence()
@@ -993,10 +1205,9 @@ private fun CreationCard(
             .joinToString("\n")
     }
     val kindGlyph = when (creation.kind) {
-        AgentCreationKind.Write, AgentCreationKind.Rewrite -> Glyph.Edit
         AgentCreationKind.Outline -> Glyph.History
         AgentCreationKind.Card -> Glyph.Share
-        else -> Glyph.Edit
+        AgentCreationKind.Write, AgentCreationKind.Rewrite -> Glyph.Edit
     }
 
     Column(
@@ -1217,30 +1428,35 @@ private fun ActionCard(
                     )
                 )
                 Spacer(Modifier.height(9.dp))
-                when (message.actionStatus) {
-                    AgentActionStatus.Pending -> {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ActionButton("允许执行", accent = true, onClick = onConfirm)
-                            ActionButton("取消", accent = false, onClick = onCancel)
-                        }
+                // 状态行交叉淡入：待确认→执行中→已执行，切换时不是硬切。
+                val statusLabel = when (message.actionStatus) {
+                    AgentActionStatus.Running -> "正在执行…"
+                    AgentActionStatus.Done -> "已执行"
+                    AgentActionStatus.Failed -> "执行失败，请查看下方说明"
+                    AgentActionStatus.Cancelled -> "已取消"
+                    else -> null
+                }
+                val statusTint = when (message.actionStatus) {
+                    AgentActionStatus.Running -> colors.accent
+                    AgentActionStatus.Done -> colors.success
+                    AgentActionStatus.Failed -> colors.danger
+                    else -> colors.textTertiary
+                }
+                AnimatedVisibility(
+                    visible = statusLabel != null,
+                    enter = fadeIn(animationSpec = MotionSpec.enter(Motion.Quick)),
+                    exit = fadeOut(animationSpec = MotionSpec.exit(Motion.Quick))
+                ) {
+                    BasicText(
+                        text = statusLabel.orEmpty(),
+                        style = TextStyle(color = statusTint, fontSize = 11.sp)
+                    )
+                }
+                if (message.actionStatus == AgentActionStatus.Pending) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ActionButton("允许执行", accent = true, onClick = onConfirm)
+                        ActionButton("取消", accent = false, onClick = onCancel)
                     }
-                    AgentActionStatus.Running -> BasicText(
-                        text = "正在执行…",
-                        style = TextStyle(color = colors.accent, fontSize = 11.sp)
-                    )
-                    AgentActionStatus.Done -> BasicText(
-                        text = "已执行",
-                        style = TextStyle(color = colors.success, fontSize = 11.sp)
-                    )
-                    AgentActionStatus.Failed -> BasicText(
-                        text = "执行失败，请查看下方说明",
-                        style = TextStyle(color = colors.danger, fontSize = 11.sp)
-                    )
-                    AgentActionStatus.Cancelled -> BasicText(
-                        text = "已取消",
-                        style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
-                    )
-                    AgentActionStatus.None -> Unit
                 }
             }
         }
@@ -1259,12 +1475,25 @@ private fun ActionButton(
     onClick: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    val interaction = remember { MutableInteractionSource() }
+    val background by animateColorAsState(
+        targetValue = if (accent) colors.accent else colors.textPrimary.copy(alpha = 0.08f),
+        animationSpec = MotionSpec.color(),
+        label = "action-bg"
+    )
     Box(
         Modifier
             .heightIn(min = Dimens.minTouch)
             .clip(RoundedCornerShape(50))
-            .background(if (accent) colors.accent else colors.textPrimary.copy(alpha = 0.08f))
-            .clickable(role = Role.Button, onClickLabel = label, onClick = onClick)
+            .background(background)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onClickLabel = label,
+                onClick = onClick
+            )
+            .pressScale(pressedScale = 0.92f, interactionSource = interaction)
             .padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -1279,18 +1508,70 @@ private fun ActionButton(
     }
 }
 
+/**
+ * 思考中的指示器。
+ *
+ * 原来只有一个静态的星形图标，用户看不出 Agent 是否还活着。
+ * 现在用三点依次起伏的波纹表示"正在进行"，并让星形图标轻微呼吸。
+ * "减少动态效果"开启时退化为静态图标。
+ */
 @Composable
 private fun ThinkingRow() {
     val colors = LocalLiuliColors.current
+    val reduced = reduceMotion
+    // 三点波纹：用无限循环的相位偏移错开，模拟依次点亮的节奏。
+    val wave = remember { Animatable(0f) }
+    LaunchedEffect(reduced) {
+        if (reduced) {
+            wave.snapTo(0f)
+        } else {
+            while (true) {
+                wave.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = 1100, easing = Motion.Enter)
+                )
+                wave.snapTo(0f)
+            }
+        }
+    }
+    val phase = wave.value
+
     Row(
         Modifier.padding(start = 4.dp, top = 6.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        GlyphIcon(Glyph.Sparkle, colors.accent, size = 13.dp)
+        GlyphIcon(
+            glyph = Glyph.Sparkle,
+            tint = colors.accent.copy(alpha = 0.55f + 0.45f * phase),
+            size = 13.dp
+        )
         Spacer(Modifier.width(6.dp))
         BasicText(
             text = "正在读取页面或与页面交互…",
             style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
         )
+        Spacer(Modifier.width(8.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            repeat(3) { index ->
+                // 每个点落后前一个 1/3 个周期，形成从左到右的流动感。
+                val offset = (phase - index / 3f).let { if (it < 0f) it + 1f else it }
+                val dotAlpha = 0.25f + 0.75f * (1f - offset)
+                val dotScale = 0.72f + 0.42f * (1f - offset)
+                Box(
+                    Modifier
+                        .size(5.dp)
+                        .graphicsLayer {
+                            alpha = dotAlpha
+                            scaleX = dotScale
+                            scaleY = dotScale
+                        }
+                        .clip(CircleShape)
+                        .background(colors.accent)
+                )
+            }
+        }
     }
 }

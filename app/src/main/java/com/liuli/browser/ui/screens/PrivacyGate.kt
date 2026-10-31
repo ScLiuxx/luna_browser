@@ -1,7 +1,6 @@
 package com.liuli.browser.ui.screens
 
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -48,6 +47,8 @@ import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.components.PrivacyPolicyDialog
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.Motion
+import com.liuli.browser.ui.theme.MotionSpec
 
 @Composable
 fun PrivacyGate(
@@ -61,7 +62,7 @@ fun PrivacyGate(
     LaunchedEffect(Unit) { entered = true }
     val progress by animateFloatAsState(
         targetValue = if (entered) 1f else 0f,
-        animationSpec = tween(520),
+        animationSpec = MotionSpec.value(Motion.Slow),
         label = "gate-entrance"
     )
 

@@ -4,10 +4,11 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,13 +31,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -44,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -66,8 +69,11 @@ import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.Motion
+import com.liuli.browser.ui.theme.MotionSpec
 import com.liuli.browser.web.BrowserTab
 import kotlinx.coroutines.delay
 
@@ -92,6 +98,8 @@ fun TabSwitcherScreen(
             .thenByDescending { it.lastUsedAt }
     )
     val columns = if (isTablet) 3 else 2
+    // 已经演过入场动画的标签：滚动出去再回来不重播。
+    val revealedIds = remember { mutableStateListOf<Long>() }
 
     BackHandler(onBack = onDismiss)
 
@@ -155,9 +163,22 @@ fun TabSwitcherScreen(
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                items(ordered, key = { it.id }) { tab ->
+                itemsIndexed(ordered, key = { _, tab -> tab.id }) { index, tab ->
+                    // 逐张浮现：错峰延迟由 MotionSpec 统一给出，已演过的标签不重播。
+                    val stagger = MotionSpec.staggerDelay(index)
+                    var revealed by remember(tab.id) {
+                        mutableStateOf(tab.id in revealedIds)
+                    }
+                    LaunchedEffect(tab.id) {
+                        if (!revealed) {
+                            delay(stagger.toLong())
+                            revealed = true
+                            if (tab.id !in revealedIds) revealedIds.add(tab.id)
+                        }
+                    }
                     TabCard(
                         tab = tab,
+                        revealed = revealed,
                         isActive = tab.id == activeId,
                         sharedScope = sharedScope,
                         animatedScope = animatedScope,
@@ -198,6 +219,7 @@ fun TabSwitcherScreen(
 @Composable
 private fun TabCard(
     tab: BrowserTab,
+    revealed: Boolean,
     isActive: Boolean,
     sharedScope: SharedTransitionScope,
     animatedScope: AnimatedVisibilityScope,
@@ -206,48 +228,82 @@ private fun TabCard(
 ) {
     val colors = LocalLiuliColors.current
     var closing by remember(tab.id) { mutableStateOf(false) }
+
+    // 动效规格先在组合作用域里取好：动画参数位不是 @Composable 上下文。
+    val enterFadeSpec = MotionSpec.enter()
+    val enterScaleSpec = MotionSpec.pageSpring()
+    val closeSpec = MotionSpec.exit(Motion.Quick)
+    val borderColorSpec = MotionSpec.color()
+    val borderWidthSpec = MotionSpec.pageSpring(0.01.dp)
+    // sharedBounds 的 boundsTransform 不是组合上下文，规格要提前算好。
+    val imageBoundsSpec = MotionSpec.pageSpring(Rect(0f, 0f, 0f, 0f))
+
+    // 入场：轻微放大 + 淡入，和共享元素落位同步。
+    val enterAlpha by animateFloatAsState(
+        targetValue = if (revealed) 1f else 0f,
+        animationSpec = enterFadeSpec,
+        label = "tab-card-enter-alpha"
+    )
+    val enterScale by animateFloatAsState(
+        targetValue = if (revealed) 1f else 0.94f,
+        animationSpec = enterScaleSpec,
+        label = "tab-card-enter-scale"
+    )
+
+    // 关闭：先播退场动画，动画结束后再真正移除标签页。
     val scale by animateFloatAsState(
         targetValue = if (closing) 0.86f else 1f,
-        animationSpec = tween(190),
+        animationSpec = closeSpec,
         label = "tab-card-scale"
     )
     val cardAlpha by animateFloatAsState(
         targetValue = if (closing) 0f else 1f,
-        animationSpec = tween(190),
+        animationSpec = closeSpec,
         label = "tab-card-alpha"
     )
     LaunchedEffect(closing) {
         if (closing) {
-            delay(195)
+            delay((Motion.Quick + 20).toLong())
             onClose()
         }
     }
+
+    // 当前标签的高亮边框：宽度与颜色都平滑过渡，而不是瞬间弹出。
+    val borderColor by animateColorAsState(
+        targetValue = if (isActive) colors.accent.copy(alpha = 0.85f) else Color.Transparent,
+        animationSpec = borderColorSpec,
+        label = "tab-card-border-color"
+    )
+    val borderWidth by animateDpAsState(
+        targetValue = if (isActive) 1.5.dp else 0.dp,
+        animationSpec = borderWidthSpec,
+        label = "tab-card-border-width"
+    )
+
+    val cardInteraction = remember { MutableInteractionSource() }
+    val closeInteraction = remember { MutableInteractionSource() }
 
     Box(
         Modifier
             .fillMaxWidth()
             .aspectRatio(0.70f)
+            // 按压回弹放在最外层，整张卡片（含背景与共享快照）一起缩小。
+            .pressScale(pressedScale = 0.96f, interactionSource = cardInteraction)
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                alpha = cardAlpha
+                scaleX = scale * enterScale
+                scaleY = scale * enterScale
+                alpha = cardAlpha * enterAlpha
             }
             .clip(RoundedCornerShape(24.dp))
             .background(colors.glassTintStrong)
             .semantics { contentDescription = tab.pageTitle() }
-            .then(
-                if (isActive) {
-                    Modifier.border(
-                        width = 1.5.dp,
-                        color = colors.accent.copy(alpha = 0.85f),
-                        shape = RoundedCornerShape(24.dp)
-                    )
-                } else {
-                    Modifier
-                }
+            .border(
+                width = borderWidth,
+                color = borderColor,
+                shape = RoundedCornerShape(24.dp)
             )
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = cardInteraction,
                 indication = null,
                 role = Role.Button,
                 onClick = onOpen
@@ -259,7 +315,7 @@ private fun TabCard(
                 Modifier.sharedBounds(
                     sharedContentState = rememberSharedContentState(key = "tab-image-${tab.id}"),
                     animatedVisibilityScope = animatedScope,
-                    boundsTransform = { _, _ -> spring(dampingRatio = 0.9f, stiffness = 380f) },
+                    boundsTransform = { _, _ -> imageBoundsSpec },
                     resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(
                         ContentScale.Crop,
                         Alignment.Center
@@ -341,7 +397,14 @@ private fun TabCard(
                     contentDescription = "关闭标签页"
                     role = Role.Button
                 }
-                .clickable(role = Role.Button, onClickLabel = "关闭标签页") {
+                // 按压回弹与点击共用同一个 interactionSource，状态才会同步。
+                .pressScale(pressedScale = 0.84f, interactionSource = closeInteraction)
+                .clickable(
+                    interactionSource = closeInteraction,
+                    indication = LocalIndication.current,
+                    role = Role.Button,
+                    onClickLabel = "关闭标签页"
+                ) {
                     if (!closing) closing = true
                 },
             contentAlignment = Alignment.Center

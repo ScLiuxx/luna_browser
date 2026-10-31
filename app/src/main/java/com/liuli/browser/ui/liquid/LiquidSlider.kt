@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -93,12 +94,12 @@ fun LiquidSlider(
                 valueDampingRatio = 0.7f,
                 valueStiffness = 600f,
                 onDragStarted = {
-                    dragValue = dampedDragAnimation.value
+                    // dragValue 已经是当前状态，拖动直接以它为基准接着走。
                 },
                 onDragStopped = {
                     if (didDrag) {
                         onValueChange(dragValue)
-                        dampedDragAnimation.animateToValue(dragValue)
+                        animateToValue(dragValue)
                     }
                 },
                 onDrag = { _, dragAmount ->
@@ -110,7 +111,7 @@ fun LiquidSlider(
                         (dragValue - delta).coerceIn(valueRange)
                     }
                     // 直接落到新位置，避免弹簧让拇指落后于手指。
-                    dampedDragAnimation.snapValue(dragValue)
+                    snapValue(dragValue)
                     if (didDrag) onValueChange(dragValue)
                 }
             )
@@ -175,6 +176,8 @@ fun LiquidSlider(
                     }
                 }
                 .then(dampedDragAnimation.modifier)
+                .then(interactiveHighlight.modifier)
+                .then(interactiveHighlight.gestureModifier)
                 .drawBackdrop(
                     backdrop = rememberCombinedBackdrop(
                         backdrop,

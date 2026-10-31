@@ -2,6 +2,7 @@ package com.liuli.browser.ui.liquid
 
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -76,6 +77,8 @@ fun LiquidButton(
     val interactiveHighlight = remember(animationScope) {
         InteractiveHighlight(animationScope = animationScope)
     }
+    // 按钮本体也参与按压回弹：玻璃件形变之外，整块再缩一点，手感更"实"。
+    val interaction = remember { MutableInteractionSource() }
 
     Row(
         modifier
@@ -137,12 +140,13 @@ fun LiquidButton(
                 if (contentDescription != null) this.contentDescription = contentDescription
             }
             .clickable(
-                interactionSource = null,
+                interactionSource = interaction,
                 indication = if (isInteractive) null else LocalIndication.current,
                 enabled = enabled,
                 role = Role.Button,
                 onClick = onClick
             )
+            .pressScale(pressedScale = 0.95f, interactionSource = interaction)
             .then(
                 if (isInteractive) {
                     Modifier
@@ -186,6 +190,7 @@ fun LiquidIconButton(
     } else {
         colors.glassTint.copy(alpha = if (colors.isDark) 0.42f else 0.50f)
     }
+    val interaction = remember { MutableInteractionSource() }
 
     Box(
         modifier
@@ -236,13 +241,14 @@ fun LiquidIconButton(
                 role = Role.Button
             }
             .clickable(
-                interactionSource = null,
+                interactionSource = interaction,
                 indication = null,
                 enabled = enabled,
                 role = Role.Button,
                 onClickLabel = description,
                 onClick = onClick
             )
+            .pressScale(pressedScale = 0.90f, interactionSource = interaction)
             .then(interactiveHighlight.modifier)
             .then(interactiveHighlight.gestureModifier),
         contentAlignment = Alignment.Center

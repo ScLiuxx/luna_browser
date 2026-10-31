@@ -1,6 +1,6 @@
 # 琉璃浏览器 AI Agent 设计方案
 
-版本：v1.9（P4.3 已实现，P5、P6 已实现，P7 部分实现）
+版本：v2.0（P4.3 已实现，P5、P6 已实现，P7 部分实现；统一动效规格层已落地）
 目标：让 AI 在用户明确授权下“看懂当前网页并代为操作”，同时保持浏览器级隐私与可控性。
 
 ## 1. 产品定位
@@ -303,6 +303,21 @@ TaskContext
 - Agent UI 使用现有 Backdrop 玻璃组件；Agent 球与面板在同一角落缩放淡入淡出，形成连贯的一镜到底转场。
 - 平板侧栏复用响应式断点（≥600dp），与标签页/书签侧栏一致的布局语义。
 - 隐私护盾继续生效：跟踪器拦截、权限拒绝、退出清除；Agent 额外遵守域策略。
+
+### 6.1 动效规格层（Motion）
+
+界面动效此前散落在各个文件里：同一套"页面级弹性" `spring(0.9f, 380f)` 出现 8 次，tween 时长有 9 种裸数字，"减少动态效果"开关只对极光背景与共享元素两处生效。现在收敛成一份契约：
+
+- `ui/theme/Motion.kt` 定义 `Motion`（弹簧曲线、时长档位、缓动）与 `MotionSpec`（统一入口）。每个规格都有两套入口：带显式 `reduced: Boolean` 的非组合版本，供 `AnimatedContent.transitionSpec` 这类非组合回调使用；无参的组合版本自动读取全局 `LocalReduceMotion`。
+- `ui/liquid/PressFeedback.kt` 提供统一的 `Modifier.pressScale()`，让此前按下毫无反应的玻璃卡片、列表行、按钮都获得液态按压回弹。
+- 全局开关接在 `LiuliApp` 的 `CompositionLocalProvider` 上，任何动效都能查询并降级；列表逐项入场用 `MotionSpec.staggerDelay(index)` 错峰，"减少动态效果"开启时返回 0。
+
+约定：
+
+- 页面级弹性（容器出现、面板展开）用 `PageSpring`；共享元素（一镜到底）用 `SharedSpring`，不过冲以保证严丝合缝；液态阻尼（玻璃件甩动回弹）用 `LiquidSpring`，允许过冲；按压回弹用 `PressSpring`；列表位移用 `GlideSpring`。
+- 规格必须在组合作用域先算好再传入 `fadeIn` / `scaleIn` 等转场参数——这些参数位不是组合上下文，直接调用组合版本会编译失败。
+- 弹窗统一走 `LiquidDialog` 容器，遮罩淡入淡出、面板缩放淡入，避免每个对话框各写一套。
+- 页面转场按层级区分方向（浮层升起 / 落下 vs 网页↔首页克制缩放），Agent 球与面板保持同角落缩放淡入淡出。
 
 ## 7. 分阶段落地
 

@@ -48,6 +48,7 @@ enum class Glyph {
     Moon,
     Edit,
     ChevronRight,
+    ChevronLeft,
     ChevronDown,
     ChevronUp,
     Shield,
@@ -306,6 +307,10 @@ private fun DrawScope.drawGlyph(glyph: Glyph, color: Color, box: Float) {
         Glyph.ChevronRight -> {
             line(9f, 5f, 16f, 12f)
             line(16f, 12f, 9f, 19f)
+        }
+        Glyph.ChevronLeft -> {
+            line(15f, 5f, 8f, 12f)
+            line(8f, 12f, 15f, 19f)
         }
         Glyph.ChevronDown -> {
             line(5f, 9f, 12f, 16f)

@@ -9,7 +9,6 @@ import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -34,6 +33,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -70,6 +70,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -83,6 +84,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
@@ -95,8 +97,10 @@ import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
 import com.liuli.browser.web.BrowserTab
 import com.liuli.browser.web.BrowserViewModel
@@ -186,7 +190,7 @@ fun BrowserScreen(
     }
     val snapshotAlpha by animateFloatAsState(
         targetValue = if (showSharedSnapshot) 1f else 0f,
-        animationSpec = tween(220),
+        animationSpec = MotionSpec.value(Motion.Normal),
         label = "shared-snapshot-alpha"
     )
     val barHeight by animateDpAsState(
@@ -247,7 +251,7 @@ fun BrowserScreen(
             ) {
                 Crossfade(
                     targetState = editing,
-                    animationSpec = tween(160),
+                    animationSpec = MotionSpec.value(Motion.Quick),
                     label = "address-content"
                 ) { isEditing ->
                     if (isEditing) {
@@ -300,10 +304,15 @@ fun BrowserScreen(
                 }
             }
 
-            if (tab.isLoading || tab.progress in 1..99) {
+            // 加载进度条：淡入淡出，不再"啪"地一下冒出来。
+            AnimatedVisibility(
+                visible = tab.isLoading || tab.progress in 1..99,
+                enter = fadeIn(MotionSpec.enter(Motion.Quick)),
+                exit = fadeOut(MotionSpec.exit(Motion.Quick))
+            ) {
                 val fraction by animateFloatAsState(
                     targetValue = tab.progress.coerceIn(0, 100) / 100f,
-                    animationSpec = tween(220),
+                    animationSpec = MotionSpec.value(Motion.Normal),
                     label = "page-progress"
                 )
                 Box(
@@ -654,33 +663,38 @@ private fun PrivacyShieldPanel(
                     )
                 }
                 Spacer(Modifier.height(14.dp))
-                ShieldPoint("已拦截 $blocked 个跟踪请求", colors.success)
+                ShieldPoint("已拦截 $blocked 个跟踪请求", colors.success, 0)
                 ShieldPoint(
                     if (blockThirdParty) "第三方 Cookie 已阻止" else "第三方 Cookie 已允许",
-                    if (blockThirdParty) colors.success else colors.textTertiary
+                    if (blockThirdParty) colors.success else colors.textTertiary,
+                    1
                 )
-                ShieldPoint("定位、相机、麦克风请求默认拒绝", colors.success)
+                ShieldPoint("定位、相机、麦克风请求默认拒绝", colors.success, 2)
                 ShieldPoint(
                     if (clearOnExit) "退出应用时清除 Cookie、缓存与历史" else "退出时保留本站数据",
-                    if (clearOnExit) colors.success else colors.textTertiary
+                    if (clearOnExit) colors.success else colors.textTertiary,
+                    3
                 )
-                ShieldPoint("通用 User-Agent，减少设备指纹", colors.success)
+                ShieldPoint("通用 User-Agent，减少设备指纹", colors.success, 4)
                 ShieldPoint(
                     if (fingerprintProtection) "防浏览器指纹：统一 Canvas/WebGL2/Client Hints/硬件/时区，阻止 WebRTC 与 Service Worker"
                     else "防浏览器指纹：已关闭",
-                    if (fingerprintProtection) colors.success else colors.textTertiary
+                    if (fingerprintProtection) colors.success else colors.textTertiary,
+                    5
                 )
                 ShieldPoint(
                     if (isPrivate) "隐私标签：隔离本地存储与脚本 Cookie，关闭时清除该站点 Cookie"
                     else "本地存储仅本机保存，退出可清除",
-                    if (isPrivate) colors.accentSecondary else colors.textTertiary
+                    if (isPrivate) colors.accentSecondary else colors.textTertiary,
+                    6
                 )
-                ShieldPoint("SSL 错误阻断 · 文件与本地存储访问禁用", colors.success)
-                ShieldPoint("DNS 预取已关闭 · Do Not Track 与 GPC 已开启", colors.success)
+                ShieldPoint("SSL 错误阻断 · 文件与本地存储访问禁用", colors.success, 7)
+                ShieldPoint("DNS 预取已关闭 · Do Not Track 与 GPC 已开启", colors.success, 8)
                 ShieldPoint(
                     if (secureScreen) "截屏与最近任务预览已禁止"
                     else "截屏与最近任务预览未禁止",
-                    if (secureScreen) colors.success else colors.textTertiary
+                    if (secureScreen) colors.success else colors.textTertiary,
+                    9
                 )
                 Spacer(Modifier.height(10.dp))
                 BasicText(
@@ -697,10 +711,28 @@ private fun PrivacyShieldPanel(
 }
 
 @Composable
-private fun ShieldPoint(text: String, tint: Color) {
+private fun ShieldPoint(text: String, tint: Color, index: Int = 0) {
     val colors = LocalLiuliColors.current
+    // 逐条浮现：护盾清单一屏六条，依次出现比整片同时亮更好读。
+    val stagger = MotionSpec.staggerDelay(index, stepMillis = 22)
+    var appeared by remember(text) { mutableStateOf(false) }
+    LaunchedEffect(text) {
+        if (stagger > 0) kotlinx.coroutines.delay(stagger.toLong())
+        appeared = true
+    }
+    val alpha by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0f,
+        animationSpec = MotionSpec.value(Motion.Normal),
+        label = "shield-point-alpha"
+    )
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .graphicsLayer {
+                this.alpha = alpha
+                translationX = (1f - alpha) * 10.dp.toPx()
+            },
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -758,14 +790,15 @@ private fun AddressIdleContent(
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (isTablet && !compact) {
+            val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
             PlainToolButton(
-                glyph = Glyph.Back,
+                glyph = if (isLtr) Glyph.Back else Glyph.Forward,
                 description = "后退",
                 enabled = canNavigateBack,
                 onClick = onBack
             )
             PlainToolButton(
-                glyph = Glyph.Forward,
+                glyph = if (isLtr) Glyph.Forward else Glyph.Back,
                 description = "前进",
                 enabled = tab.canGoForward,
                 onClick = onForward
@@ -1057,6 +1090,7 @@ private fun PlainToolButton(
     onClick: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    val interaction = remember { MutableInteractionSource() }
     Box(
         Modifier
             .size(Dimens.minTouch)
@@ -1066,11 +1100,14 @@ private fun PlainToolButton(
                 role = Role.Button
             }
             .clickable(
+                interactionSource = interaction,
+                indication = null,
                 enabled = enabled,
                 role = Role.Button,
                 onClickLabel = description,
                 onClick = onClick
-            ),
+            )
+            .pressScale(pressedScale = 0.86f, interactionSource = interaction),
         contentAlignment = Alignment.Center
     ) {
         GlyphIcon(
@@ -1090,6 +1127,7 @@ private fun RowScope.ToolDockButton(
     badge: Int = 0
 ) {
     val colors = LocalLiuliColors.current
+    val interaction = remember { MutableInteractionSource() }
     Box(
         modifier = Modifier
             .weight(1f)
@@ -1099,11 +1137,14 @@ private fun RowScope.ToolDockButton(
                 role = Role.Button
             }
             .clickable(
+                interactionSource = interaction,
+                indication = null,
                 enabled = enabled,
                 role = Role.Button,
                 onClickLabel = description,
                 onClick = onClick
-            ),
+            )
+            .pressScale(pressedScale = 0.88f, interactionSource = interaction),
         contentAlignment = Alignment.Center
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -1112,15 +1153,28 @@ private fun RowScope.ToolDockButton(
                 tint = if (enabled) colors.textPrimary else colors.textTertiary.copy(alpha = 0.38f),
                 size = 22.dp
             )
-            if (badge > 0) {
-                Box(
-                    Modifier
-                        .padding(start = 22.dp, bottom = 22.dp)
-                        .size(16.dp)
-                        .clip(CircleShape)
-                        .background(colors.accent),
-                    contentAlignment = Alignment.Center
-                ) {
+            // 角标常驻组合，靠缩放与透明度控制显隐：
+            // 标签数变化时角标是弹入/缩回，而不是突然冒出或消失。
+            // 用 offset 而不是 padding，角标不参与布局，不会挤动图标。
+            val badgeScale by animateFloatAsState(
+                targetValue = if (badge > 0) 1f else 0f,
+                animationSpec = MotionSpec.pageSpring(),
+                label = "tool-badge-scale"
+            )
+            Box(
+                Modifier
+                    .offset(x = 11.dp, y = (-11).dp)
+                    .graphicsLayer {
+                        scaleX = badgeScale
+                        scaleY = badgeScale
+                        alpha = badgeScale
+                    }
+                    .size(16.dp)
+                    .clip(CircleShape)
+                    .background(colors.accent),
+                contentAlignment = Alignment.Center
+            ) {
+                if (badge > 0) {
                     BasicText(
                         text = badge.coerceAtMost(99).toString(),
                         style = TextStyle(
@@ -1161,8 +1215,10 @@ private fun BrowserDock(
         shadow = true
     ) {
         Row(Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
-            ToolDockButton(Glyph.Back, "后退", backEnabled, onBack)
-            ToolDockButton(Glyph.Forward, "前进", tab.canGoForward, onForward)
+            // RTL 下前进/后退箭头要跟着翻转，否则方向和实际行为相反。
+            val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
+            ToolDockButton(if (isLtr) Glyph.Back else Glyph.Forward, "后退", backEnabled, onBack)
+            ToolDockButton(if (isLtr) Glyph.Forward else Glyph.Back, "前进", tab.canGoForward, onForward)
             ToolDockButton(Glyph.Home, "首页", true, onHome)
             ToolDockButton(Glyph.Tabs, "标签页", true, onTabs, badge = tabCount)
             ToolDockButton(Glyph.More, "菜单", true, onMenu)

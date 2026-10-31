@@ -160,6 +160,10 @@ object MotionSpec {
     fun value(reduced: Boolean, durationMillis: Int = Motion.Normal): FiniteAnimationSpec<Float> =
         tween(durationMillis, easing = Motion.Enter)
 
+    /** 整数补间动画（用于行数、偏移量等 Int 状态）。 */
+    fun intValue(reduced: Boolean, durationMillis: Int = Motion.Normal): FiniteAnimationSpec<Int> =
+        tween(durationMillis, easing = Motion.Enter)
+
     /** 颜色过渡（用于 animateColorAsState）。 */
     fun color(reduced: Boolean, durationMillis: Int = Motion.Quick): FiniteAnimationSpec<Color> =
         tween(durationMillis, easing = Motion.Enter)
@@ -208,6 +212,11 @@ object MotionSpec {
     @Composable
     fun value(durationMillis: Int = Motion.Normal): FiniteAnimationSpec<Float> =
         value(reduceMotion, durationMillis)
+
+    /** 整数补间动画（用于行数、偏移量等 Int 状态）。 */
+    @Composable
+    fun intValue(durationMillis: Int = Motion.Normal): FiniteAnimationSpec<Int> =
+        intValue(reduceMotion, durationMillis)
 
     /** 颜色过渡（用于 animateColorAsState）。 */
     @Composable

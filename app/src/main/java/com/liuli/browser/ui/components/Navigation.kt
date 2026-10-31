@@ -233,23 +233,35 @@ fun GlassNavigationRail(
                                     tint = iconTint,
                                     size = 22.dp
                                 )
-                                if (item.glyph == Glyph.Tabs && tabCount > 0) {
+                                if (item.glyph == Glyph.Tabs) {
+                                    // 角标常驻组合，靠缩放控制显隐，新增标签时弹入。
+                                    val badgeScale by animateFloatAsState(
+                                        targetValue = if (tabCount > 0) 1f else 0f,
+                                        animationSpec = MotionSpec.pageSpring(),
+                                        label = "rail-badge-scale"
+                                    )
                                     Box(
                                         Modifier
                                             .offset(x = 11.dp, y = (-8).dp)
+                                            .graphicsLayer {
+                                                scaleX = badgeScale
+                                                scaleY = badgeScale
+                                            }
                                             .size(15.dp)
                                             .clip(CircleShape)
                                             .background(colors.accent),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        BasicText(
-                                            text = tabCount.coerceAtMost(99).toString(),
-                                            style = TextStyle(
-                                                color = Color.White,
-                                                fontSize = 8.sp,
-                                                fontWeight = FontWeight.Bold
+                                        if (tabCount > 0) {
+                                            BasicText(
+                                                text = tabCount.coerceAtMost(99).toString(),
+                                                style = TextStyle(
+                                                    color = Color.White,
+                                                    fontSize = 8.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
                                             )
-                                        )
+                                        }
                                     }
                                 }
                             }
