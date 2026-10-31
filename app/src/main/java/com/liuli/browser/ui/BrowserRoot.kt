@@ -57,11 +57,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -762,8 +765,12 @@ fun BrowserRoot(
                 }
 
                 val message = vm.message
+                // 提示弹出时给一次轻触反馈：用户往往没在看屏幕，
+                // 震动是唯一能立刻知道"操作结果"的通道。
+                val haptics = LocalHapticFeedback.current
                 LaunchedEffect(message) {
                     if (message != null) {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         delay(2600)
                         vm.consumeMessage()
                     }
@@ -786,16 +793,24 @@ fun BrowserRoot(
                     GlassSurface(
                         backdrop = chromeBackdrop,
                         modifier = Modifier.widthIn(max = 420.dp),
-                        shape = RoundedCornerShape(50),
+                        shape = RoundedCornerShape(24.dp),
                         tint = colors.glassTintStrong,
                         blurRadius = 18.dp,
                         lensHeight = 14.dp,
                         lensAmount = 20.dp,
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
                     ) {
+                        // 提示可能很长（比如保存失败的原因），允许换行并限高，
+                        // 否则超出宽度会被裁掉，看不出到底出了什么问题。
                         BasicText(
                             text = message.orEmpty(),
-                            style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                            style = TextStyle(
+                                color = colors.textPrimary,
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp
+                            ),
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }

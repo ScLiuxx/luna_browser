@@ -4,7 +4,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -56,6 +55,8 @@ import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
+import com.liuli.browser.ui.theme.Radius
+import com.liuli.browser.ui.theme.Space
 
 data class NavItem(
     val glyph: Glyph,
@@ -71,34 +72,53 @@ fun BrandOrb(
     Canvas(modifier.size(size)) {
         val radius = this.size.minDimension / 2f
         val center = Offset(this.size.width / 2f, this.size.height / 2f)
+        // 高光位置用「圆心左上方 40%/35%」定义，而不是写死的像素偏移：
+        // 尺寸变化时高光仍落在球体的左上肩部，符合球面受光直觉。
+        val highlightCenter = Offset(
+            center.x - radius * 0.40f,
+            center.y - radius * 0.35f
+        )
         drawCircle(
             brush = Brush.radialGradient(
-                0f to Color.White.copy(alpha = 0.85f),
+                0f to Color.White.copy(alpha = 0.88f),
                 0.22f to colors.accentTertiary,
                 0.62f to colors.accent,
                 1f to colors.accentSecondary,
-                center = Offset(center.x - radius * 0.35f, center.y - radius * 0.4f),
+                center = highlightCenter,
                 radius = radius * 1.7f
             ),
             radius = radius,
             center = center
         )
+        // 边缘反光：内侧描一圈亮边，球体才有厚度而不是一张贴纸。
         drawCircle(
-            color = Color.White.copy(alpha = 0.55f),
+            brush = Brush.radialGradient(
+                0f to Color.Transparent,
+                0.82f to Color.Transparent,
+                1f to Color.White.copy(alpha = 0.30f),
+                center = highlightCenter,
+                radius = radius
+            ),
+            radius = radius,
+            center = center
+        )
+        drawCircle(
+            color = Color.White.copy(alpha = 0.42f),
             radius = radius * 0.93f,
             center = center,
             style = Stroke(width = 1.2.dp.toPx())
         )
+        // 高光椭圆：跟着同一个高光中心走，不再是固定偏移。
         drawOval(
             color = Color.White.copy(alpha = 0.34f),
-            topLeft = Offset(center.x - radius * 0.62f, center.y - radius * 0.82f),
-            size = androidx.compose.ui.geometry.Size(radius * 1.24f, radius * 0.62f),
+            topLeft = Offset(highlightCenter.x - radius * 0.48f, highlightCenter.y - radius * 0.30f),
+            size = androidx.compose.ui.geometry.Size(radius * 0.96f, radius * 0.46f),
             style = Stroke(width = 1.dp.toPx())
         )
         drawCircle(
             color = Color.White.copy(alpha = 0.65f),
             radius = radius * 0.16f,
-            center = Offset(center.x - radius * 0.36f, center.y - radius * 0.36f)
+            center = Offset(highlightCenter.x, highlightCenter.y)
         )
     }
 }
@@ -143,7 +163,7 @@ fun GlassNavigationRail(
         modifier = modifier
             .width(74.dp)
             .fillMaxHeight(),
-        shape = RoundedCornerShape(34.dp),
+        shape = RoundedCornerShape(Radius.xl),
         tint = colors.dockTint,
         blurRadius = 26.dp,
         lensHeight = 22.dp,
@@ -172,7 +192,7 @@ fun GlassNavigationRail(
                             .width(58.dp)
                             .height(indicatorHeight)
                             .graphicsLayer { alpha = indicatorAlpha },
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(Radius.md),
                         tint = colors.accent.copy(alpha = if (colors.isDark) 0.22f else 0.13f),
                         blurRadius = 14.dp,
                         lensHeight = 12.dp,
@@ -207,7 +227,7 @@ fun GlassNavigationRail(
                         Column(
                             modifier = Modifier
                                 .width(58.dp)
-                                .clip(RoundedCornerShape(18.dp))
+                                .clip(RoundedCornerShape(Radius.md))
                                 .onGloballyPositioned { coordinates ->
                                     itemBounds[index] = coordinates.boundsInParent()
                                 }
@@ -216,15 +236,16 @@ fun GlassNavigationRail(
                                     role = Role.Button
                                 }
                                 .then(itemPress)
+                                // 不用系统水波纹：液态玻璃语言下，指下高光由玻璃层自己给。
                                 .clickable(
                                     interactionSource = itemInteraction,
-                                    indication = LocalIndication.current,
+                                    indication = null,
                                     role = Role.Button,
                                     onClickLabel = item.label
                                 ) {
                                     onSelect(index)
                                 }
-                                .padding(vertical = 8.dp),
+                                .padding(vertical = Space.sm),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Box(contentAlignment = Alignment.Center) {
@@ -296,7 +317,7 @@ fun GlassNavigationRail(
                     .then(newTabPress)
                     .clickable(
                         interactionSource = newTabInteraction,
-                        indication = LocalIndication.current,
+                        indication = null,
                         role = Role.Button,
                         onClickLabel = "新建标签页",
                         onClick = onNewTab

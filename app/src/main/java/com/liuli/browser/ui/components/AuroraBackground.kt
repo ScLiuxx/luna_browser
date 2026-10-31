@@ -32,14 +32,20 @@ fun AuroraBackground(
     dynamic: Boolean = true
 ) {
     val colors = LocalLiuliColors.current
-    var phase by remember { mutableFloatStateOf(0.7f) }
+    // 色团共享一个角度基准：各个色团用不同的倍率取样，
+    // 既有整体流动感，又保持彼此之间的相位差，不会挤在一起。
+    var angle by remember { mutableFloatStateOf(0.7f) }
 
     LaunchedEffect(dynamic) {
         if (!dynamic) return@LaunchedEffect
+        var current = 0.7f
         while (true) {
             delay(82)
-            phase += 0.016f
-            if (phase > 100f) phase -= 100f
+            current += 0.016f
+            if (current > 2f * Math.PI.toFloat() * 8f) {
+                current -= 2f * Math.PI.toFloat() * 8f
+            }
+            angle = current
         }
     }
 
@@ -61,34 +67,53 @@ fun AuroraBackground(
             )
         )
 
+        // 光晕先铺在色团底下：色团边缘才有"被照亮"的过渡，
+        // 而不是直接糊在渐变背景上。
+        drawBlob(
+            color = colors.accent.copy(alpha = blobAlpha * 0.35f),
+            center = Offset(
+                size.width * 0.16f + sin(angle) * size.width * 0.07f,
+                size.height * 0.20f + cos(angle * 0.8f) * size.height * 0.045f
+            ),
+            radius = size.minDimension * 0.95f
+        )
+        drawBlob(
+            color = colors.accentSecondary.copy(alpha = blobAlpha * 0.30f),
+            center = Offset(
+                size.width * 0.90f + cos(angle * 0.9f) * size.width * 0.06f,
+                size.height * 0.28f + sin(angle) * size.height * 0.06f
+            ),
+            radius = size.minDimension * 0.82f
+        )
+
         drawBlob(
             color = colors.accent.copy(alpha = blobAlpha),
             center = Offset(
-                size.width * 0.16f + sin(phase) * size.width * 0.07f,
-                size.height * 0.20f + cos(phase * 0.8f) * size.height * 0.045f
+                size.width * 0.16f + sin(angle) * size.width * 0.07f,
+                size.height * 0.20f + cos(angle * 0.8f) * size.height * 0.045f
             ),
             radius = size.minDimension * 0.72f
         )
         drawBlob(
             color = colors.accentSecondary.copy(alpha = blobAlpha * 0.9f),
             center = Offset(
-                size.width * 0.90f + cos(phase * 0.9f) * size.width * 0.06f,
-                size.height * 0.28f + sin(phase) * size.height * 0.06f
+                size.width * 0.90f + cos(angle * 0.9f) * size.width * 0.06f,
+                size.height * 0.28f + sin(angle) * size.height * 0.06f
             ),
             radius = size.minDimension * 0.62f
         )
         drawBlob(
             color = colors.accentTertiary.copy(alpha = blobAlpha * 0.85f),
             center = Offset(
-                size.width * 0.52f + sin(phase * 1.1f) * size.width * 0.09f,
-                size.height * 0.82f + cos(phase * 0.7f) * size.height * 0.045f
+                size.width * 0.52f + sin(angle * 1.1f) * size.width * 0.09f,
+                size.height * 0.82f + cos(angle * 0.7f) * size.height * 0.045f
             ),
             radius = size.minDimension * 0.78f
         )
         drawBlob(
             color = colors.accent.copy(alpha = blobAlpha * 0.55f),
             center = Offset(
-                size.width * 0.14f + cos(phase * 0.6f) * size.width * 0.05f,
+                size.width * 0.14f + cos(angle * 0.6f) * size.width * 0.05f,
                 size.height * 0.88f
             ),
             radius = size.minDimension * 0.5f

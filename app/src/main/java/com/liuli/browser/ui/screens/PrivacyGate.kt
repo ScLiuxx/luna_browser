@@ -51,6 +51,8 @@ import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
+import com.liuli.browser.ui.theme.Radius
+import com.liuli.browser.ui.theme.Type
 
 @Composable
 fun PrivacyGate(
@@ -99,21 +101,23 @@ fun PrivacyGate(
             ) {
                 Column(Modifier.fillMaxWidth()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        BrandOrb(size = 58.dp)
+                        // 品牌球先落位，标题与副标题跟上。
+                        BrandOrb(
+                            size = 58.dp,
+                            modifier = Modifier.gateReveal(0, pop = true)
+                        )
                         Spacer(Modifier.width(14.dp))
                         Column {
                             BasicText(
                                 text = "欢迎使用琉璃浏览器",
-                                style = TextStyle(
-                                    color = colors.textPrimary,
-                                    fontSize = 23.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                                style = Type.display.copy(color = colors.textPrimary),
+                                modifier = Modifier.gateReveal(1)
                             )
                             Spacer(Modifier.height(3.dp))
                             BasicText(
                                 text = "液态玻璃设计 · Chromium 内核 · 一镜到底",
-                                style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
+                                style = Type.label.copy(color = colors.textTertiary),
+                                modifier = Modifier.gateReveal(2)
                             )
                         }
                     }
@@ -121,9 +125,9 @@ fun PrivacyGate(
                     Spacer(Modifier.height(18.dp))
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        GateBadge("无广告", Glyph.Sparkle)
-                        GateBadge("无账号", Glyph.Shield)
-                        GateBadge("本地数据", Glyph.Lock)
+                        GateBadge("无广告", Glyph.Sparkle, 3)
+                        GateBadge("无账号", Glyph.Shield, 4)
+                        GateBadge("本地数据", Glyph.Lock, 5)
                     }
 
                     Spacer(Modifier.height(18.dp))
@@ -211,11 +215,12 @@ fun PrivacyGate(
 }
 
 @Composable
-private fun GateBadge(label: String, glyph: Glyph) {
+private fun GateBadge(label: String, glyph: Glyph, index: Int = 0) {
     val colors = LocalLiuliColors.current
     Row(
         Modifier
-            .clip(RoundedCornerShape(50))
+            .gateReveal(index)
+            .clip(RoundedCornerShape(Radius.pill))
             .background(colors.textPrimary.copy(alpha = 0.05f))
             .padding(horizontal = 9.dp, vertical = 5.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -224,8 +229,38 @@ private fun GateBadge(label: String, glyph: Glyph) {
         GlyphIcon(glyph, colors.accent, size = 11.dp)
         BasicText(
             text = label,
-            style = TextStyle(color = colors.textSecondary, fontSize = 9.sp)
+            style = Type.micro.copy(color = colors.textSecondary)
         )
+    }
+}
+
+/**
+ * 隐私门内的元素依次浮现。
+ *
+ * 延迟值必须在组合作用域里取好再进 LaunchedEffect，
+ * 因为 [MotionSpec.staggerDelay] 是 @Composable，不能在协程里调用。
+ */
+@Composable
+private fun Modifier.gateReveal(index: Int, pop: Boolean = false): Modifier {
+    val stagger = MotionSpec.staggerDelay(index, stepMillis = 40)
+    var appeared by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (stagger > 0) kotlinx.coroutines.delay(stagger.toLong())
+        appeared = true
+    }
+    val alpha by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0f,
+        animationSpec = MotionSpec.value(Motion.Normal),
+        label = "gate-reveal-alpha"
+    )
+    return graphicsLayer {
+        this.alpha = alpha
+        translationY = (1f - alpha) * 12.dp.toPx()
+        if (pop) {
+            val scale = 0.78f + 0.22f * alpha
+            scaleX = scale
+            scaleY = scale
+        }
     }
 }
 

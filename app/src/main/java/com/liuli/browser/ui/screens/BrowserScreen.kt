@@ -11,10 +11,12 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -912,12 +914,20 @@ private fun AddressIdleContent(
         }
         Spacer(Modifier.width(if (compact) 6.dp else 10.dp))
         if (compact) {
+            val compactInteraction = remember { MutableInteractionSource() }
             Row(
                 Modifier
                     .weight(1f)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(10.dp))
-                    .clickable(role = Role.Button, onClickLabel = "展开工具栏", onClick = onExpand)
+                    .clickable(
+                        interactionSource = compactInteraction,
+                        indication = null,
+                        role = Role.Button,
+                        onClickLabel = "展开工具栏",
+                        onClick = onExpand
+                    )
+                    .pressScale(pressedScale = 0.97f, interactionSource = compactInteraction)
                     .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -934,11 +944,19 @@ private fun AddressIdleContent(
             }
             CompactExpandButton(onExpand)
         } else {
+            val urlInteraction = remember { MutableInteractionSource() }
             Column(
                 Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(12.dp))
-                    .clickable(role = Role.Button, onClickLabel = "编辑网址", onClick = onClick)
+                    .clickable(
+                        interactionSource = urlInteraction,
+                        indication = null,
+                        role = Role.Button,
+                        onClickLabel = "编辑网址",
+                        onClick = onClick
+                    )
+                    .pressScale(pressedScale = 0.98f, interactionSource = urlInteraction)
                     .padding(horizontal = 4.dp, vertical = 4.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -952,10 +970,18 @@ private fun AddressIdleContent(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (tab.desktopMode) {
-                        Spacer(Modifier.width(6.dp))
+                    // "桌面版"徽标淡入淡出：切到桌面模式时徽标是"化"出来的，
+                    // 而不是硬生生地插进标题旁边。
+                    AnimatedVisibility(
+                        visible = tab.desktopMode,
+                        enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
+                            expandHorizontally(animationSpec = MotionSpec.sizeValue()),
+                        exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
+                            shrinkHorizontally(animationSpec = MotionSpec.sizeValue())
+                    ) {
                         Box(
                             Modifier
+                                .padding(start = 6.dp)
                                 .clip(RoundedCornerShape(50))
                                 .background(colors.accent.copy(alpha = 0.14f))
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
@@ -1090,7 +1116,20 @@ private fun AddressEditContent(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                 keyboardActions = KeyboardActions(onGo = { onSubmit() })
             )
-            if (value.text.isNotEmpty()) {
+            // 「清空」按钮淡入：有文字才出现，硬切会让输入框看起来在闪。
+            AnimatedVisibility(
+                visible = value.text.isNotEmpty(),
+                enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
+                    scaleIn(
+                        animationSpec = MotionSpec.pageSpring(),
+                        initialScale = 0.7f
+                    ),
+                exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
+                    scaleOut(
+                        animationSpec = MotionSpec.pageSpring(),
+                        targetScale = 0.7f
+                    )
+            ) {
                 PlainToolButton(
                     glyph = Glyph.Close,
                     description = "清空",
@@ -1098,11 +1137,18 @@ private fun AddressEditContent(
                     onClick = { onValueChange(TextFieldValue("")) }
                 )
             }
+            val cancelInteraction = remember { MutableInteractionSource() }
             Box(
                 Modifier
                     .height(Dimens.minTouch)
                     .clip(RoundedCornerShape(50))
-                    .clickable(role = Role.Button, onClick = onCancel)
+                    .clickable(
+                        interactionSource = cancelInteraction,
+                        indication = null,
+                        role = Role.Button,
+                        onClick = onCancel
+                    )
+                    .pressScale(pressedScale = 0.90f, interactionSource = cancelInteraction)
                     .padding(horizontal = 10.dp),
                 contentAlignment = Alignment.Center
             ) {

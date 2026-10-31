@@ -117,7 +117,14 @@ fun LiquidButton(
                 } else {
                     null
                 },
-                highlight = { Highlight.Default.copy(alpha = if (colors.isDark) 0.65f else 0.85f) },
+                highlight = {
+                    // 高光随按压变亮：玻璃被压下去时反射更强，
+                    // 这是"被按到"最直接的视觉线索。
+                    val progress = interactiveHighlight.pressProgress
+                    Highlight.Default.copy(
+                        alpha = (if (colors.isDark) 0.65f else 0.85f) + 0.3f * progress
+                    )
+                },
                 shadow = {
                     Shadow(
                         radius = 18.dp,
@@ -224,7 +231,13 @@ fun LiquidIconButton(
                         abs(sin(angle) * offset.y / this.size.maxDimension) *
                         (height / width).fastCoerceAtMost(1f)
                 },
-                highlight = { Highlight.Default.copy(alpha = if (colors.isDark) 0.6f else 0.8f) },
+                highlight = {
+                    // 同上：按下时高光增强。
+                    val progress = interactiveHighlight.pressProgress
+                    Highlight.Default.copy(
+                        alpha = (if (colors.isDark) 0.6f else 0.8f) + 0.3f * progress
+                    )
+                },
                 shadow = {
                     Shadow(
                         radius = 12.dp,

@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -67,6 +68,8 @@ fun GlassSurface(
     contentAlignment: Alignment = Alignment.TopStart,
     interactive: Boolean = false,
     onClick: (() -> Unit)? = null,
+    /** 是否描出边缘。玻璃件没有轮廓会整个融进背景，深色下尤其明显。 */
+    edgeStroke: Boolean = true,
     content: @Composable BoxScope.() -> Unit = {}
 ) {
     val colors = LocalLiuliColors.current
@@ -168,7 +171,17 @@ fun GlassSurface(
                 } else {
                     null
                 },
-                onDrawSurface = { drawRect(effectiveTint) }
+                onDrawSurface = {
+                    drawRect(effectiveTint)
+                    // 边缘描边：没有它，深色背景上的玻璃会整个"融"进去，
+                    // 轮廓消失，只剩一团模糊的色块。
+                    if (edgeStroke) {
+                        drawRect(
+                            color = colors.glassBorder,
+                            style = Stroke(width = 1.dp.toPx())
+                        )
+                    }
+                }
             )
             .then(clickModifier)
             .then(liquidModifier)

@@ -1,11 +1,17 @@
 package com.liuli.browser.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -77,6 +83,9 @@ import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
+import com.liuli.browser.ui.theme.Radius
+import com.liuli.browser.ui.theme.Space
+import com.liuli.browser.ui.theme.Type
 import com.liuli.browser.web.BrowserTab
 import kotlinx.coroutines.delay
 
@@ -187,7 +196,7 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     BrandOrb(size = if (isTablet) 46.dp else 40.dp)
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(Space.md))
                     Column(Modifier.weight(1f)) {
                         BasicText(
                             text = "琉璃浏览器",
@@ -237,7 +246,7 @@ fun HomeScreen(
                 Spacer(Modifier.height(if (isTablet) 30.dp else 24.dp))
 
                 SectionTitle("常用网站")
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(Space.md))
                 QuickLinkGrid(
                     backdrop = backdrop,
                     links = QuickLinks.take(if (isTablet) 10 else 8),
@@ -249,7 +258,7 @@ fun HomeScreen(
                 if (recentTabs.isNotEmpty()) {
                     Spacer(Modifier.height(if (isTablet) 30.dp else 24.dp))
                     SectionTitle("继续浏览")
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(Space.md))
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         contentPadding = PaddingValues(0.dp)
@@ -314,19 +323,12 @@ private fun SectionTitle(title: String) {
     ) {
         BasicText(
             text = title,
-            style = TextStyle(
-                color = colors.textPrimary,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold
-            )
+            style = Type.title.copy(color = colors.textPrimary)
         )
         Spacer(Modifier.weight(1f))
         BasicText(
             text = "轻触即可打开",
-            style = TextStyle(
-                color = colors.textTertiary,
-                fontSize = 11.sp
-            )
+            style = Type.label.copy(color = colors.textTertiary)
         )
     }
 }
@@ -359,7 +361,7 @@ private fun HomeSearchBar(
                 scaleX = focusScale
                 scaleY = focusScale
             },
-        shape = RoundedCornerShape(32.dp),
+        shape = RoundedCornerShape(Radius.xl),
         tint = colors.glassTintStrong,
         blurRadius = 22.dp,
         lensHeight = 20.dp,
@@ -389,9 +391,8 @@ private fun HomeSearchBar(
                     .focusRequester(focusRequester)
                     .semantics { contentDescription = "搜索或输入网址" },
                 interactionSource = interactionSource,
-                textStyle = TextStyle(
+                textStyle = Type.title.copy(
                     color = colors.textPrimary,
-                    fontSize = 17.sp,
                     fontWeight = FontWeight.Medium
                 ),
                 cursorBrush = SolidColor(colors.accent),
@@ -402,21 +403,30 @@ private fun HomeSearchBar(
                     if (query.isEmpty()) {
                         BasicText(
                             text = "搜索或输入网址",
-                            style = TextStyle(
-                                color = colors.textTertiary,
-                                fontSize = 17.sp
-                            )
+                            style = Type.title.copy(color = colors.textTertiary)
                         )
                     }
                     innerTextField()
                 }
             )
-            if (query.isNotBlank()) {
+            // 「前往」按钮淡入并轻微右移：
+            // 输入框里一有字它就弹出来，硬切会让键盘显得很急躁。
+            AnimatedVisibility(
+                visible = query.isNotBlank(),
+                enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
+                    expandHorizontally(animationSpec = MotionSpec.sizeValue()) +
+                    slideInHorizontally(
+                        animationSpec = MotionSpec.pageSpring(androidx.compose.ui.unit.IntOffset.Zero),
+                        initialOffsetX = { -it / 3 }
+                    ),
+                exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
+                    shrinkHorizontally(animationSpec = MotionSpec.sizeValue())
+            ) {
                 val goInteraction = remember { MutableInteractionSource() }
                 Box(
                     modifier = Modifier
                         .heightIn(min = Dimens.minTouch)
-                        .clip(RoundedCornerShape(50))
+                        .clip(RoundedCornerShape(Radius.pill))
                         .clickable(
                             interactionSource = goInteraction,
                             indication = null,
@@ -430,9 +440,8 @@ private fun HomeSearchBar(
                 ) {
                     BasicText(
                         text = "前往",
-                        style = TextStyle(
+                        style = Type.body.copy(
                             color = colors.accent,
-                            fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     )
@@ -487,7 +496,7 @@ private fun QuickLinkTile(
         backdrop = backdrop,
         modifier = modifier
             .height(if (isTablet) 112.dp else 96.dp)
-            .clip(RoundedCornerShape(22.dp))
+            .clip(RoundedCornerShape(Radius.md))
             .clickable(
                 interactionSource = interaction,
                 indication = null,
@@ -496,7 +505,7 @@ private fun QuickLinkTile(
                 onClick = onClick
             )
             .pressScale(pressedScale = 0.94f, interactionSource = interaction),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(Radius.md),
         tint = colors.glassTint,
         blurRadius = 18.dp,
         lensHeight = 14.dp,
@@ -553,7 +562,7 @@ private fun RecentTabCard(
         modifier = Modifier
             .width(if (isTablet) 270.dp else 220.dp)
             .height(if (isTablet) 104.dp else 92.dp)
-            .clip(RoundedCornerShape(22.dp))
+            .clip(RoundedCornerShape(Radius.md))
             .clickable(
                 interactionSource = interaction,
                 indication = null,
@@ -561,7 +570,7 @@ private fun RecentTabCard(
                 onClick = onClick
             )
             .pressScale(pressedScale = 0.95f, interactionSource = interaction),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(Radius.md),
         tint = colors.glassTint,
         blurRadius = 18.dp,
         lensHeight = 14.dp,
@@ -575,13 +584,13 @@ private fun RecentTabCard(
             Box(
                 Modifier
                     .size(40.dp)
-                    .clip(RoundedCornerShape(13.dp))
+                    .clip(RoundedCornerShape(Radius.sm))
                     .background(colors.accent.copy(alpha = if (colors.isDark) 0.24f else 0.14f)),
                 contentAlignment = Alignment.Center
             ) {
                 GlyphIcon(Glyph.Globe, colors.accent, size = 20.dp)
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Space.md))
             Column(Modifier.weight(1f)) {
                 BasicText(
                     text = tab.pageTitle(),
@@ -593,7 +602,7 @@ private fun RecentTabCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(Space.xs))
                 BasicText(
                     text = tab.displayHost,
                     style = TextStyle(
@@ -617,7 +626,7 @@ private fun PrivacyCard(
     GlassSurface(
         backdrop = backdrop,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(Radius.md),
         tint = colors.glassTint,
         blurRadius = 18.dp,
         lensHeight = 14.dp,
@@ -637,7 +646,7 @@ private fun PrivacyCard(
             ) {
                 GlyphIcon(Glyph.Shield, colors.success, size = 21.dp)
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Space.md))
             Column(Modifier.weight(1f)) {
                 BasicText(
                     text = "隐私优先，数据留在本地",
@@ -647,7 +656,7 @@ private fun PrivacyCard(
                         fontWeight = FontWeight.SemiBold
                     )
                 )
-                Spacer(Modifier.height(3.dp))
+                Spacer(Modifier.height(Space.xxs))
                 BasicText(
                     text = "隐私护盾默认开启 · 退出即清除数据",
                     style = TextStyle(
@@ -658,7 +667,7 @@ private fun PrivacyCard(
             }
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(Radius.pill))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
