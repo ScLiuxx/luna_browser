@@ -1,11 +1,13 @@
 package com.liuli.browser.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -15,6 +17,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -102,6 +105,7 @@ import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
+import com.liuli.browser.ui.theme.reduceMotion
 import com.liuli.browser.web.BrowserTab
 import com.liuli.browser.web.BrowserViewModel
 import com.liuli.browser.web.agent.AgentController
@@ -202,6 +206,14 @@ fun BrowserScreen(
         animationSpec = MotionSpec.pageSpring(0.01.dp),
         label = "address-morph"
     )
+    // 地址栏在"浏览态 ↔ 编辑态"之间形变：
+    // 容器高度用弹簧伸缩，内容同时做方向性滑动，
+    // 新内容从下方推入、旧内容向上收起，避免纯淡化的"凭空替换"。
+    val editProgress by animateFloatAsState(
+        targetValue = if (editing) 1f else 0f,
+        animationSpec = MotionSpec.value(Motion.Quick),
+        label = "address-edit-progress"
+    )
 
     Box(Modifier.fillMaxSize()) {
         if (sharedSnapshot != null && sharedSnapshotKey != null) {
@@ -254,52 +266,66 @@ fun BrowserScreen(
                     animationSpec = MotionSpec.value(Motion.Quick),
                     label = "address-content"
                 ) { isEditing ->
-                    if (isEditing) {
-                        AddressEditContent(
-                            settings = settings,
-                            value = editValue,
-                            onValueChange = { editValue = it },
-                            onCancel = {
-                                editing = false
-                                editValue = TextFieldValue(tab.url)
-                            },
-                            onSubmit = {
-                                vm.navigate(editValue.text)
-                                editing = false
-                            },
-                            focusRequester = focusRequester
-                        )
-                    } else {
-                        AddressIdleContent(
-                            tab = tab,
-                            isTablet = isTablet,
-                            onClick = {
-                                editValue = TextFieldValue(
-                                    text = tab.url,
-                                    selection = TextRange(0, tab.url.length)
-                                )
-                                editing = true
-                            },
-                            onReload = {
-                                if (tab.isLoading) vm.stopLoading() else vm.reload()
-                            },
-                            onMenu = {
-                                vm.expandToolbar()
-                                agentOpen = false
-                                menuOpen = true
-                            },
-                            onBack = { vm.handleBack() },
-                            onForward = { vm.goForward() },
-                            canNavigateBack = canNavigateBack,
-                            shieldOn = settings.privacyShield,
-                            blockedTrackers = tab.blockedTrackers,
-                            onShieldClick = {
-                                agentOpen = false
-                                shieldOpen = true
-                            },
-                            compact = collapsed,
-                            onExpand = { vm.expandToolbar() }
-                        )
+                    // 交叉淡化的同时给一点方向：编辑态从下方推入，
+                    // 浏览态向上收起，避免纯淡化的"凭空替换"。
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                translationY = if (isEditing) {
+                                    (1f - editProgress) * 14.dp.toPx()
+                                } else {
+                                    -editProgress * 10.dp.toPx()
+                                }
+                            }
+                    ) {
+                        if (isEditing) {
+                            AddressEditContent(
+                                settings = settings,
+                                value = editValue,
+                                onValueChange = { editValue = it },
+                                onCancel = {
+                                    editing = false
+                                    editValue = TextFieldValue(tab.url)
+                                },
+                                onSubmit = {
+                                    vm.navigate(editValue.text)
+                                    editing = false
+                                },
+                                focusRequester = focusRequester
+                            )
+                        } else {
+                            AddressIdleContent(
+                                tab = tab,
+                                isTablet = isTablet,
+                                onClick = {
+                                    editValue = TextFieldValue(
+                                        text = tab.url,
+                                        selection = TextRange(0, tab.url.length)
+                                    )
+                                    editing = true
+                                },
+                                onReload = {
+                                    if (tab.isLoading) vm.stopLoading() else vm.reload()
+                                },
+                                onMenu = {
+                                    vm.expandToolbar()
+                                    agentOpen = false
+                                    menuOpen = true
+                                },
+                                onBack = { vm.handleBack() },
+                                onForward = { vm.goForward() },
+                                canNavigateBack = canNavigateBack,
+                                shieldOn = settings.privacyShield,
+                                blockedTrackers = tab.blockedTrackers,
+                                onShieldClick = {
+                                    agentOpen = false
+                                    shieldOpen = true
+                                },
+                                compact = collapsed,
+                                onExpand = { vm.expandToolbar() }
+                            )
+                        }
                     }
                 }
             }
@@ -769,6 +795,7 @@ private fun AddressIdleContent(
     onExpand: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    val reduced = reduceMotion
     val securityGlyph = when {
         tab.isPrivate -> Glyph.Incognito
         shieldOn -> Glyph.Shield
@@ -783,6 +810,19 @@ private fun AddressIdleContent(
         tab.url.startsWith("http://") -> colors.danger
         else -> colors.textSecondary
     }
+    // 安全徽标在 http/https、私密/普通之间切换时是淡入淡出，而不是硬切颜色。
+    val animatedSecurityTint by animateColorAsState(
+        targetValue = securityTint,
+        animationSpec = MotionSpec.color(Motion.Quick),
+        label = "security-tint"
+    )
+    val shieldInteraction = remember { MutableInteractionSource() }
+    // 拦截计数角标：从 0 冒出时弹入，归零时缩回。
+    val shieldBadgeScale by animateFloatAsState(
+        targetValue = if (blockedTrackers > 0) 1f else 0f,
+        animationSpec = MotionSpec.pageSpring(),
+        label = "shield-badge-scale"
+    )
     Row(
         Modifier
             .fillMaxWidth()
@@ -807,12 +847,15 @@ private fun AddressIdleContent(
         Box(
             Modifier
                 .size(if (compact) 30.dp else 38.dp)
+                .pressScale(pressedScale = 0.9f, interactionSource = shieldInteraction)
                 .clip(CircleShape)
-                .background(securityTint.copy(alpha = if (colors.isDark) 0.18f else 0.10f))
+                .background(animatedSecurityTint.copy(alpha = if (colors.isDark) 0.18f else 0.10f))
                 .semantics {
                     if (shieldOn) contentDescription = "隐私护盾，已拦截 $blockedTrackers 个跟踪请求"
                 }
                 .clickable(
+                    interactionSource = shieldInteraction,
+                    indication = null,
                     enabled = shieldOn,
                     role = Role.Button,
                     onClickLabel = "隐私护盾",
@@ -820,16 +863,42 @@ private fun AddressIdleContent(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            GlyphIcon(securityGlyph, securityTint, size = if (compact) 15.dp else 18.dp)
-            if (blockedTrackers > 0) {
-                Box(
-                    Modifier
-                        .align(Alignment.TopEnd)
-                        .size(if (compact) 13.dp else 15.dp)
-                        .clip(CircleShape)
-                        .background(colors.accent),
-                    contentAlignment = Alignment.Center
-                ) {
+            // 安全图标本身也会换（锁↔感叹号↔隐身），换形时淡入淡出而不是硬切。
+            AnimatedContent(
+                targetState = securityGlyph,
+                modifier = Modifier.size(if (compact) 15.dp else 18.dp),
+                contentAlignment = Alignment.Center,
+                transitionSpec = {
+                    ((fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick)) +
+                        scaleIn(
+                            animationSpec = MotionSpec.enter(reduced, Motion.Quick),
+                            initialScale = 0.7f
+                        )) togetherWith
+                        (fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)) +
+                            scaleOut(
+                                animationSpec = MotionSpec.exit(reduced, Motion.Quick),
+                                targetScale = 0.7f
+                            ))).using(null)
+                },
+                label = "security-glyph"
+            ) { glyph ->
+                GlyphIcon(glyph, animatedSecurityTint, size = if (compact) 15.dp else 18.dp)
+            }
+            // 角标常驻组合，用缩放与透明度控制显隐，不突然冒出或消失。
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .graphicsLayer {
+                        scaleX = shieldBadgeScale
+                        scaleY = shieldBadgeScale
+                        alpha = shieldBadgeScale
+                    }
+                    .size(if (compact) 13.dp else 15.dp)
+                    .clip(CircleShape)
+                    .background(colors.accent),
+                contentAlignment = Alignment.Center
+            ) {
+                if (blockedTrackers > 0) {
                     BasicText(
                         text = blockedTrackers.coerceAtMost(99).toString(),
                         style = TextStyle(
@@ -961,15 +1030,23 @@ private fun CollapsedToolbarHandle(
 @Composable
 private fun CompactExpandButton(onExpand: () -> Unit) {
     val colors = LocalLiuliColors.current
+    val interaction = remember { MutableInteractionSource() }
     Box(
         Modifier
             .size(32.dp)
+            .pressScale(pressedScale = 0.86f, interactionSource = interaction)
             .clip(CircleShape)
             .semantics {
                 contentDescription = "展开工具栏"
                 role = Role.Button
             }
-            .clickable(role = Role.Button, onClickLabel = "展开工具栏", onClick = onExpand),
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onClickLabel = "展开工具栏",
+                onClick = onExpand
+            ),
         contentAlignment = Alignment.Center
     ) {
         GlyphIcon(Glyph.ChevronDown, colors.textSecondary, size = 16.dp)
@@ -1090,7 +1167,14 @@ private fun PlainToolButton(
     onClick: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    val reduced = reduceMotion
     val interaction = remember { MutableInteractionSource() }
+    // 可用与不可用之间用颜色补间淡入淡出：前进键变灰是渐变，不是瞬切。
+    val tint by animateColorAsState(
+        targetValue = if (enabled) colors.textPrimary else colors.textTertiary.copy(alpha = 0.4f),
+        animationSpec = MotionSpec.color(Motion.Quick),
+        label = "plain-tool-tint"
+    )
     Box(
         Modifier
             .size(Dimens.minTouch)
@@ -1110,11 +1194,31 @@ private fun PlainToolButton(
             .pressScale(pressedScale = 0.86f, interactionSource = interaction),
         contentAlignment = Alignment.Center
     ) {
-        GlyphIcon(
-            glyph = glyph,
-            tint = if (enabled) colors.textPrimary else colors.textTertiary.copy(alpha = 0.4f),
-            size = 20.dp
-        )
+        // 图标切换（刷新↔停止、前进↔后退）也做淡入淡出，不硬切。
+        AnimatedContent(
+            targetState = glyph,
+            modifier = Modifier.size(20.dp),
+            contentAlignment = Alignment.Center,
+            transitionSpec = {
+                ((fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick)) +
+                    scaleIn(
+                        animationSpec = MotionSpec.enter(reduced, Motion.Quick),
+                        initialScale = 0.7f
+                    )) togetherWith
+                    (fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)) +
+                        scaleOut(
+                            animationSpec = MotionSpec.exit(reduced, Motion.Quick),
+                            targetScale = 0.7f
+                        ))).using(null)
+            },
+            label = "plain-tool-glyph"
+        ) { target ->
+            GlyphIcon(
+                glyph = target,
+                tint = tint,
+                size = 20.dp
+            )
+        }
     }
 }
 
@@ -1127,7 +1231,14 @@ private fun RowScope.ToolDockButton(
     badge: Int = 0
 ) {
     val colors = LocalLiuliColors.current
+    val reduced = reduceMotion
     val interaction = remember { MutableInteractionSource() }
+    // 可用/禁用之间淡入淡出：标签页键不可用时是"淡灰"，不是硬切。
+    val tint by animateColorAsState(
+        targetValue = if (enabled) colors.textPrimary else colors.textTertiary.copy(alpha = 0.38f),
+        animationSpec = MotionSpec.color(Motion.Quick),
+        label = "tool-dock-tint"
+    )
     Box(
         modifier = Modifier
             .weight(1f)
@@ -1150,7 +1261,7 @@ private fun RowScope.ToolDockButton(
         Box(contentAlignment = Alignment.Center) {
             GlyphIcon(
                 glyph = glyph,
-                tint = if (enabled) colors.textPrimary else colors.textTertiary.copy(alpha = 0.38f),
+                tint = tint,
                 size = 22.dp
             )
             // 角标常驻组合，靠缩放与透明度控制显隐：
@@ -1174,15 +1285,35 @@ private fun RowScope.ToolDockButton(
                     .background(colors.accent),
                 contentAlignment = Alignment.Center
             ) {
-                if (badge > 0) {
-                    BasicText(
-                        text = badge.coerceAtMost(99).toString(),
-                        style = TextStyle(
-                            color = Color.White,
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Bold
+                // 数字变化时交叉淡入：11 → 12 是换字，不是整块角标闪一下。
+                AnimatedContent(
+                    targetState = badge,
+                    modifier = Modifier.size(16.dp),
+                    contentAlignment = Alignment.Center,
+                    transitionSpec = {
+                        ((fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick)) +
+                            scaleIn(
+                                animationSpec = MotionSpec.enter(reduced, Motion.Quick),
+                                initialScale = 0.6f
+                            )) togetherWith
+                            (fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)) +
+                                scaleOut(
+                                    animationSpec = MotionSpec.exit(reduced, Motion.Quick),
+                                    targetScale = 0.6f
+                                ))).using(null)
+                    },
+                    label = "tool-badge-count"
+                ) { count ->
+                    if (count > 0) {
+                        BasicText(
+                            text = count.coerceAtMost(99).toString(),
+                            style = TextStyle(
+                                color = Color.White,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
@@ -1249,8 +1380,11 @@ private fun PageErrorCard(
             Modifier.padding(22.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // 整卡已有缩放淡入，内部元素再错开一点：
+            // 图标先落位，标题、说明、按钮依次跟上，读起来更有层次。
             Box(
                 Modifier
+                    .errorReveal(index = 0, pop = true)
                     .size(52.dp)
                     .clip(CircleShape)
                     .background(colors.danger.copy(alpha = 0.12f)),
@@ -1261,6 +1395,7 @@ private fun PageErrorCard(
             Spacer(Modifier.height(12.dp))
             BasicText(
                 text = "页面无法打开",
+                modifier = Modifier.errorReveal(index = 1),
                 style = TextStyle(
                     color = colors.textPrimary,
                     fontSize = 17.sp,
@@ -1270,13 +1405,17 @@ private fun PageErrorCard(
             Spacer(Modifier.height(6.dp))
             BasicText(
                 text = message,
+                modifier = Modifier.errorReveal(index = 2),
                 style = TextStyle(
                     color = colors.textSecondary,
                     fontSize = 13.sp
                 )
             )
             Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.errorReveal(index = 3),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 GlassPillButton(
                     label = "重试",
                     onClick = onRetry,
@@ -1291,6 +1430,36 @@ private fun PageErrorCard(
                     glyph = Glyph.Home
                 )
             }
+        }
+    }
+}
+
+/**
+ * 错误卡内的元素依次浮现。
+ *
+ * 延迟值必须在组合作用域里取好再进 LaunchedEffect，
+ * 因为 [MotionSpec.staggerDelay] 是 @Composable，不能在协程里调用。
+ */
+@Composable
+private fun Modifier.errorReveal(index: Int, pop: Boolean = false): Modifier {
+    val stagger = MotionSpec.staggerDelay(index, stepMillis = 40)
+    var appeared by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (stagger > 0) delay(stagger.toLong())
+        appeared = true
+    }
+    val alpha by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0f,
+        animationSpec = MotionSpec.value(Motion.Normal),
+        label = "error-reveal-alpha"
+    )
+    return graphicsLayer {
+        this.alpha = alpha
+        translationY = (1f - alpha) * 10.dp.toPx()
+        if (pop) {
+            val scale = 0.72f + 0.28f * alpha
+            scaleX = scale
+            scaleY = scale
         }
     }
 }
@@ -1398,13 +1567,35 @@ private fun BrowserMenu(
                     )
                 }
             }
-            entries.forEach { entry ->
+            entries.forEachIndexed { index, entry ->
+                val interaction = remember { MutableInteractionSource() }
+                // 菜单项逐条浮现：十项同时出现会糊成一片，错峰更好定位。
+                val stagger = MotionSpec.staggerDelay(index, stepMillis = 16)
+                var appeared by remember(entry.label) { mutableStateOf(false) }
+                LaunchedEffect(entry.label) {
+                    if (stagger > 0) kotlinx.coroutines.delay(stagger.toLong())
+                    appeared = true
+                }
+                val alpha by animateFloatAsState(
+                    targetValue = if (appeared) 1f else 0f,
+                    animationSpec = MotionSpec.value(Motion.Normal),
+                    label = "menu-entry-alpha"
+                )
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .heightIn(min = Dimens.minTouch)
                         .clip(RoundedCornerShape(16.dp))
-                        .clickable(role = Role.Button) { entry.onClick() }
+                        .clickable(
+                            interactionSource = interaction,
+                            indication = null,
+                            role = Role.Button
+                        ) { entry.onClick() }
+                        .pressScale(pressedScale = 0.97f, interactionSource = interaction)
+                        .graphicsLayer {
+                            this.alpha = alpha
+                            translationX = (1f - alpha) * 14.dp.toPx()
+                        }
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
