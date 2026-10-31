@@ -40,6 +40,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -47,6 +48,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -251,13 +254,43 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         contentPadding = PaddingValues(0.dp)
                     ) {
-                        items(recentTabs, key = { it.id }) { tab ->
-                            RecentTabCard(
-                                tab = tab,
-                                backdrop = backdrop,
-                                isTablet = isTablet,
-                                onClick = { onOpenTab(tab.id) }
+                        itemsIndexed(recentTabs, key = { _, tab -> tab.id }) { index, tab ->
+                            // 逐张浮现：横向滚动条里的卡片错峰落位。
+                            val stagger = MotionSpec.staggerDelay(index, stepMillis = 24)
+                            var revealed by remember(tab.id) {
+                                mutableStateOf(tab.id in revealedTabIds)
+                            }
+                            LaunchedEffect(tab.id) {
+                                if (!revealed) {
+                                    delay(stagger.toLong())
+                                    revealed = true
+                                    if (tab.id !in revealedTabIds) revealedTabIds.add(tab.id)
+                                }
+                            }
+                            val alpha by animateFloatAsState(
+                                targetValue = if (revealed) 1f else 0f,
+                                animationSpec = cardFadeSpec,
+                                label = "recent-tab-alpha"
                             )
+                            val scale by animateFloatAsState(
+                                targetValue = if (revealed) 1f else 0.94f,
+                                animationSpec = cardScaleSpec,
+                                label = "recent-tab-scale"
+                            )
+                            Box(
+                                Modifier.graphicsLayer {
+                                    this.alpha = alpha
+                                    scaleX = scale
+                                    scaleY = scale
+                                }
+                            ) {
+                                RecentTabCard(
+                                    tab = tab,
+                                    backdrop = backdrop,
+                                    isTablet = isTablet,
+                                    onClick = { onOpenTab(tab.id) }
+                                )
+                            }
                         }
                     }
                 }
@@ -307,12 +340,25 @@ private fun HomeSearchBar(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalLiuliColors.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val focusRequester = remember { FocusRequester() }
+    // 搜索框获得焦点时轻微放大，输入时玻璃件也跟着"醒"过来。
+    val focused by interactionSource.collectIsFocusedAsState()
+    val focusScale by animateFloatAsState(
+        targetValue = if (focused) 1.012f else 1f,
+        animationSpec = MotionSpec.pageSpring(),
+        label = "search-focus-scale"
+    )
     GlassSurface(
         backdrop = backdrop,
         modifier = modifier
             .widthIn(max = 720.dp)
             .fillMaxWidth()
-            .heightIn(min = 64.dp),
+            .heightIn(min = 64.dp)
+            .graphicsLayer {
+                scaleX = focusScale
+                scaleY = focusScale
+            },
         shape = RoundedCornerShape(32.dp),
         tint = colors.glassTintStrong,
         blurRadius = 22.dp,
@@ -340,7 +386,9 @@ private fun HomeSearchBar(
                 modifier = Modifier
                     .weight(1f)
                     .padding(horizontal = 2.dp)
+                    .focusRequester(focusRequester)
                     .semantics { contentDescription = "搜索或输入网址" },
+                interactionSource = interactionSource,
                 textStyle = TextStyle(
                     color = colors.textPrimary,
                     fontSize = 17.sp,
@@ -364,11 +412,19 @@ private fun HomeSearchBar(
                 }
             )
             if (query.isNotBlank()) {
+                val goInteraction = remember { MutableInteractionSource() }
                 Box(
                     modifier = Modifier
                         .heightIn(min = Dimens.minTouch)
                         .clip(RoundedCornerShape(50))
-                        .clickable(role = Role.Button, onClickLabel = "搜索", onClick = onSubmit)
+                        .clickable(
+                            interactionSource = goInteraction,
+                            indication = null,
+                            role = Role.Button,
+                            onClickLabel = "搜索",
+                            onClick = onSubmit
+                        )
+                        .pressScale(pressedScale = 0.90f, interactionSource = goInteraction)
                         .padding(horizontal = 14.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -426,12 +482,20 @@ private fun QuickLinkTile(
     onClick: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    val interaction = remember { MutableInteractionSource() }
     GlassSurface(
         backdrop = backdrop,
         modifier = modifier
             .height(if (isTablet) 112.dp else 96.dp)
             .clip(RoundedCornerShape(22.dp))
-            .clickable(role = Role.Button, onClickLabel = link.label, onClick = onClick),
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onClickLabel = link.label,
+                onClick = onClick
+            )
+            .pressScale(pressedScale = 0.94f, interactionSource = interaction),
         shape = RoundedCornerShape(22.dp),
         tint = colors.glassTint,
         blurRadius = 18.dp,
@@ -483,13 +547,20 @@ private fun RecentTabCard(
     onClick: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    val interaction = remember { MutableInteractionSource() }
     GlassSurface(
         backdrop = backdrop,
         modifier = Modifier
             .width(if (isTablet) 270.dp else 220.dp)
             .height(if (isTablet) 104.dp else 92.dp)
             .clip(RoundedCornerShape(22.dp))
-            .clickable(role = Role.Button, onClick = onClick),
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick
+            )
+            .pressScale(pressedScale = 0.95f, interactionSource = interaction),
         shape = RoundedCornerShape(22.dp),
         tint = colors.glassTint,
         blurRadius = 18.dp,
@@ -588,7 +659,13 @@ private fun PrivacyCard(
             Box(
                 Modifier
                     .clip(RoundedCornerShape(50))
-                    .clickable(role = Role.Button, onClick = onOpenLibrary)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        role = Role.Button,
+                        onClick = onOpenLibrary
+                    )
+                    .pressScale(pressedScale = 0.90f)
                     .padding(horizontal = 10.dp, vertical = 8.dp)
             ) {
                 BasicText(

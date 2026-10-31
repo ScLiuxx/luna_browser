@@ -13,6 +13,8 @@
 - 仓库同款交互组件：`LiquidButton`、`InteractiveHighlight`、`DampedDragAnimation`、`LiquidToggle`、`LiquidSlider`、`LiquidBottomTabs`。
 - Chromium 内核：使用 Android 系统 WebView，不打包 Chromium 运行时，安装包约 2.3 MB。
 - 一镜到底：`SharedTransitionLayout` + `AnimatedContent`，搜索框与标签卡片使用共享元素/共享容器过渡。
+- 统一动效规格层：弹簧曲线、时长档位与缓动收敛到一份契约（`ui/theme/Motion.kt`），所有页面共用；「减少动态效果」开关全局生效，任何动效都能降级。
+- 按压反馈全覆盖：玻璃卡片、列表行、按钮、标签页都获得液态按压回弹，拖动类控件（开关、滑块、底部 Dock）1:1 跟手并带液态过冲。
 - 多标签浏览：新建/关闭/切换标签、标签缩略图、书签与历史、下载、桌面版网站、全屏视频。
 - 平板与折叠屏：响应式侧栏、多列标签、可调整窗口、横竖屏。
 - 隐私护盾：本机拦截追踪器、去除跟踪参数、阻止第三方 Cookie、通用 User-Agent、拒绝敏感网页权限、退出即清除数据。
@@ -62,10 +64,10 @@ app/src/main/java/com/liuli/browser
 ├── data/          SettingsStore、LibraryStore
 ├── ui/
 │   ├── BrowserRoot.kt       响应式根布局、共享元素转场
-│   ├── liquid/              LiquidButton/Toggle/Slider/Dock、InteractiveHighlight
-│   ├── components/          玻璃表面、图标、Aurora 背景、隐私说明
+│   ├── liquid/              LiquidButton/Toggle/Slider/Dock、InteractiveHighlight、pressScale
+│   ├── components/          玻璃表面、图标、Aurora 背景、隐私说明、通用对话框
 │   ├── screens/             Home/Browser/TabSwitcher/Library/Settings/PrivacyGate
-│   └── theme/               配色、字体、尺寸
+│   └── theme/               配色、字体、尺寸、Motion 动效规格层
 └── web/                     BrowserViewModel、WebView 配置、隐私护盾、快照
 ```
 
