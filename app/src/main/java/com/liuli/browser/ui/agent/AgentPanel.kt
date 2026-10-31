@@ -1,15 +1,20 @@
 package com.liuli.browser.ui.agent
 
 import android.speech.tts.TextToSpeech
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntAsState
@@ -76,6 +81,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
@@ -185,6 +191,20 @@ fun AgentPanel(
     val keyboard = LocalSoftwareKeyboardController.current
     // 已经演过入场动画的消息：滚出去再回来不重播。
     val revealedMessageIds = remember { mutableStateListOf<Long>() }
+    // "减少动态效果"开关：AnimatedContent 的 transitionSpec 不是 @Composable 上下文，
+    // 只能在这里把开关读出来，交给非组合版本的时间轴。
+    val reduced = reduceMotion
+    // 规格先在组合作用域算好：fadeIn / scaleIn 的参数位不是
+    // @Composable 上下文，不能直接调用 MotionSpec 的组合版本。
+    val fadeInSpec = MotionSpec.enter()
+    val fadeOutSpec = MotionSpec.exit()
+    val scaleInSpec = MotionSpec.pageSpring()
+    val slideSpec = MotionSpec.pageSpring(androidx.compose.ui.unit.IntOffset.Zero)
+    // 高度变化（审计行、会话行出现/消失）用带可见阈值的弹簧。
+    val expandSpec = MotionSpec.pageSpring(IntSize.Zero)
+    // 顶部免责声明与底部说明文案：面板展开时淡入，不要整块压在标题下面。
+    var notesVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { notesVisible = true }
 
     // P7 语音回复：只在用户开启后朗读最新一条只读回答，不上传音频、不请求录音权限。
     val context = LocalContext.current
@@ -347,26 +367,57 @@ fun AgentPanel(
                                 fontWeight = FontWeight.SemiBold
                             )
                         )
-                        BasicText(
-                            text = subtitle,
-                            style = TextStyle(color = colors.textTertiary, fontSize = 10.sp),
-                            maxLines = 1
-                        )
+                        // 站点策略变化时副标题淡入淡出，而不是整行硬切。
+                        AnimatedContent(
+                            targetState = subtitle,
+                            transitionSpec = {
+                                fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Normal))
+                                    .togetherWith(fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)))
+                                    .using(SizeTransform(clip = false))
+                            },
+                            label = "agent-subtitle"
+                        ) { text ->
+                            BasicText(
+                                text = text,
+                                style = TextStyle(color = colors.textTertiary, fontSize = 10.sp),
+                                maxLines = 1
+                            )
+                        }
                     }
+                    // 模式徽标："本机 / 云端 / 本地"切换时底色与字色交叉过渡。
+                    val modeBadgeBg by animateColorAsState(
+                        targetValue = modeTint.copy(alpha = 0.14f),
+                        animationSpec = MotionSpec.color(),
+                        label = "mode-badge-bg"
+                    )
+                    val modeBadgeTint by animateColorAsState(
+                        targetValue = modeTint,
+                        animationSpec = MotionSpec.color(),
+                        label = "mode-badge-tint"
+                    )
                     Box(
                         Modifier
                             .clip(RoundedCornerShape(50))
-                            .background(modeTint.copy(alpha = 0.14f))
+                            .background(modeBadgeBg)
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
-                        BasicText(
-                            text = modeLabel,
-                            style = TextStyle(
-                                color = modeTint,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Medium
+                        AnimatedContent(
+                            targetState = modeLabel,
+                            transitionSpec = {
+                                fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick))
+                                    .togetherWith(fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)))
+                            },
+                            label = "mode-badge-label"
+                        ) { label ->
+                            BasicText(
+                                text = label,
+                                style = TextStyle(
+                                    color = modeBadgeTint,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
                             )
-                        )
+                        }
                     }
                     Spacer(Modifier.width(4.dp))
                     GlassIconButton(
@@ -380,10 +431,20 @@ fun AgentPanel(
                 }
 
                 Spacer(Modifier.height(8.dp))
-                BasicText(
-                    text = "只读取可见正文与元素名称，不读取输入框已有内容、密码、Cookie 或剪贴板。",
-                    style = TextStyle(color = colors.textTertiary, fontSize = 10.sp, lineHeight = 15.sp)
-                )
+                // 免责声明淡入：面板展开时不要整块"啪"地压在标题下面，
+                // 高度也跟着过渡，快捷标签不会被顶下去。
+                AnimatedVisibility(
+                    visible = notesVisible,
+                    enter = fadeIn(animationSpec = fadeInSpec) +
+                        expandVertically(animationSpec = expandSpec),
+                    exit = fadeOut(animationSpec = fadeOutSpec) +
+                        shrinkVertically(animationSpec = expandSpec)
+                ) {
+                    BasicText(
+                        text = "只读取可见正文与元素名称，不读取输入框已有内容、密码、Cookie 或剪贴板。",
+                        style = TextStyle(color = colors.textTertiary, fontSize = 10.sp, lineHeight = 15.sp)
+                    )
+                }
 
                 Spacer(Modifier.height(10.dp))
                 Row(
@@ -424,12 +485,6 @@ fun AgentPanel(
                             .fillMaxWidth()
                     )
                 } else {
-                    // 规格先在组合作用域算好：fadeIn / scaleIn 的参数位不是
-                    // @Composable 上下文，不能直接调用 MotionSpec 的组合版本。
-                    val fadeInSpec = MotionSpec.enter()
-                    val fadeOutSpec = MotionSpec.exit()
-                    val scaleInSpec = MotionSpec.pageSpring()
-                    val slideSpec = MotionSpec.pageSpring(androidx.compose.ui.unit.IntOffset.Zero)
                     LazyColumn(
                         state = listState,
                         modifier = Modifier
@@ -653,35 +708,61 @@ fun AgentPanel(
                 }
 
                 Spacer(Modifier.height(8.dp))
-                BasicText(
-                    text = "受控操作：单步动作需逐条确认；多步任务需先批准计划，执行中可暂停或取消，不会自动提交表单。",
-                    style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
-                )
-                if (agent.audit.isNotEmpty()) {
-                    Spacer(Modifier.height(3.dp))
+                // 底部说明文案与面板一起淡入。
+                AnimatedVisibility(
+                    visible = notesVisible,
+                    enter = fadeIn(animationSpec = fadeInSpec) +
+                        expandVertically(animationSpec = expandSpec),
+                    exit = fadeOut(animationSpec = fadeOutSpec) +
+                        shrinkVertically(animationSpec = expandSpec)
+                ) {
                     BasicText(
-                        text = "审计 ${agent.audit.size} 条 · 仅本机内存，清除对话或退出时删除",
-                        style = TextStyle(
-                            color = colors.textTertiary,
-                            fontSize = 9.sp,
-                            lineHeight = 13.sp
-                        )
+                        text = "受控操作：单步动作需逐条确认；多步任务需先批准计划，执行中可暂停或取消，不会自动提交表单。",
+                        style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
                     )
                 }
-                if (agent.watches.isNotEmpty() || agent.macros.isNotEmpty() || agent.recordingMacro) {
-                    Spacer(Modifier.height(3.dp))
-                    BasicText(
-                        text = buildString {
-                            append("本机会话：关注 ${agent.watches.size} 个页面 · 宏 ${agent.macros.size} 个")
-                            if (agent.recordingMacro) append(" · 正在录制宏")
-                            append("（不后台运行）")
-                        },
-                        style = TextStyle(
-                            color = colors.textTertiary,
-                            fontSize = 9.sp,
-                            lineHeight = 13.sp
+                // 审计行与会话行：出现/消失都带高度过渡，输入框不会被顶来顶去。
+                AnimatedVisibility(
+                    visible = agent.audit.isNotEmpty(),
+                    enter = fadeIn(animationSpec = fadeInSpec) +
+                        expandVertically(animationSpec = expandSpec),
+                    exit = fadeOut(animationSpec = fadeOutSpec) +
+                        shrinkVertically(animationSpec = expandSpec)
+                ) {
+                    Column(Modifier.fillMaxWidth()) {
+                        Spacer(Modifier.height(3.dp))
+                        BasicText(
+                            text = "审计 ${agent.audit.size} 条 · 仅本机内存，清除对话或退出时删除",
+                            style = TextStyle(
+                                color = colors.textTertiary,
+                                fontSize = 9.sp,
+                                lineHeight = 13.sp
+                            )
                         )
-                    )
+                    }
+                }
+                AnimatedVisibility(
+                    visible = agent.watches.isNotEmpty() || agent.macros.isNotEmpty() || agent.recordingMacro,
+                    enter = fadeIn(animationSpec = fadeInSpec) +
+                        expandVertically(animationSpec = expandSpec),
+                    exit = fadeOut(animationSpec = fadeOutSpec) +
+                        shrinkVertically(animationSpec = expandSpec)
+                ) {
+                    Column(Modifier.fillMaxWidth()) {
+                        Spacer(Modifier.height(3.dp))
+                        BasicText(
+                            text = buildString {
+                                append("本机会话：关注 ${agent.watches.size} 个页面 · 宏 ${agent.macros.size} 个")
+                                if (agent.recordingMacro) append(" · 正在录制宏")
+                                append("（不后台运行）")
+                            },
+                            style = TextStyle(
+                                color = colors.textTertiary,
+                                fontSize = 9.sp,
+                                lineHeight = 13.sp
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -775,12 +856,49 @@ private fun EmptyState(tabTitle: String, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * 卡片头部的小图标圆。
+ *
+ * 卡片本身已经整体缩放入场，图标再从 0.82 长出来一点，
+ * 两层错开，卡片才像"落位"而不是被"贴"上去。
+ *
+ * [entranceKey] 用来记住入场状态：卡片滑出屏幕再滑回来时不重播动画。
+ */
+@Composable
+private fun CardHeaderIcon(
+    glyph: Glyph,
+    tint: Color,
+    entranceKey: Any
+) {
+    var entered by rememberSaveable(entranceKey) { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (entered) 1f else 0.82f,
+        animationSpec = MotionSpec.pageSpring(),
+        label = "card-icon-scale"
+    )
+    LaunchedEffect(entranceKey) { entered = true }
+    Box(
+        Modifier
+            .size(26.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(CircleShape)
+            .background(tint.copy(alpha = 0.18f)),
+        contentAlignment = Alignment.Center
+    ) {
+        GlyphIcon(glyph, tint, size = 14.dp)
+    }
+}
+
 @Composable
 private fun PlanCard(
     plan: AgentPlan,
     onCommand: (AgentPlanCommand) -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    val reduced = reduceMotion
     val statusLabel = when (plan.status) {
         AgentPlanStatus.Pending -> "待批准"
         AgentPlanStatus.Running -> "执行中"
@@ -804,15 +922,7 @@ private fun PlanCard(
             .padding(12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .background(colors.accent.copy(alpha = 0.18f)),
-                contentAlignment = Alignment.Center
-            ) {
-                GlyphIcon(Glyph.Sparkle, colors.accent, size = 14.dp)
-            }
+            CardHeaderIcon(Glyph.Sparkle, colors.accent, entranceKey = plan.goal)
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 BasicText(
@@ -841,14 +951,24 @@ private fun PlanCard(
                     .background(badgeTint.copy(alpha = 0.14f))
                     .padding(horizontal = 7.dp, vertical = 3.dp)
             ) {
-                BasicText(
-                    text = statusLabel,
-                    style = TextStyle(
-                        color = badgeTint,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Medium
+                // 状态文案与颜色同步交叉过渡，换状态时徽标是"化"过去的。
+                AnimatedContent(
+                    targetState = statusLabel,
+                    transitionSpec = {
+                        fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick))
+                            .togetherWith(fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)))
+                    },
+                    label = "plan-status-label"
+                ) { label ->
+                    BasicText(
+                        text = label,
+                        style = TextStyle(
+                            color = badgeTint,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Medium
+                        )
                     )
-                )
+                }
             }
         }
         Spacer(Modifier.height(6.dp))
@@ -939,37 +1059,48 @@ private fun PlanCard(
             )
         }
         Spacer(Modifier.height(8.dp))
-        when (plan.status) {
-            AgentPlanStatus.Pending -> {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton("批准并执行", accent = true) { onCommand(AgentPlanCommand.Approve) }
-                    ActionButton("取消", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+        // 状态推进时按钮组整组交叉淡入淡出，不再"啪"地换掉。
+        AnimatedContent(
+            targetState = plan.status,
+            transitionSpec = {
+                fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick))
+                    .togetherWith(fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)))
+                    .using(SizeTransform(clip = false))
+            },
+            label = "plan-actions"
+        ) { status ->
+            when (status) {
+                AgentPlanStatus.Pending -> {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ActionButton("批准并执行", accent = true) { onCommand(AgentPlanCommand.Approve) }
+                        ActionButton("取消", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+                    }
+                    Spacer(Modifier.height(5.dp))
+                    BasicText(
+                        text = "批准后按顺序执行；点击可能跳转或提交表单，填写不会自动提交。",
+                        style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
+                    )
                 }
-                Spacer(Modifier.height(5.dp))
-                BasicText(
-                    text = "批准后按顺序执行；点击可能跳转或提交表单，填写不会自动提交。",
-                    style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
-                )
-            }
-            AgentPlanStatus.Running -> {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton("暂停", accent = false) { onCommand(AgentPlanCommand.Pause) }
-                    ActionButton("取消任务", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+                AgentPlanStatus.Running -> {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ActionButton("暂停", accent = false) { onCommand(AgentPlanCommand.Pause) }
+                        ActionButton("取消任务", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+                    }
                 }
-            }
-            AgentPlanStatus.Paused -> {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton("继续执行", accent = true) { onCommand(AgentPlanCommand.Resume) }
-                    ActionButton("取消任务", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+                AgentPlanStatus.Paused -> {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ActionButton("继续执行", accent = true) { onCommand(AgentPlanCommand.Resume) }
+                        ActionButton("取消任务", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+                    }
                 }
-            }
-            AgentPlanStatus.Failed -> {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton("重试", accent = true) { onCommand(AgentPlanCommand.Retry) }
-                    ActionButton("取消", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+                AgentPlanStatus.Failed -> {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ActionButton("重试", accent = true) { onCommand(AgentPlanCommand.Retry) }
+                        ActionButton("取消", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+                    }
                 }
+                AgentPlanStatus.Done, AgentPlanStatus.Cancelled -> Unit
             }
-            AgentPlanStatus.Done, AgentPlanStatus.Cancelled -> Unit
         }
     }
 }
@@ -983,6 +1114,7 @@ private fun ReportCard(
 ) {
     val colors = LocalLiuliColors.current
     val clipboard = LocalClipboardManager.current
+    val reduced = reduceMotion
     var expanded by rememberSaveable(report.createdAt) { mutableStateOf(false) }
     var copied by rememberSaveable(report.createdAt) { mutableStateOf(false) }
     // "已复制"提示 1.6 秒后自动复原，避免用户误以为状态卡住。
@@ -1010,15 +1142,7 @@ private fun ReportCard(
             .padding(12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .background(colors.success.copy(alpha = 0.18f)),
-                contentAlignment = Alignment.Center
-            ) {
-                GlyphIcon(Glyph.History, colors.success, size = 14.dp)
-            }
+            CardHeaderIcon(Glyph.History, colors.success, entranceKey = report.createdAt)
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 BasicText(
@@ -1078,14 +1202,9 @@ private fun ReportCard(
             overflow = TextOverflow.Ellipsis
         )
         val expandInteraction = remember { MutableInteractionSource() }
-        BasicText(
-            text = if (expanded) "收起全文" else "展开全文",
-            style = TextStyle(
-                color = colors.accent,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Medium
-            ),
-            modifier = Modifier
+        // "展开全文 / 收起全文"切换时交叉淡入淡出，文字不硬切。
+        Box(
+            Modifier
                 .padding(top = 4.dp)
                 .clickable(
                     interactionSource = expandInteraction,
@@ -1094,7 +1213,26 @@ private fun ReportCard(
                     onClickLabel = if (expanded) "收起全文" else "展开全文"
                 ) { expanded = !expanded }
                 .pressScale(pressedScale = 0.94f, interactionSource = expandInteraction)
-        )
+        ) {
+            AnimatedContent(
+                targetState = expanded,
+                transitionSpec = {
+                    fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick))
+                        .togetherWith(fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)))
+                        .using(SizeTransform(clip = false))
+                },
+                label = "report-expand-label"
+            ) { isExpanded ->
+                BasicText(
+                    text = if (isExpanded) "收起全文" else "展开全文",
+                    style = TextStyle(
+                        color = colors.accent,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                )
+            }
+        }
         Spacer(Modifier.height(7.dp))
         report.sources.forEach { source ->
             val credibility = ResearchEngine.assessSource(source.url, source.title, source.charCount)
@@ -1218,15 +1356,7 @@ private fun CreationCard(
             .padding(12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .background(colors.accentSecondary.copy(alpha = 0.18f)),
-                contentAlignment = Alignment.Center
-            ) {
-                GlyphIcon(kindGlyph, colors.accentSecondary, size = 14.dp)
-            }
+            CardHeaderIcon(kindGlyph, colors.accentSecondary, entranceKey = creation.createdAt)
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 BasicText(
@@ -1318,6 +1448,8 @@ private fun MessageBubble(
     }
     val colors = LocalLiuliColors.current
     val isUser = message.role == AgentMessageRole.User
+    // 气泡标注的淡入规格：比气泡本身晚一点，两层错开。
+    val captionSpec = MotionSpec.enter(Motion.Normal)
     Column(
         Modifier
             .fillMaxWidth()
@@ -1351,11 +1483,23 @@ private fun MessageBubble(
             )
         }
         if (!isUser) {
-            BasicText(
-                text = "${message.mode.label} · 只读",
-                style = TextStyle(color = colors.textTertiary, fontSize = 9.sp),
-                modifier = Modifier.padding(start = 5.dp, top = 3.dp)
-            )
+            // "本机 · 只读"标注晚于气泡一点点淡入：两层错开，不一次性砸下来。
+            // 用 rememberSaveable 记住是否已经演过，滚出屏幕再回来不重播。
+            var captionVisible by rememberSaveable(message.id) { mutableStateOf(false) }
+            LaunchedEffect(message.id) {
+                delay(120L)
+                captionVisible = true
+            }
+            AnimatedVisibility(
+                visible = captionVisible,
+                enter = fadeIn(animationSpec = captionSpec)
+            ) {
+                BasicText(
+                    text = "${message.mode.label} · 只读",
+                    style = TextStyle(color = colors.textTertiary, fontSize = 9.sp),
+                    modifier = Modifier.padding(start = 5.dp, top = 3.dp)
+                )
+            }
         }
     }
 }
@@ -1383,15 +1527,7 @@ private fun ActionCard(
         ) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .background(colors.accent.copy(alpha = 0.18f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        GlyphIcon(Glyph.Sparkle, colors.accent, size = 14.dp)
-                    }
+                    CardHeaderIcon(Glyph.Sparkle, colors.accent, entranceKey = message.id)
                     Spacer(Modifier.width(8.dp))
                     BasicText(
                         text = proposal.title,
@@ -1402,16 +1538,30 @@ private fun ActionCard(
                         ),
                         modifier = Modifier.weight(1f)
                     )
+                    // 风险徽标：入场时先是无色，随后落到对应风险色，
+                    // 底色与字色一起交叉过渡，而不是硬切。
+                    var riskSettled by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) { riskSettled = true }
+                    val riskTint = if (proposal.riskLabel.contains("低风险")) {
+                        colors.success
+                    } else {
+                        colors.accent
+                    }
+                    val riskBadgeTint by animateColorAsState(
+                        targetValue = if (riskSettled) riskTint else colors.textTertiary,
+                        animationSpec = MotionSpec.color(Motion.Normal),
+                        label = "action-risk-tint"
+                    )
                     Box(
                         Modifier
                             .clip(RoundedCornerShape(50))
-                            .background(colors.accent.copy(alpha = 0.14f))
+                            .background(riskBadgeTint.copy(alpha = 0.14f))
                             .padding(horizontal = 7.dp, vertical = 3.dp)
                     ) {
                         BasicText(
                             text = proposal.riskLabel,
                             style = TextStyle(
-                                color = colors.accent,
+                                color = riskBadgeTint,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Medium
                             )
@@ -1476,6 +1626,7 @@ private fun ActionButton(
 ) {
     val colors = LocalLiuliColors.current
     val interaction = remember { MutableInteractionSource() }
+    val reduced = reduceMotion
     val background by animateColorAsState(
         targetValue = if (accent) colors.accent else colors.textPrimary.copy(alpha = 0.08f),
         animationSpec = MotionSpec.color(),
@@ -1497,14 +1648,25 @@ private fun ActionButton(
             .padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center
     ) {
-        BasicText(
-            text = label,
-            style = TextStyle(
-                color = if (accent) Color.White else colors.textSecondary,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium
+        // 按钮文案会变（"复制"→"已复制"、"朗读"→"停止朗读"），交叉淡入淡出而不是硬切。
+        AnimatedContent(
+            targetState = label,
+            transitionSpec = {
+                fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick))
+                    .togetherWith(fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)))
+                    .using(SizeTransform(clip = false))
+            },
+            label = "action-label"
+        ) { text ->
+            BasicText(
+                text = text,
+                style = TextStyle(
+                    color = if (accent) Color.White else colors.textSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium
+                )
             )
-        )
+        }
     }
 }
 
