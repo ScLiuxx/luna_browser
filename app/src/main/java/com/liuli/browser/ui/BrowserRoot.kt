@@ -11,13 +11,20 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
@@ -56,6 +63,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -81,6 +89,7 @@ import com.liuli.browser.ui.screens.SettingsScreen
 import com.liuli.browser.ui.screens.TabSwitcherScreen
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.MotionSpec
 import com.liuli.browser.web.AppOverlay
 import com.liuli.browser.web.BrowserTab
 import com.liuli.browser.web.BrowserViewModel
@@ -105,6 +114,73 @@ private enum class MainScreen {
     Tabs,
     Library,
     Settings
+}
+
+/**
+ * 页面层级。不同层级之间的转场方向不同：
+ * - Content 是网页本身；
+ * - Page 是首页这类根页面；
+ * - Overlay 是标签、书签、设置这类从底层升起的浮层。
+ */
+private fun MainScreen.layer(): ScreenLayer = when (this) {
+    MainScreen.Browser -> ScreenLayer.Content
+    MainScreen.Home -> ScreenLayer.Page
+    MainScreen.Tabs, MainScreen.Library, MainScreen.Settings -> ScreenLayer.Overlay
+}
+
+private enum class ScreenLayer { Content, Page, Overlay }
+
+/**
+ * 主页面转场。
+ *
+ * 此前所有页面之间都是纯 fadeIn/fadeOut，五个页面观感完全一致、缺方向感，
+ * 而且两屏交叉淡化时中间帧会发灰。现在按层级区分方向：
+ * 浮层升起时底层轻微后退，网页与首页之间保持克制以免破坏共享元素转场。
+ */
+private fun screenTransition(
+    initial: MainScreen,
+    target: MainScreen,
+    isTablet: Boolean,
+    reduced: Boolean
+): ContentTransform {
+    val from = initial.layer()
+    val to = target.layer()
+    val offsetSpec = MotionSpec.pageSpring(reduced, IntOffset.Zero)
+    // 浮层升起 / 落下：纵向滑动，桌面端从右侧滑入。
+    if (from != to && (to == ScreenLayer.Overlay || from == ScreenLayer.Overlay)) {
+        val enterTransition: EnterTransition
+        val exitTransition: ExitTransition
+        if (to == ScreenLayer.Overlay) {
+            enterTransition = if (isTablet) {
+                slideInHorizontally(animationSpec = offsetSpec) { it / 6 }
+            } else {
+                slideInVertically(animationSpec = offsetSpec) { it / 8 }
+            }
+            exitTransition = if (isTablet) {
+                slideOutHorizontally(animationSpec = offsetSpec) { -it / 8 }
+            } else {
+                slideOutVertically(animationSpec = offsetSpec) { -it / 10 }
+            }
+        } else {
+            enterTransition = if (isTablet) {
+                slideInHorizontally(animationSpec = offsetSpec) { -it / 8 }
+            } else {
+                slideInVertically(animationSpec = offsetSpec) { -it / 10 }
+            }
+            exitTransition = if (isTablet) {
+                slideOutHorizontally(animationSpec = offsetSpec) { it / 6 }
+            } else {
+                slideOutVertically(animationSpec = offsetSpec) { it / 8 }
+            }
+        }
+        return (fadeIn(MotionSpec.enter(reduced)) + enterTransition) togetherWith
+            (fadeOut(MotionSpec.exit(reduced)) + exitTransition)
+    }
+    // 网页与首页之间靠共享元素承接，这里只做轻微缩放，避免抢戏。
+    val enterScale = if (to == ScreenLayer.Content) 0.985f else 1f
+    val exitScale = if (from == ScreenLayer.Content) 1.015f else 1f
+    return (fadeIn(MotionSpec.enter(reduced)) + scaleIn(initialScale = enterScale)) togetherWith
+        (fadeOut(MotionSpec.exit(reduced)) + scaleOut(targetScale = exitScale))
 }
 
 private val RailItems = listOf(
@@ -458,7 +534,7 @@ fun BrowserRoot(
                         targetState = screen,
                         modifier = Modifier.fillMaxSize(),
                         transitionSpec = {
-                            fadeIn(tween(220)) togetherWith fadeOut(tween(160))
+                            screenTransition(initialState, targetState, isTablet, settings.reduceMotion)
                         },
                         label = "main-screen"
                     ) { target ->
@@ -657,12 +733,12 @@ fun BrowserRoot(
                 Box(Modifier.align(Alignment.BottomCenter)) {
                     androidx.compose.animation.AnimatedVisibility(
                         visible = !isTablet && screen == MainScreen.Home,
-                        enter = fadeIn(tween(200)) + slideInVertically(
-                            animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f),
+                        enter = fadeIn(MotionSpec.enter()) + slideInVertically(
+                            animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
                             initialOffsetY = { it / 2 }
                         ),
-                        exit = fadeOut(tween(150)) + slideOutVertically(
-                            animationSpec = tween(150),
+                        exit = fadeOut(MotionSpec.exit()) + slideOutVertically(
+                            animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
                             targetOffsetY = { it / 3 }
                         )
                     ) {
@@ -692,28 +768,35 @@ fun BrowserRoot(
                         vm.consumeMessage()
                     }
                 }
-                if (message != null) {
-                    Box(
-                        Modifier
-                            .align(Alignment.BottomCenter)
-                            .navigationBarsPadding()
-                            .padding(bottom = if (isTablet) 24.dp else 88.dp, start = 20.dp, end = 20.dp)
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = message != null,
+                    enter = fadeIn(MotionSpec.enter()) + slideInVertically(
+                        animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
+                        initialOffsetY = { it / 2 }
+                    ),
+                    exit = fadeOut(MotionSpec.exit()) + slideOutVertically(
+                        animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
+                        targetOffsetY = { it / 3 }
+                    ),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(bottom = if (isTablet) 24.dp else 88.dp, start = 20.dp, end = 20.dp)
+                ) {
+                    GlassSurface(
+                        backdrop = chromeBackdrop,
+                        modifier = Modifier.widthIn(max = 420.dp),
+                        shape = RoundedCornerShape(50),
+                        tint = colors.glassTintStrong,
+                        blurRadius = 18.dp,
+                        lensHeight = 14.dp,
+                        lensAmount = 20.dp,
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
                     ) {
-                        GlassSurface(
-                            backdrop = chromeBackdrop,
-                            modifier = Modifier.widthIn(max = 420.dp),
-                            shape = RoundedCornerShape(50),
-                            tint = colors.glassTintStrong,
-                            blurRadius = 18.dp,
-                            lensHeight = 14.dp,
-                            lensAmount = 20.dp,
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
-                        ) {
-                            BasicText(
-                                text = message,
-                                style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
-                            )
-                        }
+                        BasicText(
+                            text = message.orEmpty(),
+                            style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+                        )
                     }
                 }
             }

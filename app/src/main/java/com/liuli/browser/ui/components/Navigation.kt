@@ -1,10 +1,13 @@
 package com.liuli.browser.ui.components
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -33,6 +36,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -47,8 +51,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.Motion
+import com.liuli.browser.ui.theme.MotionSpec
 
 data class NavItem(
     val glyph: Glyph,
@@ -110,15 +117,26 @@ fun GlassNavigationRail(
     val density = LocalDensity.current
     val itemBounds = remember { mutableStateMapOf<Int, Rect>() }
     val selectedBounds = itemBounds[selectedIndex]
+    // 指示器位置与高度共用同一套页面级弹性，上下两端因此完全对称
     val indicatorTop by animateDpAsState(
         targetValue = selectedBounds?.top?.let { with(density) { it.toDp() } } ?: 0.dp,
-        animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f),
+        animationSpec = MotionSpec.pageSpring(0.01.dp),
         label = "rail-indicator-top"
     )
     val indicatorHeight by animateDpAsState(
         targetValue = selectedBounds?.height?.let { with(density) { it.toDp() } } ?: 0.dp,
-        animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f),
+        animationSpec = MotionSpec.pageSpring(0.01.dp),
         label = "rail-indicator-height"
+    )
+    // 出现与消失用互为镜像的进入/退出曲线，两端观感一致
+    val indicatorAlpha by animateFloatAsState(
+        targetValue = if (selectedBounds != null) 1f else 0f,
+        animationSpec = if (selectedBounds != null) {
+            MotionSpec.enter(Motion.Quick)
+        } else {
+            MotionSpec.exit(Motion.Quick)
+        },
+        label = "rail-indicator-alpha"
     )
     GlassSurface(
         backdrop = backdrop,
@@ -145,14 +163,15 @@ fun GlassNavigationRail(
                     .fillMaxWidth()
                     .weight(1f)
             ) {
-                if (indicatorHeight > 0.dp) {
+                if (indicatorHeight > 0.dp || indicatorAlpha > 0f) {
                     GlassSurface(
                         backdrop = backdrop,
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .offset(y = indicatorTop)
                             .width(58.dp)
-                            .height(indicatorHeight),
+                            .height(indicatorHeight)
+                            .graphicsLayer { alpha = indicatorAlpha },
                         shape = RoundedCornerShape(18.dp),
                         tint = colors.accent.copy(alpha = if (colors.isDark) 0.22f else 0.13f),
                         blurRadius = 14.dp,
@@ -168,6 +187,23 @@ fun GlassNavigationRail(
                 ) {
                     items.forEachIndexed { index, item ->
                         val selected = index == selectedIndex
+                        val itemInteraction = remember(item) { MutableInteractionSource() }
+                        // 导航项较小，按压回缩得更明显一些
+                        val itemPress = Modifier.pressScale(
+                            pressedScale = 0.92f,
+                            interactionSource = itemInteraction
+                        )
+                        // 选中与未选中之间平滑过渡，而不是瞬时换色
+                        val iconTint by animateColorAsState(
+                            targetValue = if (selected) colors.accent else colors.textSecondary,
+                            animationSpec = MotionSpec.color(Motion.Quick),
+                            label = "rail-icon-tint"
+                        )
+                        val labelTint by animateColorAsState(
+                            targetValue = if (selected) colors.accent else colors.textTertiary,
+                            animationSpec = MotionSpec.color(Motion.Quick),
+                            label = "rail-label-tint"
+                        )
                         Column(
                             modifier = Modifier
                                 .width(58.dp)
@@ -179,7 +215,13 @@ fun GlassNavigationRail(
                                     contentDescription = item.label
                                     role = Role.Button
                                 }
-                                .clickable(role = Role.Button, onClickLabel = item.label) {
+                                .then(itemPress)
+                                .clickable(
+                                    interactionSource = itemInteraction,
+                                    indication = LocalIndication.current,
+                                    role = Role.Button,
+                                    onClickLabel = item.label
+                                ) {
                                     onSelect(index)
                                 }
                                 .padding(vertical = 8.dp),
@@ -188,7 +230,7 @@ fun GlassNavigationRail(
                             Box(contentAlignment = Alignment.Center) {
                                 GlyphIcon(
                                     glyph = item.glyph,
-                                    tint = if (selected) colors.accent else colors.textSecondary,
+                                    tint = iconTint,
                                     size = 22.dp
                                 )
                                 if (item.glyph == Glyph.Tabs && tabCount > 0) {
@@ -215,7 +257,7 @@ fun GlassNavigationRail(
                             BasicText(
                                 text = item.label,
                                 style = TextStyle(
-                                    color = if (selected) colors.accent else colors.textTertiary,
+                                    color = labelTint,
                                     fontSize = 10.sp,
                                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                                 )
@@ -225,6 +267,11 @@ fun GlassNavigationRail(
                 }
             }
             Spacer(Modifier.height(6.dp))
+            val newTabInteraction = remember { MutableInteractionSource() }
+            val newTabPress = Modifier.pressScale(
+                pressedScale = 0.92f,
+                interactionSource = newTabInteraction
+            )
             Box(
                 Modifier
                     .size(48.dp)
@@ -234,7 +281,14 @@ fun GlassNavigationRail(
                         contentDescription = "新建标签页"
                         role = Role.Button
                     }
-                    .clickable(role = Role.Button, onClickLabel = "新建标签页", onClick = onNewTab),
+                    .then(newTabPress)
+                    .clickable(
+                        interactionSource = newTabInteraction,
+                        indication = LocalIndication.current,
+                        role = Role.Button,
+                        onClickLabel = "新建标签页",
+                        onClick = onNewTab
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 GlyphIcon(Glyph.Plus, colors.accent, size = 22.dp)

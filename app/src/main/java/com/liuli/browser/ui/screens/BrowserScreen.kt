@@ -82,6 +82,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
@@ -96,6 +97,7 @@ import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.MotionSpec
 import com.liuli.browser.web.BrowserTab
 import com.liuli.browser.web.BrowserViewModel
 import com.liuli.browser.web.agent.AgentController
@@ -171,11 +173,14 @@ fun BrowserScreen(
     val idleBarHeight = if (fontScale > 1.3f) 76.dp else 64.dp
     val canNavigateBack = tab.canGoBack || vm.tabs.size > 1 || !tab.isHome
     val collapsed = settings.autoHideToolbar && vm.toolbarCollapsed && !editing && !menuOpen && !shieldOpen
+    // sharedBounds 的 boundsTransform 不是 Composable 上下文，规格要在外面先算好。
+    val addressBoundsSpec = MotionSpec.sharedSpring(Rect(0f, 0f, 0f, 0f))
+    val snapshotBoundsSpec = MotionSpec.pageSpring(Rect(0f, 0f, 0f, 0f))
     val addressSharedModifier = with(sharedScope) {
         Modifier.sharedBounds(
             sharedContentState = rememberSharedContentState(key = "address-bar"),
             animatedVisibilityScope = animatedScope,
-            boundsTransform = { _, _ -> spring(dampingRatio = 1f, stiffness = 342f) },
+            boundsTransform = { _, _ -> addressBoundsSpec },
             resizeMode = SharedTransitionScope.ResizeMode.RemeasureToBounds
         )
     }
@@ -190,7 +195,7 @@ fun BrowserScreen(
             collapsed -> 42.dp
             else -> idleBarHeight
         },
-        animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f),
+        animationSpec = MotionSpec.pageSpring(0.01.dp),
         label = "address-morph"
     )
 
@@ -200,7 +205,7 @@ fun BrowserScreen(
                 Modifier.sharedBounds(
                     sharedContentState = rememberSharedContentState(key = "tab-image-$sharedSnapshotKey"),
                     animatedVisibilityScope = animatedScope,
-                    boundsTransform = { _, _ -> spring(dampingRatio = 0.9f, stiffness = 380f) },
+                    boundsTransform = { _, _ -> snapshotBoundsSpec },
                     resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(
                         ContentScale.Crop,
                         Alignment.Center
@@ -327,12 +332,12 @@ fun BrowserScreen(
         AnimatedVisibility(
             visible = !tab.isFullscreen && !isTablet && !collapsed,
             modifier = Modifier.align(Alignment.BottomCenter),
-            enter = fadeIn(tween(180)) + slideInVertically(
-                animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f),
+            enter = fadeIn(MotionSpec.enter()) + slideInVertically(
+                animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
                 initialOffsetY = { it / 2 }
             ),
-            exit = fadeOut(tween(140)) + slideOutVertically(
-                animationSpec = tween(140),
+            exit = fadeOut(MotionSpec.exit()) + slideOutVertically(
+                animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
                 targetOffsetY = { it / 3 }
             )
         ) {
@@ -356,25 +361,45 @@ fun BrowserScreen(
                     .widthIn(max = 560.dp)
             )
         }
-        if (!tab.isFullscreen && !isTablet && collapsed) {
+        AnimatedVisibility(
+            visible = !tab.isFullscreen && !isTablet && collapsed,
+            enter = fadeIn(MotionSpec.enter()) + slideInVertically(
+                animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
+                initialOffsetY = { it / 2 }
+            ),
+            exit = fadeOut(MotionSpec.exit()) + slideOutVertically(
+                animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
+                targetOffsetY = { it / 3 }
+            ),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 6.dp)
+        ) {
             CollapsedToolbarHandle(
                 backdrop = backdrop,
-                onClick = { vm.expandToolbar() },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 6.dp)
+                onClick = { vm.expandToolbar() }
             )
         }
 
-        if (tab.errorText != null) {
+        AnimatedVisibility(
+            visible = tab.errorText != null,
+            enter = fadeIn(MotionSpec.enter()) + scaleIn(
+                animationSpec = MotionSpec.pageSpring(),
+                initialScale = 0.94f
+            ),
+            exit = fadeOut(MotionSpec.exit()) + scaleOut(
+                animationSpec = MotionSpec.pageSpring(),
+                targetScale = 0.96f
+            ),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
             PageErrorCard(
                 backdrop = backdrop,
                 message = tab.errorText.orEmpty(),
                 onRetry = { vm.reload() },
                 onHome = onNewHomeTab,
                 modifier = Modifier
-                    .align(Alignment.Center)
                     .padding(horizontal = 24.dp)
                     .widthIn(max = 380.dp)
             )
@@ -382,8 +407,8 @@ fun BrowserScreen(
 
         AnimatedVisibility(
             visible = menuOpen,
-            enter = fadeIn(tween(160)),
-            exit = fadeOut(tween(120))
+            enter = fadeIn(MotionSpec.enter()),
+            exit = fadeOut(MotionSpec.exit())
         ) {
             Box(
                 Modifier
@@ -399,13 +424,13 @@ fun BrowserScreen(
         AnimatedVisibility(
             visible = menuOpen,
             enter = slideInVertically(
-                animationSpec = spring(dampingRatio = 0.9f, stiffness = 380f),
+                animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
                 initialOffsetY = { it / 2 }
-            ) + fadeIn(tween(160)),
+            ) + fadeIn(MotionSpec.enter()),
             exit = slideOutVertically(
-                animationSpec = tween(160),
+                animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
                 targetOffsetY = { it / 3 }
-            ) + fadeOut(tween(120)),
+            ) + fadeOut(MotionSpec.exit()),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
@@ -434,7 +459,11 @@ fun BrowserScreen(
             )
         }
 
-        if (shieldOpen) {
+        AnimatedVisibility(
+            visible = shieldOpen,
+            enter = fadeIn(MotionSpec.enter()),
+            exit = fadeOut(MotionSpec.exit())
+        ) {
             PrivacyShieldPanel(
                 blocked = tab.blockedTrackers,
                 blockThirdParty = settings.blockThirdPartyCookies,
@@ -449,13 +478,13 @@ fun BrowserScreen(
         // P7 一镜到底：Agent 球从右下角缩小隐去，面板从同一角展开，避免场景跳变。
         AnimatedVisibility(
             visible = settings.agentEnabled && !tab.isFullscreen && !menuOpen && !shieldOpen && !agentOpen,
-            enter = fadeIn(tween(160)) + scaleIn(
-                animationSpec = tween(180),
+            enter = fadeIn(MotionSpec.enter()) + scaleIn(
+                animationSpec = MotionSpec.pageSpring(),
                 initialScale = 0.88f,
                 transformOrigin = TransformOrigin(1f, 1f)
             ),
-            exit = fadeOut(tween(120)) + scaleOut(
-                animationSpec = tween(140),
+            exit = fadeOut(MotionSpec.exit()) + scaleOut(
+                animationSpec = MotionSpec.pageSpring(),
                 targetScale = 0.88f,
                 transformOrigin = TransformOrigin(1f, 1f)
             ),
@@ -479,15 +508,15 @@ fun BrowserScreen(
 
         AnimatedVisibility(
             visible = agentOpen,
-            enter = fadeIn(tween(180)) + scaleIn(
-                animationSpec = spring(dampingRatio = 0.92f, stiffness = 360f),
+            enter = fadeIn(MotionSpec.enter()) + scaleIn(
+                animationSpec = MotionSpec.pageSpring(),
                 initialScale = 0.94f,
-                transformOrigin = TransformOrigin(if (isTablet) 1f else 0.5f, 1f)
+                transformOrigin = TransformOrigin(if (isTablet) 1f else 0.5f, if (isTablet) 0.5f else 1f)
             ),
-            exit = fadeOut(tween(140)) + scaleOut(
-                animationSpec = tween(140),
-                targetScale = 0.96f,
-                transformOrigin = TransformOrigin(if (isTablet) 1f else 0.5f, 1f)
+            exit = fadeOut(MotionSpec.exit()) + scaleOut(
+                animationSpec = MotionSpec.pageSpring(),
+                targetScale = 0.94f,
+                transformOrigin = TransformOrigin(if (isTablet) 1f else 0.5f, if (isTablet) 0.5f else 1f)
             ),
             modifier = Modifier.fillMaxSize()
         ) {
