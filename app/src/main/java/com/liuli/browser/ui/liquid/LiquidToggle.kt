@@ -106,11 +106,14 @@ fun LiquidToggle(
             onDrag = { _, dragAmount ->
                 if (!didDrag) didDrag = dragAmount.x != 0f
                 val delta = dragAmount.x / dragWidth
-                fraction = if (isLtr) {
-                    (fraction + delta).fastCoerceIn(0f, 1f)
-                } else {
-                    (fraction - delta).fastCoerceIn(0f, 1f)
-                }
+                // 越界时给阻尼：拨到头还能继续拽，但明显变沉，
+                // 告诉用户"到头了"，而不是硬邦邦地卡住。
+                val raw = fraction + delta * if (isLtr) 1f else -1f
+                fraction = when {
+                    raw < 0f -> raw * 0.35f
+                    raw > 1f -> 1f + (raw - 1f) * 0.35f
+                    else -> raw
+                }.fastCoerceIn(0f, 1f)
                 // 拖动中直接跟随手指，松手才回弹。
                 snapValue(fraction)
             }

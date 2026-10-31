@@ -113,11 +113,16 @@ fun LiquidSlider(
                 onDrag = { _, dragAmount ->
                     if (!didDrag) didDrag = dragAmount.x != 0f
                     val delta = (valueRange.endInclusive - valueRange.start) * (dragAmount.x / trackWidth)
-                    dragValue = if (isLtr) {
-                        (dragValue + delta).coerceIn(valueRange)
-                    } else {
-                        (dragValue - delta).coerceIn(valueRange)
-                    }
+                    val raw = if (isLtr) dragValue + delta else dragValue - delta
+                    // 越界时给阻尼：拖到头还能继续拽，但明显变沉，
+                    // 告诉用户"到头了"，而不是硬邦邦地卡住。
+                    dragValue = when {
+                        raw < valueRange.start ->
+                            valueRange.start + (raw - valueRange.start) * 0.35f
+                        raw > valueRange.endInclusive ->
+                            valueRange.endInclusive + (raw - valueRange.endInclusive) * 0.35f
+                        else -> raw
+                    }.coerceIn(valueRange)
                     // 每跨过一个整数档位震一下：滑动时能感知到自己走了几格。
                     val step = dragValue.toInt()
                     if (didDrag && step != lastHapticStep) {

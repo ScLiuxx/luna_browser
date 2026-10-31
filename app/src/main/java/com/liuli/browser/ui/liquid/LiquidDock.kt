@@ -184,10 +184,19 @@ fun LiquidDock(
                     onSelected(targetIndex)
                 },
                 onDrag = { _, dragAmount ->
-                    updateValue(
-                        (targetValue + dragAmount.x / tabWidth * if (isLtr) 1f else -1f)
-                            .fastCoerceIn(0f, (items.size - 1).toFloat())
-                    )
+                    // 液滴必须 1:1 跟手：弹簧会让它落后于手指半拍，
+                    // 拖起来"粘滞"，液态感全无。这里直接落位，
+                    // 松手后再由 onDragStopped 的过冲弹簧接管。
+                    val raw = targetValue + dragAmount.x / tabWidth * if (isLtr) 1f else -1f
+                    // 越界时给阻尼：拖到头还能继续拽，但明显变沉，
+                    // 告诉用户"到边了"，而不是硬邦邦地卡住。
+                    val max = (items.size - 1).toFloat()
+                    val next = when {
+                        raw < 0f -> raw * 0.35f
+                        raw > max -> max + (raw - max) * 0.35f
+                        else -> raw
+                    }.fastCoerceIn(0f, max)
+                    snapValue(next)
                     animationScope.launch {
                         offsetAnimation.snapTo(offsetAnimation.value + dragAmount.x)
                     }
