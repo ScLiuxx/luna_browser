@@ -1,7 +1,10 @@
 package com.liuli.browser.ui.liquid
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOut
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -67,6 +70,8 @@ import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.components.NavItem
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.Motion
+import com.liuli.browser.ui.theme.MotionSpec
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.sign
@@ -158,6 +163,9 @@ fun LiquidDock(
                 visibilityThreshold = 0.001f,
                 initialScale = 1f,
                 pressedScale = 78f / 56f,
+                // 液滴甩到目标位置时允许轻微过冲，而不是直落到位。
+                valueDampingRatio = 0.62f,
+                valueStiffness = 700f,
                 onDragStarted = {},
                 onDragStopped = {
                     val targetIndex = targetValue.fastRoundToInt().fastCoerceIn(0, items.lastIndex)
@@ -231,6 +239,7 @@ fun LiquidDock(
 
         CompositionLocalProvider(
             LocalLiquidBottomTabScale provides {
+                // 选中标签的放大用弹性曲线，和液滴的甩动保持一致的手感。
                 lerp(1f, 1.2f, dampedDragAnimation.pressProgress)
             }
         ) {
@@ -331,6 +340,23 @@ private fun RowScope.DockItems(
 ) {
     val colors = LocalLiuliColors.current
     items.forEachIndexed { index, item ->
+        val selected = index == selectedIndex
+        // 图标与文字的选中态用颜色插值过渡，而不是瞬时换色。
+        val iconTint by animateColorAsState(
+            targetValue = if (selected) colors.accent else colors.textSecondary,
+            animationSpec = MotionSpec.color(Motion.Quick),
+            label = "dock-icon-tint"
+        )
+        val labelTint by animateColorAsState(
+            targetValue = if (selected) colors.accent else colors.textTertiary,
+            animationSpec = MotionSpec.color(Motion.Quick),
+            label = "dock-label-tint"
+        )
+        val labelWeight by animateFloatAsState(
+            targetValue = if (selected) 1f else 0f,
+            animationSpec = MotionSpec.value(Motion.Quick),
+            label = "dock-label-weight"
+        )
         LiquidBottomTab(
             onClick = { onSelected(index) },
             interactive = interactive
@@ -338,7 +364,7 @@ private fun RowScope.DockItems(
             Box(contentAlignment = Alignment.Center) {
                 GlyphIcon(
                     glyph = item.glyph,
-                    tint = if (index == selectedIndex) colors.accent else colors.textSecondary,
+                    tint = iconTint,
                     size = 22.dp
                 )
                 if (item.glyph == Glyph.Tabs && tabCount > 0) {
@@ -365,9 +391,9 @@ private fun RowScope.DockItems(
             BasicText(
                 text = item.label,
                 style = TextStyle(
-                    color = if (index == selectedIndex) colors.accent else colors.textTertiary,
+                    color = labelTint,
                     fontSize = 9.sp,
-                    fontWeight = if (index == selectedIndex) FontWeight.SemiBold else FontWeight.Normal
+                    fontWeight = if (labelWeight > 0.5f) FontWeight.SemiBold else FontWeight.Normal
                 ),
                 maxLines = 1
             )

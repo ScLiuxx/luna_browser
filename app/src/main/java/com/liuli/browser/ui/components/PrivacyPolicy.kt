@@ -56,24 +56,19 @@ SSL 证书错误会直接阻断访问；禁止混合内容、文件访问与通�
 本说明随应用离线提供，最后更新：2026-10。"""
 
 @Composable
-fun PrivacyPolicyDialog(onDismiss: () -> Unit) {
+fun PrivacyPolicyDialog(visible: Boolean, onDismiss: () -> Unit) {
     val colors = LocalLiuliColors.current
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.28f))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onDismiss() },
-        contentAlignment = Alignment.Center
+    LiquidDialog(
+        visible = visible,
+        onDismiss = onDismiss,
+        panelModifier = Modifier
+            .padding(22.dp)
+            .widthIn(max = 520.dp)
+            .heightIn(max = 640.dp)
     ) {
         GlassSurface(
             backdrop = emptyBackdrop(),
             modifier = Modifier
-                .padding(22.dp)
-                .widthIn(max = 520.dp)
-                .heightIn(max = 640.dp)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null

@@ -201,9 +201,7 @@ fun PrivacyGate(
         }
     }
 
-    if (showPolicy) {
-        PrivacyPolicyDialog(onDismiss = { showPolicy = false })
-    }
+    PrivacyPolicyDialog(visible = showPolicy, onDismiss = { showPolicy = false })
 }
 
 @Composable

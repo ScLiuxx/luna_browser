@@ -136,11 +136,19 @@ class DampedDragAnimation(
     val visibilityThreshold: Float,
     val initialScale: Float,
     val pressedScale: Float,
+    /** 数值动画的阻尼比；默认临界阻尼（不过冲），液态场景可传入更小的值。 */
+    val valueDampingRatio: Float = 1f,
+    /** 数值动画的刚度。 */
+    val valueStiffness: Float = 1000f,
     val onDragStarted: DampedDragAnimation.(position: Offset) -> Unit,
     val onDragStopped: DampedDragAnimation.() -> Unit,
     val onDrag: DampedDragAnimation.(size: IntSize, dragAmount: Offset) -> Unit,
 ) {
-    private val valueAnimationSpec = spring(1f, 1000f, visibilityThreshold)
+    private val valueAnimationSpec = spring(
+        dampingRatio = valueDampingRatio,
+        stiffness = valueStiffness,
+        visibilityThreshold = visibilityThreshold
+    )
     private val velocityAnimationSpec = spring(0.5f, 300f, visibilityThreshold * 10f)
     private val pressProgressAnimationSpec = spring(1f, 1000f, 0.001f)
     private val scaleXAnimationSpec = spring(0.6f, 250f, 0.001f)

@@ -68,6 +68,7 @@ import com.liuli.browser.data.SettingsStore
 import com.liuli.browser.ui.components.GlassIconButton
 import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
+import com.liuli.browser.ui.components.LiquidDialog
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.components.PrivacyPolicyDialog
@@ -625,27 +626,23 @@ fun SettingsScreen(
         }
     }
 
-    if (showPrivacy) {
-        PrivacyPolicyDialog(onDismiss = { showPrivacy = false })
-    }
-    if (confirmClear) {
-        ConfirmClearDialog(
-            onConfirm = {
-                confirmClear = false
-                vm.clearBrowsingData()
-            },
-            onCancel = { confirmClear = false }
-        )
-    }
-    if (confirmRevoke) {
-        ConfirmRevokeDialog(
-            onConfirm = {
-                confirmRevoke = false
-                onRevokePrivacy()
-            },
-            onCancel = { confirmRevoke = false }
-        )
-    }
+    PrivacyPolicyDialog(visible = showPrivacy, onDismiss = { showPrivacy = false })
+    ConfirmClearDialog(
+        visible = confirmClear,
+        onConfirm = {
+            confirmClear = false
+            vm.clearBrowsingData()
+        },
+        onCancel = { confirmClear = false }
+    )
+    ConfirmRevokeDialog(
+        visible = confirmRevoke,
+        onConfirm = {
+            confirmRevoke = false
+            onRevokePrivacy()
+        },
+        onCancel = { confirmRevoke = false }
+    )
 }
 
 @Composable
@@ -863,25 +860,21 @@ private fun SettingsField(
 
 @Composable
 private fun ConfirmRevokeDialog(
+    visible: Boolean,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.25f))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onCancel() },
-        contentAlignment = Alignment.Center
+    LiquidDialog(
+        visible = visible,
+        onDismiss = onCancel,
+        panelModifier = Modifier
+            .padding(24.dp)
+            .widthIn(max = 380.dp)
     ) {
         GlassSurface(
             backdrop = com.kyant.backdrop.backdrops.emptyBackdrop(),
             modifier = Modifier
-                .padding(24.dp)
-                .widthIn(max = 380.dp)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
@@ -928,25 +921,21 @@ private fun ConfirmRevokeDialog(
 
 @Composable
 private fun ConfirmClearDialog(
+    visible: Boolean,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.25f))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onCancel() },
-        contentAlignment = Alignment.Center
+    LiquidDialog(
+        visible = visible,
+        onDismiss = onCancel,
+        panelModifier = Modifier
+            .padding(24.dp)
+            .widthIn(max = 380.dp)
     ) {
         GlassSurface(
             backdrop = com.kyant.backdrop.backdrops.emptyBackdrop(),
             modifier = Modifier
-                .padding(24.dp)
-                .widthIn(max = 380.dp)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
