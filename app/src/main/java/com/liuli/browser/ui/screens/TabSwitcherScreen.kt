@@ -51,9 +51,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -282,6 +284,7 @@ private fun TabCard(
 
     val cardInteraction = remember { MutableInteractionSource() }
     val closeInteraction = remember { MutableInteractionSource() }
+    val haptics = LocalHapticFeedback.current
 
     Box(
         Modifier
@@ -405,7 +408,11 @@ private fun TabCard(
                     role = Role.Button,
                     onClickLabel = "关闭标签页"
                 ) {
-                    if (!closing) closing = true
+                    if (!closing) {
+                        // 关闭标签页是破坏性操作，给一次明确的触感确认。
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        closing = true
+                    }
                 },
             contentAlignment = Alignment.Center
         ) {

@@ -40,7 +40,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -157,6 +159,8 @@ fun LiquidDock(
 
         val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
         val animationScope = rememberCoroutineScope()
+        // 切换标签时给一次轻触反馈，与液滴甩动同步。
+        val haptics = LocalHapticFeedback.current
         var currentIndex by remember(selectedIndex) { mutableIntStateOf(selectedIndex) }
         val dampedDragAnimation = remember(animationScope) {
             DampedDragAnimation(
@@ -234,6 +238,9 @@ fun LiquidDock(
             verticalAlignment = Alignment.CenterVertically
         ) {
             DockItems(items, currentIndex, tabCount, onSelected = { index ->
+                if (index != currentIndex) {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
                 currentIndex = index
                 dampedDragAnimation.animateToValue(index.toFloat())
                 onSelected(index)

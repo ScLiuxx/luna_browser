@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -22,8 +23,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
@@ -68,6 +71,9 @@ fun LiquidSlider(
     val accentColor = colors.accent
     val trackColor = if (colors.isDark) Color(0xFF787880).copy(alpha = 0.36f) else Color(0xFF787878).copy(alpha = 0.2f)
     val trackBackdrop = rememberLayerBackdrop()
+    // 跨越整数刻度时给一次轻触反馈：滑动过程中能"数"出档位。
+    val haptics = LocalHapticFeedback.current
+    var lastHapticStep by remember { mutableIntStateOf(Int.MIN_VALUE) }
 
     BoxWithConstraints(
         modifier.fillMaxWidth(),
@@ -111,6 +117,12 @@ fun LiquidSlider(
                         (dragValue + delta).coerceIn(valueRange)
                     } else {
                         (dragValue - delta).coerceIn(valueRange)
+                    }
+                    // 每跨过一个整数档位震一下：滑动时能感知到自己走了几格。
+                    val step = dragValue.toInt()
+                    if (didDrag && step != lastHapticStep) {
+                        lastHapticStep = step
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     }
                     // 直接落到新位置，避免弹簧让拇指落后于手指。
                     snapValue(dragValue)

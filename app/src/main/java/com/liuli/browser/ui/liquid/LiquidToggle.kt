@@ -20,7 +20,9 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -66,6 +68,8 @@ fun LiquidToggle(
     val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
     val dragWidth = with(density) { 20f.dp.toPx() }
     val animationScope = rememberCoroutineScope()
+    // 状态切换时给一次轻触反馈：液态形变看得见，震动摸得着。
+    val haptics = LocalHapticFeedback.current
     var didDrag by remember { mutableStateOf(false) }
     // 拖拽期间的即时值，保证拇指跟手；松手后才由弹簧接管。
     var fraction by remember { mutableFloatStateOf(if (selected()) 1f else 0f) }
@@ -97,6 +101,7 @@ fun LiquidToggle(
                     // fraction 变化会被下面的 snapshotFlow 捕获，
                     // 由 updateValue 用液态弹簧把拇指送到位，这里不再重复驱动。
                 }
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             },
             onDrag = { _, dragAmount ->
                 if (!didDrag) didDrag = dragAmount.x != 0f
