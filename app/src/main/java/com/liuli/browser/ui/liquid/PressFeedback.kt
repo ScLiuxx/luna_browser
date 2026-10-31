@@ -8,7 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
-import com.liuli.browser.ui.theme.Motion
+import com.liuli.browser.ui.theme.MotionSpec
 import com.liuli.browser.ui.theme.reduceMotion
 
 /**
@@ -27,12 +27,15 @@ fun Modifier.pressScale(
     pressedScale: Float = 0.96f,
     interactionSource: MutableInteractionSource? = null
 ): Modifier {
-    if (reduceMotion) return this
+    // 这里的 remember / 状态订阅必须无条件调用：条件分支会让组合槽位错位，
+    // "减少动态效果"开关切换时可能读到一个从未写入的状态。
+    // 关闭动效时目标值恒为 1f，视觉上等价于没有缩放。
     val source = interactionSource ?: remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
+    val reduced = reduceMotion
     val scale by animateFloatAsState(
-        targetValue = if (pressed) pressedScale else 1f,
-        animationSpec = Motion.PressSpring.spring(),
+        targetValue = if (pressed && !reduced) pressedScale else 1f,
+        animationSpec = MotionSpec.pressSpring(),
         label = "press-scale"
     )
     return this.graphicsLayer {
