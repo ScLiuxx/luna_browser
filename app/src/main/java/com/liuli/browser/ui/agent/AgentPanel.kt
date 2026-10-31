@@ -77,7 +77,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -94,6 +93,9 @@ import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
+import com.liuli.browser.ui.theme.Radius
+import com.liuli.browser.ui.theme.Space
+import com.liuli.browser.ui.theme.Type
 import com.liuli.browser.ui.theme.reduceMotion
 import com.liuli.browser.web.agent.AgentActionStatus
 import com.liuli.browser.web.agent.AgentController
@@ -309,7 +311,7 @@ fun AgentPanel(
                 .align(Alignment.CenterEnd)
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .padding(end = 16.dp, top = 10.dp, bottom = 10.dp)
+                .padding(end = Space.lg, top = Space.md, bottom = Space.md)
                 .width(400.dp)
                 .fillMaxHeight()
         } else {
@@ -317,7 +319,7 @@ fun AgentPanel(
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
                 .imePadding()
-                .padding(start = 10.dp, end = 10.dp, bottom = 8.dp)
+                .padding(start = Space.md, end = Space.md, bottom = Space.sm)
                 .fillMaxWidth()
                 .widthIn(max = 560.dp)
                 .fillMaxHeight(0.72f)
@@ -326,12 +328,12 @@ fun AgentPanel(
         GlassSurface(
             backdrop = backdrop,
             modifier = panelModifier
-                .clip(RoundedCornerShape(28.dp))
+                .clip(RoundedCornerShape(Radius.xl))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
                 ) { },
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(Radius.xl),
             tint = colors.glassTintStrong,
             blurRadius = 26.dp,
             lensHeight = 20.dp,
@@ -341,7 +343,7 @@ fun AgentPanel(
             Column(
                 Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
+                    .padding(horizontal = Space.lg, vertical = Space.lg)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -357,14 +359,14 @@ fun AgentPanel(
                     ) {
                         GlyphIcon(Glyph.Sparkle, Color.White, size = 19.dp)
                     }
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(Space.md))
                     Column(Modifier.weight(1f)) {
                         BasicText(
                             text = "琉璃 Agent",
-                            style = TextStyle(
+                            // 面板标题：走 title 档，字号保留 16sp 的紧凑感。
+                            style = Type.title.copy(
                                 color = colors.textPrimary,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontSize = 16.sp
                             )
                         )
                         // 站点策略变化时副标题淡入淡出，而不是整行硬切。
@@ -379,7 +381,7 @@ fun AgentPanel(
                         ) { text ->
                             BasicText(
                                 text = text,
-                                style = TextStyle(color = colors.textTertiary, fontSize = 10.sp),
+                                style = Type.caption.copy(color = colors.textTertiary),
                                 maxLines = 1
                             )
                         }
@@ -397,9 +399,9 @@ fun AgentPanel(
                     )
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(50))
+                            .clip(RoundedCornerShape(Radius.pill))
                             .background(modeBadgeBg)
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .padding(horizontal = Space.sm, vertical = Space.xs)
                     ) {
                         AnimatedContent(
                             targetState = modeLabel,
@@ -411,15 +413,11 @@ fun AgentPanel(
                         ) { label ->
                             BasicText(
                                 text = label,
-                                style = TextStyle(
-                                    color = modeBadgeTint,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
+                                style = Type.micro.copy(color = modeBadgeTint)
                             )
                         }
                     }
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(Space.xs))
                     GlassIconButton(
                         glyph = Glyph.Close,
                         contentDescription = "关闭 Agent",
@@ -430,7 +428,7 @@ fun AgentPanel(
                     )
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(Space.sm))
                 // 免责声明淡入：面板展开时不要整块"啪"地压在标题下面，
                 // 高度也跟着过渡，快捷标签不会被顶下去。
                 AnimatedVisibility(
@@ -442,16 +440,16 @@ fun AgentPanel(
                 ) {
                     BasicText(
                         text = "只读取可见正文与元素名称，不读取输入框已有内容、密码、Cookie 或剪贴板。",
-                        style = TextStyle(color = colors.textTertiary, fontSize = 10.sp, lineHeight = 15.sp)
+                        style = Type.caption.copy(color = colors.textTertiary)
                     )
                 }
 
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(Space.md))
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(Space.sm)
                 ) {
                     QuickChip("总结此页") { submit("总结此页") }
                     QuickChip("页面信息") { submit("页面信息") }
@@ -472,7 +470,7 @@ fun AgentPanel(
                     }
                 }
 
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(Space.sm))
 
                 val currentPlan = agent.plan
                 val currentReport = agent.report
@@ -490,8 +488,8 @@ fun AgentPanel(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                        contentPadding = PaddingValues(vertical = 4.dp)
+                        verticalArrangement = Arrangement.spacedBy(Space.xxs),
+                        contentPadding = PaddingValues(vertical = Space.xs)
                     ) {
                         itemsIndexed(agent.messages, key = { _, item -> item.id }) { index, message ->
                             // 逐条浮现：新消息到达时轻轻滑入。
@@ -622,15 +620,15 @@ fun AgentPanel(
                     }
                 }
 
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(Space.sm))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         Modifier
                             .weight(1f)
                             .heightIn(min = 44.dp)
-                            .clip(RoundedCornerShape(22.dp))
+                            .clip(RoundedCornerShape(Radius.md))
                             .background(colors.textPrimary.copy(alpha = 0.06f))
-                            .padding(horizontal = 14.dp, vertical = 2.dp),
+                            .padding(horizontal = Space.md, vertical = Space.xxs),
                         contentAlignment = Alignment.CenterStart
                     ) {
                         BasicTextField(
@@ -640,7 +638,7 @@ fun AgentPanel(
                                 .fillMaxWidth()
                                 .heightIn(min = 40.dp)
                                 .focusRequester(focusRequester),
-                            textStyle = TextStyle(
+                            textStyle = Type.body.copy(
                                 color = colors.textPrimary,
                                 fontSize = 13.sp,
                                 lineHeight = 18.sp
@@ -654,7 +652,7 @@ fun AgentPanel(
                                     if (input.isEmpty()) {
                                         BasicText(
                                             text = "询问本页内容…",
-                                            style = TextStyle(
+                                            style = Type.body.copy(
                                                 color = colors.textTertiary,
                                                 fontSize = 13.sp
                                             )
@@ -665,7 +663,7 @@ fun AgentPanel(
                             }
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(Space.sm))
                     val canSend = input.isNotBlank() && !agent.busy
                     val sendInteraction = remember { MutableInteractionSource() }
                     val sendBackground by animateColorAsState(
@@ -707,7 +705,7 @@ fun AgentPanel(
                     }
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(Space.sm))
                 // 底部说明文案与面板一起淡入。
                 AnimatedVisibility(
                     visible = notesVisible,
@@ -718,7 +716,7 @@ fun AgentPanel(
                 ) {
                     BasicText(
                         text = "受控操作：单步动作需逐条确认；多步任务需先批准计划，执行中可暂停或取消，不会自动提交表单。",
-                        style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
+                        style = Type.micro.copy(color = colors.textTertiary, lineHeight = 13.sp)
                     )
                 }
                 // 审计行与会话行：出现/消失都带高度过渡，输入框不会被顶来顶去。
@@ -730,12 +728,11 @@ fun AgentPanel(
                         shrinkVertically(animationSpec = expandSpec)
                 ) {
                     Column(Modifier.fillMaxWidth()) {
-                        Spacer(Modifier.height(3.dp))
+                        Spacer(Modifier.height(Space.xxs))
                         BasicText(
                             text = "审计 ${agent.audit.size} 条 · 仅本机内存，清除对话或退出时删除",
-                            style = TextStyle(
+                            style = Type.micro.copy(
                                 color = colors.textTertiary,
-                                fontSize = 9.sp,
                                 lineHeight = 13.sp
                             )
                         )
@@ -749,16 +746,15 @@ fun AgentPanel(
                         shrinkVertically(animationSpec = expandSpec)
                 ) {
                     Column(Modifier.fillMaxWidth()) {
-                        Spacer(Modifier.height(3.dp))
+                        Spacer(Modifier.height(Space.xxs))
                         BasicText(
                             text = buildString {
                                 append("本机会话：关注 ${agent.watches.size} 个页面 · 宏 ${agent.macros.size} 个")
                                 if (agent.recordingMacro) append(" · 正在录制宏")
                                 append("（不后台运行）")
                             },
-                            style = TextStyle(
+                            style = Type.micro.copy(
                                 color = colors.textTertiary,
-                                fontSize = 9.sp,
                                 lineHeight = 13.sp
                             )
                         )
@@ -775,7 +771,7 @@ private fun QuickChip(label: String, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     Box(
         Modifier
-            .clip(RoundedCornerShape(50))
+            .clip(RoundedCornerShape(Radius.pill))
             .background(colors.textPrimary.copy(alpha = 0.06f))
             .clickable(
                 interactionSource = interaction,
@@ -785,11 +781,11 @@ private fun QuickChip(label: String, onClick: () -> Unit) {
                 onClick = onClick
             )
             .pressScale(pressedScale = 0.90f, interactionSource = interaction)
-            .padding(horizontal = 11.dp, vertical = 6.dp)
+            .padding(horizontal = Space.md, vertical = Space.sm)
     ) {
         BasicText(
             text = label,
-            style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
+            style = Type.label.copy(color = colors.textSecondary)
         )
     }
 }
@@ -829,28 +825,26 @@ private fun EmptyState(tabTitle: String, modifier: Modifier = Modifier) {
         ) {
             GlyphIcon(Glyph.Sparkle, colors.accent, size = 26.dp)
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(Space.md))
         BasicText(
             text = "向当前页面提问",
-            style = TextStyle(
+            style = Type.title.copy(
                 color = colors.textPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold
+                fontSize = 15.sp
             )
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(Space.xs))
         BasicText(
             text = tabTitle.take(48).ifBlank { "当前页面" },
-            style = TextStyle(color = colors.textTertiary, fontSize = 11.sp),
+            style = Type.label.copy(color = colors.textTertiary),
             maxLines = 1
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(Space.md))
         BasicText(
             text = "速览、查找与问答默认在本机完成。\n也可以让我滚动、点击或填写，每次都会先确认。",
-            style = TextStyle(
+            style = Type.bodySmall.copy(
                 color = colors.textTertiary,
-                fontSize = 11.sp,
-                lineHeight = 17.sp
+                fontSize = 11.sp
             )
         )
     }
@@ -917,26 +911,22 @@ private fun PlanCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(Radius.md))
             .background(colors.accent.copy(alpha = if (colors.isDark) 0.12f else 0.07f))
-            .padding(12.dp)
+            .padding(Space.md)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CardHeaderIcon(Glyph.Sparkle, colors.accent, entranceKey = plan.goal)
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(Space.sm))
             Column(Modifier.weight(1f)) {
                 BasicText(
                     text = "任务计划",
-                    style = TextStyle(
-                        color = colors.textPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    style = Type.sectionTitle.copy(color = colors.textPrimary)
                 )
                 BasicText(
                     text = "${plan.steps.size} 步 · " +
                         "${if (plan.source == AgentMode.Cloud) "云端规划" else "本地规划"}",
-                    style = TextStyle(color = colors.textTertiary, fontSize = 9.sp)
+                    style = Type.micro.copy(color = colors.textTertiary)
                 )
             }
             // 状态徽标：待批准→执行中→已完成，颜色交叉过渡而不是瞬时换色。
@@ -947,9 +937,9 @@ private fun PlanCard(
             )
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(Radius.pill))
                     .background(badgeTint.copy(alpha = 0.14f))
-                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                    .padding(horizontal = Space.sm, vertical = Space.xs)
             ) {
                 // 状态文案与颜色同步交叉过渡，换状态时徽标是"化"过去的。
                 AnimatedContent(
@@ -962,23 +952,19 @@ private fun PlanCard(
                 ) { label ->
                     BasicText(
                         text = label,
-                        style = TextStyle(
-                            color = badgeTint,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        style = Type.micro.copy(color = badgeTint)
                     )
                 }
             }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(Space.sm))
         BasicText(
             text = plan.goal,
-            style = TextStyle(color = colors.textTertiary, fontSize = 10.sp, lineHeight = 15.sp),
+            style = Type.caption.copy(color = colors.textTertiary),
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(Space.sm))
         plan.steps.forEachIndexed { index, step ->
             val completed = index < plan.currentStep
             val current = index == plan.currentStep &&
@@ -1005,7 +991,7 @@ private fun PlanCard(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 2.dp),
+                    .padding(vertical = Space.xxs),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
@@ -1017,17 +1003,16 @@ private fun PlanCard(
                 ) {
                     BasicText(
                         text = "${index + 1}",
-                        style = TextStyle(
+                        style = Type.micro.copy(
                             color = tint,
-                            fontSize = 9.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     )
                 }
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(Space.xs))
                 BasicText(
                     text = step.description,
-                    style = TextStyle(
+                    style = Type.bodySmall.copy(
                         color = if (completed) colors.textTertiary else colors.textSecondary,
                         fontSize = 11.sp
                     ),
@@ -1052,13 +1037,13 @@ private fun PlanCard(
             }
         }
         if (!plan.failure.isNullOrBlank()) {
-            Spacer(Modifier.height(5.dp))
+            Spacer(Modifier.height(Space.xs))
             BasicText(
                 text = plan.failure,
-                style = TextStyle(color = colors.danger, fontSize = 10.sp, lineHeight = 15.sp)
+                style = Type.caption.copy(color = colors.danger)
             )
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(Space.sm))
         // 状态推进时按钮组整组交叉淡入淡出，不再"啪"地换掉。
         AnimatedContent(
             targetState = plan.status,
@@ -1071,30 +1056,30 @@ private fun PlanCard(
         ) { status ->
             when (status) {
                 AgentPlanStatus.Pending -> {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                         ActionButton("批准并执行", accent = true) { onCommand(AgentPlanCommand.Approve) }
                         ActionButton("取消", accent = false) { onCommand(AgentPlanCommand.Cancel) }
                     }
-                    Spacer(Modifier.height(5.dp))
+                    Spacer(Modifier.height(Space.xs))
                     BasicText(
                         text = "批准后按顺序执行；点击可能跳转或提交表单，填写不会自动提交。",
-                        style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
+                        style = Type.micro.copy(color = colors.textTertiary, lineHeight = 13.sp)
                     )
                 }
                 AgentPlanStatus.Running -> {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                         ActionButton("暂停", accent = false) { onCommand(AgentPlanCommand.Pause) }
                         ActionButton("取消任务", accent = false) { onCommand(AgentPlanCommand.Cancel) }
                     }
                 }
                 AgentPlanStatus.Paused -> {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                         ActionButton("继续执行", accent = true) { onCommand(AgentPlanCommand.Resume) }
                         ActionButton("取消任务", accent = false) { onCommand(AgentPlanCommand.Cancel) }
                     }
                 }
                 AgentPlanStatus.Failed -> {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                         ActionButton("重试", accent = true) { onCommand(AgentPlanCommand.Retry) }
                         ActionButton("取消", accent = false) { onCommand(AgentPlanCommand.Cancel) }
                     }
@@ -1137,58 +1122,50 @@ private fun ReportCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(Radius.md))
             .background(colors.success.copy(alpha = if (colors.isDark) 0.12f else 0.07f))
-            .padding(12.dp)
+            .padding(Space.md)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CardHeaderIcon(Glyph.History, colors.success, entranceKey = report.createdAt)
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(Space.sm))
             Column(Modifier.weight(1f)) {
                 BasicText(
                     text = "调研报告",
-                    style = TextStyle(
-                        color = colors.textPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    style = Type.sectionTitle.copy(color = colors.textPrimary)
                 )
                 BasicText(
                     text = "${report.sources.size} 个来源 · ${report.mode.label}整理 · 全部带引用",
-                    style = TextStyle(color = colors.textTertiary, fontSize = 9.sp)
+                    style = Type.micro.copy(color = colors.textTertiary)
                 )
             }
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(Radius.pill))
                     .background(colors.success.copy(alpha = 0.14f))
-                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                    .padding(horizontal = Space.sm, vertical = Space.xs)
             ) {
                 BasicText(
                     text = "只读",
-                    style = TextStyle(
-                        color = colors.success,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                    style = Type.micro.copy(color = colors.success)
                 )
             }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(Space.sm))
         BasicText(
             text = report.goal,
-            style = TextStyle(color = colors.textTertiary, fontSize = 10.sp, lineHeight = 15.sp),
+            style = Type.caption.copy(color = colors.textTertiary),
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
         if (!report.note.isNullOrBlank()) {
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(Space.xs))
             BasicText(
                 text = report.note,
-                style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
+                style = Type.micro.copy(color = colors.textTertiary, lineHeight = 13.sp)
             )
         }
-        Spacer(Modifier.height(7.dp))
+        Spacer(Modifier.height(Space.sm))
         // 行数用动画插值：展开/收起时正文连续生长，而不是"啪"地跳一下。
         val maxLines by animateIntAsState(
             targetValue = if (expanded) 80 else 8,
@@ -1197,7 +1174,7 @@ private fun ReportCard(
         )
         BasicText(
             text = report.markdown,
-            style = TextStyle(color = colors.textSecondary, fontSize = 11.sp, lineHeight = 17.sp),
+            style = Type.bodySmall.copy(color = colors.textSecondary, fontSize = 11.sp),
             maxLines = maxLines,
             overflow = TextOverflow.Ellipsis
         )
@@ -1205,7 +1182,7 @@ private fun ReportCard(
         // "展开全文 / 收起全文"切换时交叉淡入淡出，文字不硬切。
         Box(
             Modifier
-                .padding(top = 4.dp)
+                .padding(top = Space.xs)
                 .clickable(
                     interactionSource = expandInteraction,
                     indication = null,
@@ -1225,45 +1202,48 @@ private fun ReportCard(
             ) { isExpanded ->
                 BasicText(
                     text = if (isExpanded) "收起全文" else "展开全文",
-                    style = TextStyle(
+                    style = Type.caption.copy(
                         color = colors.accent,
-                        fontSize = 10.sp,
                         fontWeight = FontWeight.Medium
                     )
                 )
             }
         }
-        Spacer(Modifier.height(7.dp))
+        Spacer(Modifier.height(Space.sm))
         report.sources.forEach { source ->
             val credibility = ResearchEngine.assessSource(source.url, source.title, source.charCount)
             BasicText(
                 text = "[${source.id}] ${source.title} · ${source.host}" +
                     " · 可信度 ${credibility.label} ${credibility.score}" +
                     (if (source.isPrivate) " · 隐私" else ""),
-                style = TextStyle(color = colors.textTertiary, fontSize = 9.sp),
+                style = Type.micro.copy(color = colors.textTertiary),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(Radius.xs))
                     .clickable(
                         role = Role.Button,
                         onClickLabel = "在新标签页打开来源 ${source.id}"
                     ) { onOpenSource(source.url, source.isPrivate) }
-                    .padding(vertical = 2.dp)
+                    .padding(vertical = Space.xxs)
             )
         }
         BasicText(
             text = "点按来源可在新标签页打开；隐私来源保持为隐私标签。",
-            style = TextStyle(color = colors.textTertiary, fontSize = 8.sp, lineHeight = 12.sp),
-            modifier = Modifier.padding(top = 2.dp)
+            style = Type.caption.copy(
+                color = colors.textTertiary,
+                fontSize = 8.sp,
+                lineHeight = 12.sp
+            ),
+            modifier = Modifier.padding(top = Space.xxs)
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(Space.sm))
         Row(
             Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(Space.sm)
         ) {
             ActionButton("保存 Markdown", accent = true) {
                 onExport(AgentReportFormat.Markdown)
@@ -1298,10 +1278,10 @@ private fun ReportCard(
             }
             ActionButton("收起", accent = false, onClick = onDismiss)
         }
-        Spacer(Modifier.height(5.dp))
+        Spacer(Modifier.height(Space.xs))
         BasicText(
             text = "报告保存在本机内存，只有你选择保存位置后才会写入文件。",
-            style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
+            style = Type.micro.copy(color = colors.textTertiary, lineHeight = 13.sp)
         )
     }
 }
@@ -1351,65 +1331,57 @@ private fun CreationCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(Radius.md))
             .background(colors.accentSecondary.copy(alpha = if (colors.isDark) 0.12f else 0.07f))
-            .padding(12.dp)
+            .padding(Space.md)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CardHeaderIcon(kindGlyph, colors.accentSecondary, entranceKey = creation.createdAt)
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(Space.sm))
             Column(Modifier.weight(1f)) {
                 BasicText(
                     text = creation.kind.label,
-                    style = TextStyle(
-                        color = colors.textPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    style = Type.sectionTitle.copy(color = colors.textPrimary)
                 )
                 BasicText(
                     text = creation.title,
-                    style = TextStyle(color = colors.textTertiary, fontSize = 9.sp),
+                    style = Type.micro.copy(color = colors.textTertiary),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(Radius.pill))
                     .background(colors.accentSecondary.copy(alpha = 0.14f))
-                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                    .padding(horizontal = Space.sm, vertical = Space.xs)
             ) {
                 BasicText(
                     text = creation.mode.label,
-                    style = TextStyle(
-                        color = colors.accentSecondary,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                    style = Type.micro.copy(color = colors.accentSecondary)
                 )
             }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(Space.sm))
         BasicText(
             text = preview,
-            style = TextStyle(color = colors.textSecondary, fontSize = 11.sp, lineHeight = 17.sp),
+            style = Type.bodySmall.copy(color = colors.textSecondary, fontSize = 11.sp),
             maxLines = 6,
             overflow = TextOverflow.Ellipsis
         )
         if (!creation.note.isNullOrBlank()) {
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(Space.xs))
             BasicText(
                 text = creation.note,
-                style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
+                style = Type.micro.copy(color = colors.textTertiary, lineHeight = 13.sp)
             )
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(Space.sm))
         Row(
             Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(Space.sm)
         ) {
             ActionButton(if (copied) "已复制" else "复制", accent = true) {
                 clipboard.setText(AnnotatedString(CreationEngine.plainText(creation)))
@@ -1428,10 +1400,10 @@ private fun CreationCard(
             ActionButton("卡片", accent = false) { onShareCard() }
             ActionButton("收起", accent = false, onClick = onDismiss)
         }
-        Spacer(Modifier.height(5.dp))
+        Spacer(Modifier.height(Space.xs))
         BasicText(
             text = "创作产物保存在本机内存，导出或分享前不会写入文件。",
-            style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
+            style = Type.micro.copy(color = colors.textTertiary, lineHeight = 13.sp)
         )
     }
 }
@@ -1453,7 +1425,7 @@ private fun MessageBubble(
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp),
+            .padding(vertical = Space.xxs),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
         Box(
@@ -1461,21 +1433,22 @@ private fun MessageBubble(
                 .fillMaxWidth(if (isUser) 0.88f else 0.96f)
                 .clip(
                     RoundedCornerShape(
-                        topStart = 16.dp,
-                        topEnd = 16.dp,
-                        bottomStart = if (isUser) 16.dp else 5.dp,
-                        bottomEnd = if (isUser) 5.dp else 16.dp
+                        // 气泡主体用小圆角，尾巴那一角再收小一档。
+                        topStart = Radius.sm,
+                        topEnd = Radius.sm,
+                        bottomStart = if (isUser) Radius.sm else Radius.xs,
+                        bottomEnd = if (isUser) Radius.xs else Radius.sm
                     )
                 )
                 .background(
                     if (isUser) colors.accent.copy(alpha = 0.16f)
                     else colors.textPrimary.copy(alpha = 0.05f)
                 )
-                .padding(horizontal = 13.dp, vertical = 9.dp)
+                .padding(horizontal = Space.md, vertical = Space.sm)
         ) {
             BasicText(
                 text = message.text,
-                style = TextStyle(
+                style = Type.body.copy(
                     color = colors.textPrimary,
                     fontSize = 13.sp,
                     lineHeight = 19.sp
@@ -1496,8 +1469,8 @@ private fun MessageBubble(
             ) {
                 BasicText(
                     text = "${message.mode.label} · 只读",
-                    style = TextStyle(color = colors.textTertiary, fontSize = 9.sp),
-                    modifier = Modifier.padding(start = 5.dp, top = 3.dp)
+                    style = Type.micro.copy(color = colors.textTertiary),
+                    modifier = Modifier.padding(start = Space.xs, top = Space.xxs)
                 )
             }
         }
@@ -1515,27 +1488,23 @@ private fun ActionCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp),
+            .padding(vertical = Space.xxs),
         horizontalAlignment = Alignment.Start
     ) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
+                .clip(RoundedCornerShape(Radius.md))
                 .background(colors.accent.copy(alpha = if (colors.isDark) 0.14f else 0.08f))
-                .padding(13.dp)
+                .padding(Space.md)
         ) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CardHeaderIcon(Glyph.Sparkle, colors.accent, entranceKey = message.id)
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(Space.sm))
                     BasicText(
                         text = proposal.title,
-                        style = TextStyle(
-                            color = colors.textPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        ),
+                        style = Type.sectionTitle.copy(color = colors.textPrimary),
                         modifier = Modifier.weight(1f)
                     )
                     // 风险徽标：入场时先是无色，随后落到对应风险色，
@@ -1554,30 +1523,26 @@ private fun ActionCard(
                     )
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(50))
+                            .clip(RoundedCornerShape(Radius.pill))
                             .background(riskBadgeTint.copy(alpha = 0.14f))
-                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                            .padding(horizontal = Space.sm, vertical = Space.xs)
                     ) {
                         BasicText(
                             text = proposal.riskLabel,
-                            style = TextStyle(
-                                color = riskBadgeTint,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                            style = Type.micro.copy(color = riskBadgeTint)
                         )
                     }
                 }
-                Spacer(Modifier.height(7.dp))
+                Spacer(Modifier.height(Space.sm))
                 BasicText(
                     text = proposal.detail,
-                    style = TextStyle(
+                    style = Type.bodySmall.copy(
                         color = colors.textSecondary,
                         fontSize = 11.sp,
                         lineHeight = 16.sp
                     )
                 )
-                Spacer(Modifier.height(9.dp))
+                Spacer(Modifier.height(Space.sm))
                 // 状态行交叉淡入：待确认→执行中→已执行，切换时不是硬切。
                 val statusLabel = when (message.actionStatus) {
                     AgentActionStatus.Running -> "正在执行…"
@@ -1599,11 +1564,11 @@ private fun ActionCard(
                 ) {
                     BasicText(
                         text = statusLabel.orEmpty(),
-                        style = TextStyle(color = statusTint, fontSize = 11.sp)
+                        style = Type.label.copy(color = statusTint)
                     )
                 }
                 if (message.actionStatus == AgentActionStatus.Pending) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                         ActionButton("允许执行", accent = true, onClick = onConfirm)
                         ActionButton("取消", accent = false, onClick = onCancel)
                     }
@@ -1612,8 +1577,8 @@ private fun ActionCard(
         }
         BasicText(
             text = "仅执行此一步，不会自动连续操作",
-            style = TextStyle(color = colors.textTertiary, fontSize = 9.sp),
-            modifier = Modifier.padding(start = 5.dp, top = 3.dp)
+            style = Type.micro.copy(color = colors.textTertiary),
+            modifier = Modifier.padding(start = Space.xs, top = Space.xxs)
         )
     }
 }
@@ -1635,7 +1600,7 @@ private fun ActionButton(
     Box(
         Modifier
             .heightIn(min = Dimens.minTouch)
-            .clip(RoundedCornerShape(50))
+            .clip(RoundedCornerShape(Radius.pill))
             .background(background)
             .clickable(
                 interactionSource = interaction,
@@ -1645,7 +1610,7 @@ private fun ActionButton(
                 onClick = onClick
             )
             .pressScale(pressedScale = 0.92f, interactionSource = interaction)
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = Space.lg),
         contentAlignment = Alignment.Center
     ) {
         // 按钮文案会变（"复制"→"已复制"、"朗读"→"停止朗读"），交叉淡入淡出而不是硬切。
@@ -1660,10 +1625,8 @@ private fun ActionButton(
         ) { text ->
             BasicText(
                 text = text,
-                style = TextStyle(
-                    color = if (accent) Color.White else colors.textSecondary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
+                style = Type.label.copy(
+                    color = if (accent) Color.White else colors.textSecondary
                 )
             )
         }
@@ -1699,7 +1662,7 @@ private fun ThinkingRow() {
     val phase = wave.value
 
     Row(
-        Modifier.padding(start = 4.dp, top = 6.dp, bottom = 4.dp),
+        Modifier.padding(start = Space.xs, top = Space.sm, bottom = Space.xs),
         verticalAlignment = Alignment.CenterVertically
     ) {
         GlyphIcon(
@@ -1707,14 +1670,14 @@ private fun ThinkingRow() {
             tint = colors.accent.copy(alpha = 0.55f + 0.45f * phase),
             size = 13.dp
         )
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(Space.xs))
         BasicText(
             text = "正在读取页面或与页面交互…",
-            style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
+            style = Type.label.copy(color = colors.textTertiary)
         )
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(Space.sm))
         Row(
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(Space.xxs),
             verticalAlignment = Alignment.CenterVertically
         ) {
             repeat(3) { index ->

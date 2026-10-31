@@ -45,7 +45,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -62,6 +61,9 @@ import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
+import com.liuli.browser.ui.theme.Radius
+import com.liuli.browser.ui.theme.Space
+import com.liuli.browser.ui.theme.Type
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -78,7 +80,8 @@ fun LibraryScreen(
     val colors = LocalLiuliColors.current
     var section by rememberSaveable { mutableIntStateOf(0) }
     val list = if (section == 0) library.bookmarks else library.history
-    val horizontal = if (isTablet) 26.dp else 18.dp
+    // 页面左右留白走间距阶梯：平板 Space.xl，手机 Space.lg。
+    val horizontal = if (isTablet) Space.xl else Space.lg
     // 已经演过入场动画的条目：滚动出去再回来不重播。
     val revealedKeys = remember { mutableStateListOf<String>() }
     // 空状态首次出现时淡入上移。
@@ -98,7 +101,7 @@ fun LibraryScreen(
                 .widthIn(max = 1000.dp)
                 .fillMaxSize()
                 .statusBarsPadding()
-                .padding(top = 8.dp)
+                .padding(top = Space.sm)
         ) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = horizontal),
@@ -107,16 +110,15 @@ fun LibraryScreen(
                 Column(Modifier.weight(1f)) {
                     BasicText(
                         text = "书签与历史",
-                        style = TextStyle(
+                        style = Type.display.copy(
                             color = colors.textPrimary,
-                            fontSize = if (isTablet) 32.sp else 26.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontSize = if (isTablet) 32.sp else 26.sp
                         )
                     )
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(Space.xxs))
                     BasicText(
                         text = "仅保存在本机，不上传云端",
-                        style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
+                        style = Type.label.copy(color = colors.textTertiary)
                     )
                 }
                 if (section == 1 && library.history.isNotEmpty()) {
@@ -128,7 +130,7 @@ fun LibraryScreen(
                         size = 44.dp,
                         glyphSize = 18.dp
                     )
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(Space.sm))
                 }
                 GlassIconButton(
                     glyph = Glyph.Close,
@@ -140,17 +142,17 @@ fun LibraryScreen(
                 )
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(Space.lg))
 
             Row(
                 Modifier
                     .padding(horizontal = horizontal)
-                    .clip(RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(Radius.pill))
                     .background(
                         colors.textPrimary.copy(alpha = if (colors.isDark) 0.10f else 0.06f)
                     )
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    .padding(Space.xs),
+                horizontalArrangement = Arrangement.spacedBy(Space.xs)
             ) {
                 LibraryTab(
                     label = "收藏 ${library.bookmarks.size}",
@@ -164,7 +166,7 @@ fun LibraryScreen(
                 )
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(Space.md))
 
             if (list.isEmpty()) {
                 EmptyLibrary(
@@ -182,10 +184,10 @@ fun LibraryScreen(
                     contentPadding = PaddingValues(
                         start = horizontal,
                         end = horizontal,
-                        top = 4.dp,
-                        bottom = 28.dp
+                        top = Space.xs,
+                        bottom = Space.xl
                     ),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(Space.sm)
                 ) {
                     itemsIndexed(
                         list,
@@ -258,7 +260,7 @@ private fun LibraryTab(
     )
     Box(
         Modifier
-            .clip(RoundedCornerShape(50))
+            .clip(RoundedCornerShape(Radius.pill))
             .background(background)
             .clickable(
                 interactionSource = interactionSource,
@@ -267,13 +269,12 @@ private fun LibraryTab(
                 onClick = onClick
             )
             .pressScale(pressedScale = 0.92f, interactionSource = interactionSource)
-            .padding(horizontal = 16.dp, vertical = 9.dp)
+            .padding(horizontal = Space.lg, vertical = Space.sm)
     ) {
         BasicText(
             text = label,
-            style = TextStyle(
+            style = Type.sectionTitle.copy(
                 color = labelColor,
-                fontSize = 13.sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
             )
         )
@@ -293,7 +294,7 @@ private fun LibraryRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(Radius.sm))
             .background(colors.glassTint)
             .clickable(
                 interactionSource = rowInteraction,
@@ -303,13 +304,13 @@ private fun LibraryRow(
                 onClick = onClick
             )
             .pressScale(pressedScale = 0.97f, interactionSource = rowInteraction)
-            .padding(start = 12.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
+            .padding(start = Space.md, top = Space.sm, bottom = Space.sm, end = Space.xs),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             Modifier
                 .size(38.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(Radius.xs))
                 .background(colors.accent.copy(alpha = if (colors.isDark) 0.22f else 0.12f)),
             contentAlignment = Alignment.Center
         ) {
@@ -319,22 +320,21 @@ private fun LibraryRow(
                 size = 18.dp
             )
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(Space.md))
         Column(Modifier.weight(1f)) {
             BasicText(
                 text = entry.title.ifBlank { entry.url },
-                style = TextStyle(
+                style = Type.body.copy(
                     color = colors.textPrimary,
-                    fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 ),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(Space.xxs))
             BasicText(
                 text = "${hostOf(entry.url)} · ${formatTime(entry.timestamp)}",
-                style = TextStyle(color = colors.textTertiary, fontSize = 10.sp),
+                style = Type.caption.copy(color = colors.textTertiary),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -380,19 +380,15 @@ private fun EmptyLibrary(
                 size = 28.dp
             )
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(Space.md))
         BasicText(
             text = if (isBookmarks) "还没有收藏" else "还没有浏览记录",
-            style = TextStyle(
-                color = colors.textPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold
-            )
+            style = Type.title.copy(fontSize = 15.sp, color = colors.textPrimary)
         )
-        Spacer(Modifier.height(5.dp))
+        Spacer(Modifier.height(Space.xs))
         BasicText(
             text = if (isBookmarks) "在浏览页面菜单中点击“添加收藏”" else "浏览网页后会自动记录在这里",
-            style = TextStyle(color = colors.textTertiary, fontSize = 12.sp)
+            style = Type.bodySmall.copy(color = colors.textTertiary)
         )
     }
 }

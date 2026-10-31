@@ -8,7 +8,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -60,8 +59,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -76,6 +73,9 @@ import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
+import com.liuli.browser.ui.theme.Radius
+import com.liuli.browser.ui.theme.Space
+import com.liuli.browser.ui.theme.Type
 import com.liuli.browser.web.BrowserTab
 import kotlinx.coroutines.delay
 
@@ -111,25 +111,25 @@ fun TabSwitcherScreen(
                 .widthIn(max = 1160.dp)
                 .fillMaxSize()
                 .statusBarsPadding()
-                .padding(top = 8.dp)
+                .padding(top = Space.sm)
         ) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = if (isTablet) 26.dp else 18.dp),
+                Modifier.fillMaxWidth().padding(horizontal = if (isTablet) Space.xl else Space.lg),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
                     BasicText(
                         text = "标签页",
-                        style = TextStyle(
+                        // 页面大标题：走 display 档，平板/手机两档字号保留原样。
+                        style = Type.display.copy(
                             color = colors.textPrimary,
-                            fontSize = if (isTablet) 32.sp else 26.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontSize = if (isTablet) 32.sp else 26.sp
                         )
                     )
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(Space.xxs))
                     BasicText(
                         text = "${tabs.size} 个标签 · 轻触切换",
-                        style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
+                        style = Type.label.copy(color = colors.textTertiary)
                     )
                 }
                 GlassIconButton(
@@ -140,7 +140,7 @@ fun TabSwitcherScreen(
                     size = 46.dp,
                     glyphSize = 20.dp
                 )
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(Space.sm))
                 GlassIconButton(
                     glyph = Glyph.Close,
                     contentDescription = "关闭标签页视图",
@@ -151,19 +151,19 @@ fun TabSwitcherScreen(
                 )
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(Space.lg))
 
             LazyVerticalGrid(
                 columns = GridCells.Fixed(columns),
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = PaddingValues(
-                    start = if (isTablet) 26.dp else 18.dp,
-                    end = if (isTablet) 26.dp else 18.dp,
-                    top = 4.dp,
-                    bottom = bottomSpace + 24.dp
+                    start = if (isTablet) Space.xl else Space.lg,
+                    end = if (isTablet) Space.xl else Space.lg,
+                    top = Space.xs,
+                    bottom = bottomSpace + Space.xl
                 ),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                horizontalArrangement = Arrangement.spacedBy(Space.md),
+                verticalArrangement = Arrangement.spacedBy(Space.md)
             ) {
                 itemsIndexed(ordered, key = { _, tab -> tab.id }) { index, tab ->
                     // 逐张浮现：错峰延迟由 MotionSpec 统一给出，已演过的标签不重播。
@@ -195,8 +195,8 @@ fun TabSwitcherScreen(
                     Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
-                        .padding(horizontal = 26.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        .padding(horizontal = Space.xl, vertical = Space.md),
+                    horizontalArrangement = Arrangement.spacedBy(Space.md)
                 ) {
                     GlassPillButton(
                         label = "新建标签页",
@@ -297,13 +297,13 @@ private fun TabCard(
                 scaleY = scale * enterScale
                 alpha = cardAlpha * enterAlpha
             }
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(Radius.lg))
             .background(colors.glassTintStrong)
             .semantics { contentDescription = tab.pageTitle() }
             .border(
                 width = borderWidth,
                 color = borderColor,
-                shape = RoundedCornerShape(24.dp)
+                shape = RoundedCornerShape(Radius.lg)
             )
             .clickable(
                 interactionSource = cardInteraction,
@@ -372,8 +372,8 @@ private fun TabCard(
         Row(
             Modifier
                 .align(Alignment.TopStart)
-                .padding(10.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                .padding(Space.md),
+            horizontalArrangement = Arrangement.spacedBy(Space.sm),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (tab.isPrivate) {
@@ -404,7 +404,7 @@ private fun TabCard(
                 .pressScale(pressedScale = 0.84f, interactionSource = closeInteraction)
                 .clickable(
                     interactionSource = closeInteraction,
-                    indication = LocalIndication.current,
+                    indication = null,
                     role = Role.Button,
                     onClickLabel = "关闭标签页"
                 ) {
@@ -431,22 +431,21 @@ private fun TabCard(
             Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(12.dp)
+                .padding(Space.md)
         ) {
             BasicText(
                 text = tab.pageTitle(),
-                style = TextStyle(
+                style = Type.title.copy(
                     color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold
+                    fontSize = 14.sp
                 ),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(Space.xs))
             BasicText(
                 text = tab.displayHost,
-                style = TextStyle(color = Color.White.copy(alpha = 0.72f), fontSize = 10.sp),
+                style = Type.caption.copy(color = Color.White.copy(alpha = 0.72f)),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -462,16 +461,16 @@ private fun TabBadge(
 ) {
     Row(
         Modifier
-            .clip(RoundedCornerShape(50))
+            .clip(RoundedCornerShape(Radius.pill))
             .background(Color.Black.copy(alpha = 0.34f))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(horizontal = Space.sm, vertical = Space.xs),
+        horizontalArrangement = Arrangement.spacedBy(Space.xs),
         verticalAlignment = Alignment.CenterVertically
     ) {
         GlyphIcon(glyph, tint, size = 11.dp)
         BasicText(
             text = text,
-            style = TextStyle(color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Medium)
+            style = Type.micro.copy(color = Color.White)
         )
     }
 }

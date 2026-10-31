@@ -58,7 +58,6 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -86,6 +85,9 @@ import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
+import com.liuli.browser.ui.theme.Radius
+import com.liuli.browser.ui.theme.Space
+import com.liuli.browser.ui.theme.Type
 import com.liuli.browser.web.BrowserViewModel
 import com.liuli.browser.web.agent.AgentAuditEntry
 import com.liuli.browser.web.agent.AgentController
@@ -112,7 +114,8 @@ fun SettingsScreen(
     var showPrivacy by rememberSaveable { mutableStateOf(false) }
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     var confirmRevoke by rememberSaveable { mutableStateOf(false) }
-    val horizontal = if (isTablet) 28.dp else 18.dp
+    // 页面左右留白走间距阶梯：平板 Space.xl，手机 Space.lg。
+    val horizontal = if (isTablet) Space.xl else Space.lg
     val webViewPackage = remember {
         runCatching { WebView.getCurrentWebViewPackage() }.getOrNull()
     }
@@ -142,7 +145,7 @@ fun SettingsScreen(
                 .statusBarsPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = horizontal)
-                .padding(top = 8.dp)
+                .padding(top = Space.sm)
         ) {
             Row(
                 Modifier.fillMaxWidth(),
@@ -151,16 +154,15 @@ fun SettingsScreen(
                 Column(Modifier.weight(1f)) {
                     BasicText(
                         text = "设置",
-                        style = TextStyle(
+                        style = Type.display.copy(
                             color = colors.textPrimary,
-                            fontSize = if (isTablet) 32.sp else 26.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontSize = if (isTablet) 32.sp else 26.sp
                         )
                     )
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(Space.xxs))
                     BasicText(
                         text = "外观、搜索、AI 与隐私合规",
-                        style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
+                        style = Type.label.copy(color = colors.textTertiary)
                     )
                 }
                 GlassIconButton(
@@ -173,12 +175,12 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(Space.lg))
 
             SettingsSection(title = "外观", backdrop = backdrop, index = 0) {
                 SettingsLabel("主题色", "液态玻璃的折射色调")
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Spacer(Modifier.height(Space.md))
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                     AccentPalettes.forEachIndexed { index, palette ->
                         val selected = settings.accentIndex == index
                         val interaction = remember { MutableInteractionSource() }
@@ -230,15 +232,15 @@ fun SettingsScreen(
                         }
                     }
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(Space.md))
                 SettingsLabel("深色模式", null)
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(Space.sm))
                 Row(
                     Modifier
-                        .clip(RoundedCornerShape(50))
+                        .clip(RoundedCornerShape(Radius.pill))
                         .background(colors.textPrimary.copy(alpha = 0.06f))
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        .padding(Space.xs),
+                    horizontalArrangement = Arrangement.spacedBy(Space.xs)
                 ) {
                     DarkModeOption.entries.forEachIndexed { index, option ->
                         val selected = settings.darkMode == index
@@ -255,7 +257,7 @@ fun SettingsScreen(
                         )
                         Box(
                             Modifier
-                                .clip(RoundedCornerShape(50))
+                                .clip(RoundedCornerShape(Radius.pill))
                                 .background(background)
                                 .clickable(
                                     interactionSource = interaction,
@@ -263,20 +265,19 @@ fun SettingsScreen(
                                     role = Role.RadioButton
                                 ) { settings.updateDarkMode(index) }
                                 .pressScale(pressedScale = 0.92f, interactionSource = interaction)
-                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                                .padding(horizontal = Space.md, vertical = Space.sm)
                         ) {
                             BasicText(
                                 text = option.label,
-                                style = TextStyle(
+                                style = Type.bodySmall.copy(
                                     color = labelColor,
-                                    fontSize = 12.sp,
                                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                                 )
                             )
                         }
                     }
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(Space.md))
                 ToggleRow(
                     title = "动态流光背景",
                     subtitle = "低功耗地缓慢流动；关闭后保持静态",
@@ -294,12 +295,12 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(Space.md))
 
             SettingsSection(title = "搜索", backdrop = backdrop, index = 1) {
                 SettingsLabel("默认搜索引擎", "地址栏输入非网址内容时使用")
-                Spacer(Modifier.height(10.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Spacer(Modifier.height(Space.md))
+                Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                     SearchEngine.entries.forEach { engine ->
                         val selected = settings.searchEngine == engine
                         val interaction = remember { MutableInteractionSource() }
@@ -323,14 +324,14 @@ fun SettingsScreen(
                             Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = Dimens.minTouch)
-                                .clip(RoundedCornerShape(14.dp))
+                                .clip(RoundedCornerShape(Radius.sm))
                                 .clickable(
                                     interactionSource = interaction,
                                     indication = null,
                                     role = Role.RadioButton
                                 ) { settings.updateSearchEngine(engine) }
                                 .pressScale(pressedScale = 0.98f, interactionSource = interaction)
-                                .padding(horizontal = 6.dp, vertical = 10.dp),
+                                .padding(horizontal = Space.xs, vertical = Space.sm),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(Modifier.size(17.dp), contentAlignment = Alignment.Center) {
@@ -348,12 +349,11 @@ fun SettingsScreen(
                                     size = 17.dp
                                 )
                             }
-                            Spacer(Modifier.width(10.dp))
+                            Spacer(Modifier.width(Space.sm))
                             BasicText(
                                 text = engine.label,
-                                style = TextStyle(
+                                style = Type.body.copy(
                                     color = labelColor,
-                                    fontSize = 14.sp,
                                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                                 )
                             )
@@ -362,11 +362,11 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(Space.md))
 
             SettingsSection(title = "浏览", backdrop = backdrop, index = 2) {
                 SettingsLabel("标签页上限", "达到上限后自动回收最久未使用的标签")
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(Space.xs))
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -381,14 +381,13 @@ fun SettingsScreen(
                         backdrop = backdrop,
                         modifier = Modifier
                             .weight(1f)
-                            .padding(horizontal = 20.dp),
+                            .padding(horizontal = Space.lg),
                         contentDescription = "标签页上限"
                     )
                     BasicText(
                         text = "${settings.maxTabs} 个",
-                        style = TextStyle(
+                        style = Type.bodySmall.copy(
                             color = colors.textPrimary,
-                            fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
                         )
                     )
@@ -425,7 +424,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(Space.md))
 
             SettingsSection(title = "AI 页面助手", backdrop = backdrop, index = 3) {
                 ToggleRow(
@@ -452,8 +451,8 @@ fun SettingsScreen(
                         "先打开一个网页，再回到这里设置"
                     }
                 )
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Spacer(Modifier.height(Space.sm))
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                     AgentSiteMode.entries.forEach { mode ->
                         GlassPillButton(
                             label = mode.label,
@@ -461,18 +460,18 @@ fun SettingsScreen(
                             backdrop = backdrop,
                             accent = activePolicy.mode == mode,
                             enabled = activePolicyHost != null,
-                            contentPadding = PaddingValues(horizontal = 14.dp)
+                            contentPadding = PaddingValues(horizontal = Space.md)
                         )
                     }
                 }
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(Space.xs))
                 BasicText(
                     text = if (activePolicyHost == null) {
                         "打开网页后可选择禁止、只读或允许；策略按域名保存。"
                     } else {
                         activePolicy.mode.hint
                     },
-                    style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 14.sp)
+                    style = Type.micro.copy(color = colors.textTertiary, lineHeight = 14.sp)
                 )
                 // 低风险免确认只在"允许"站点出现，出现与收起都有过渡。
                 AnimatedVisibility(
@@ -493,7 +492,7 @@ fun SettingsScreen(
                     )
                 }
                 if (agentPolicies.policies.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(Space.sm))
                     GlassPillButton(
                         label = "清除全部站点策略",
                         onClick = { agentPolicies.clear() },
@@ -520,21 +519,21 @@ fun SettingsScreen(
                     )
                 ) {
                     Column {
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(Modifier.height(Space.md))
                         SettingsField(
                             label = "接口地址（OpenAI 兼容）",
                             value = settings.agentEndpoint,
                             placeholder = SettingsStore.DEFAULT_AGENT_ENDPOINT,
                             onValueChange = { settings.updateAgentEndpoint(it) }
                         )
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(Space.sm))
                         SettingsField(
                             label = "模型名称",
                             value = settings.agentModel,
                             placeholder = SettingsStore.DEFAULT_AGENT_MODEL,
                             onValueChange = { settings.updateAgentModel(it) }
                         )
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(Space.sm))
                         SettingsField(
                             label = "API Key（仅本次会话）",
                             value = settings.agentApiKey,
@@ -544,7 +543,7 @@ fun SettingsScreen(
                         )
                     }
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(Space.sm))
                 val cloudState = when {
                     !settings.agentCloudEnabled -> "本地模式"
                     settings.agentApiKey.isBlank() -> "云端已开启，未填写 API Key"
@@ -561,13 +560,9 @@ fun SettingsScreen(
                             append(it)
                         }
                     },
-                    style = TextStyle(
-                        color = colors.textTertiary,
-                        fontSize = 9.sp,
-                        lineHeight = 14.sp
-                    )
+                    style = Type.micro.copy(color = colors.textTertiary, lineHeight = 14.sp)
                 )
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(Space.md))
                 BasicText(
                     text = "Agent 默认在本机完成页面速览、页内查找与关键词问答。页面操作只在本地执行，" +
                         "单步动作需要你逐条确认；多步任务会先生成计划，批准后按顺序执行，执行中可暂停、重试或取消。" +
@@ -578,28 +573,24 @@ fun SettingsScreen(
                         "允许站点可单独开启低风险步骤免确认。" +
                         "云端模式必须手动开启，且仅支持 HTTPS；发送前会脱敏邮箱、手机号、证件号与长数字串。" +
                         "隐私标签始终只在本机处理。",
-                    style = TextStyle(color = colors.textTertiary, fontSize = 10.sp, lineHeight = 16.sp)
+                    style = Type.caption.copy(color = colors.textTertiary, lineHeight = 16.sp)
                 )
                 if (agent.audit.isNotEmpty()) {
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(Space.md))
                     Divider()
                     SettingsLabel(
                         title = "审计记录",
                         subtitle = "仅保存在本机内存，退出或清除对话时删除"
                     )
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(Space.xs))
                     agent.audit.takeLast(6).reversed().forEach { entry ->
                         BasicText(
                             text = entry.displayLine(),
-                            style = TextStyle(
-                                color = colors.textTertiary,
-                                fontSize = 9.sp,
-                                lineHeight = 14.sp
-                            )
+                            style = Type.micro.copy(color = colors.textTertiary, lineHeight = 14.sp)
                         )
                     }
                 }
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(Space.md))
                 GlassPillButton(
                     label = "清除对话与审计",
                     onClick = { agent.clear() },
@@ -608,7 +599,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(Space.md))
 
             SettingsSection(title = "隐私护盾", backdrop = backdrop, index = 4) {
                 ToggleRow(
@@ -651,15 +642,15 @@ fun SettingsScreen(
                     },
                     backdrop = backdrop
                 )
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(Space.md))
                 BasicText(
                     text = "隐私护盾在本机运行，不上传网址或任何标识符。隐私标签关闭时清除该站点 Cookie。" +
                         "网页无法读取剪贴板、通讯录、定位、相机或麦克风。",
-                    style = TextStyle(color = colors.textTertiary, fontSize = 10.sp, lineHeight = 16.sp)
+                    style = Type.caption.copy(color = colors.textTertiary, lineHeight = 16.sp)
                 )
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(Space.md))
 
             SettingsSection(title = "金标联盟 · 隐私与合规", backdrop = backdrop, index = 5) {
                 ComplianceRow("权限最小化", "仅 INTERNET，无存储、定位、相机、通讯录等敏感权限")
@@ -672,8 +663,8 @@ fun SettingsScreen(
                 ComplianceRow("一镜到底", "搜索框与标签卡片共享元素/容器，弹簧曲线驱动")
                 ComplianceRow("深色与无障碍", "深色模式、48dp 触控、语义标签、字体缩放、减弱动效")
                 ComplianceRow("安全浏览", "SSL 错误阻断、混合内容阻止、文件访问禁用、Safe Browsing")
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Spacer(Modifier.height(Space.md))
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                     GlassPillButton(
                         label = "隐私说明",
                         onClick = { showPrivacy = true },
@@ -689,7 +680,7 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(Space.md))
 
             SettingsSection(title = "关于", backdrop = backdrop, index = 6) {
                 AboutRow("应用版本", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
@@ -697,17 +688,17 @@ fun SettingsScreen(
                 AboutRow("运行平台", "Android ${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}")
                 AboutRow("设计语言", "Liquid Glass · Backdrop (Apache-2.0)")
                 AboutRow("界面框架", "Jetpack Compose 1.12 · Kotlin 2.4")
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(Space.md))
                 BasicText(
                     text = "琉璃浏览器使用系统 Chromium WebView 作为内核，内核随系统或 WebView 应用更新，应用本身不内置 Chromium 运行时，因此 APK 约 2 MB。",
-                    style = TextStyle(color = colors.textTertiary, fontSize = 11.sp, lineHeight = 17.sp)
+                    style = Type.label.copy(color = colors.textTertiary, lineHeight = 17.sp)
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(Space.xs))
                 BasicText(
                     text = "琉璃浏览器不提供云同步。所有浏览数据均保存在本机，可在上方一键清除。",
-                    style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
+                    style = Type.label.copy(color = colors.textTertiary)
                 )
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(Space.md))
                 GlassPillButton(
                     label = "撤回隐私同意",
                     onClick = { confirmRevoke = true },
@@ -717,7 +708,7 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.navigationBarsPadding())
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(Space.xl))
         }
     }
 
@@ -770,22 +761,18 @@ private fun SettingsSection(
     ) {
         BasicText(
             text = title,
-            style = TextStyle(
-                color = colors.textSecondary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold
-            ),
-            modifier = Modifier.padding(start = 6.dp, bottom = 8.dp)
+            style = Type.sectionTitle.copy(color = colors.textSecondary),
+            modifier = Modifier.padding(start = Space.xs, bottom = Space.sm)
         )
         GlassSurface(
             backdrop = backdrop,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(26.dp),
+            shape = RoundedCornerShape(Radius.lg),
             tint = colors.glassTint,
             blurRadius = 20.dp,
             lensHeight = 16.dp,
             lensAmount = 22.dp,
-            contentPadding = PaddingValues(18.dp)
+            contentPadding = PaddingValues(Space.lg)
         ) {
             Column(Modifier.fillMaxWidth()) {
                 content()
@@ -800,17 +787,16 @@ private fun SettingsLabel(title: String, subtitle: String?) {
     Column {
         BasicText(
             text = title,
-            style = TextStyle(
+            style = Type.body.copy(
                 color = colors.textPrimary,
-                fontSize = 14.sp,
                 fontWeight = FontWeight.Medium
             )
         )
         if (subtitle != null) {
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(Space.xxs))
             BasicText(
                 text = subtitle,
-                style = TextStyle(color = colors.textTertiary, fontSize = 10.sp)
+                style = Type.caption.copy(color = colors.textTertiary)
             )
         }
     }
@@ -830,7 +816,7 @@ private fun ToggleRow(
         Modifier
             .fillMaxWidth()
             .heightIn(min = Dimens.minTouch)
-            .padding(vertical = 6.dp),
+            .padding(vertical = Space.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(
@@ -845,15 +831,15 @@ private fun ToggleRow(
         ) {
             BasicText(
                 text = title,
-                style = TextStyle(color = colors.textPrimary, fontSize = 14.sp)
+                style = Type.body.copy(color = colors.textPrimary)
             )
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(Space.xxs))
             BasicText(
                 text = subtitle,
-                style = TextStyle(color = colors.textTertiary, fontSize = 10.sp)
+                style = Type.caption.copy(color = colors.textTertiary)
             )
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(Space.md))
         LiquidToggle(
             selected = { checked },
             onSelect = onCheckedChange,
@@ -867,12 +853,12 @@ private fun ToggleRow(
 private fun ComplianceRow(title: String, detail: String) {
     val colors = LocalLiuliColors.current
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 7.dp),
+        Modifier.fillMaxWidth().padding(vertical = Space.sm),
         verticalAlignment = Alignment.Top
     ) {
         Box(
             Modifier
-                .padding(top = 2.dp)
+                .padding(top = Space.xxs)
                 .size(18.dp)
                 .clip(CircleShape)
                 .background(colors.success.copy(alpha = 0.16f)),
@@ -880,20 +866,19 @@ private fun ComplianceRow(title: String, detail: String) {
         ) {
             GlyphIcon(Glyph.Check, colors.success, size = 10.dp)
         }
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(Space.sm))
         Column {
             BasicText(
                 text = title,
-                style = TextStyle(
+                style = Type.sectionTitle.copy(
                     color = colors.textPrimary,
-                    fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 )
             )
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(Space.xxs))
             BasicText(
                 text = detail,
-                style = TextStyle(color = colors.textTertiary, fontSize = 10.sp)
+                style = Type.caption.copy(color = colors.textTertiary)
             )
         }
     }
@@ -903,17 +888,17 @@ private fun ComplianceRow(title: String, detail: String) {
 private fun AboutRow(label: String, value: String) {
     val colors = LocalLiuliColors.current
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        Modifier.fillMaxWidth().padding(vertical = Space.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
         BasicText(
             text = label,
-            style = TextStyle(color = colors.textSecondary, fontSize = 12.sp),
+            style = Type.bodySmall.copy(color = colors.textSecondary),
             modifier = Modifier.weight(1f)
         )
         BasicText(
             text = value,
-            style = TextStyle(color = colors.textPrimary, fontSize = 12.sp)
+            style = Type.bodySmall.copy(color = colors.textPrimary)
         )
     }
 }
@@ -924,7 +909,7 @@ private fun Divider() {
     Box(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp)
+            .padding(vertical = Space.sm)
             .height(1.dp)
             .background(colors.textPrimary.copy(alpha = 0.07f))
     )
@@ -942,18 +927,18 @@ private fun SettingsField(
     Column {
         BasicText(
             text = label,
-            style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
+            style = Type.label.copy(color = colors.textSecondary)
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(Space.xs))
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
+                .clip(RoundedCornerShape(Radius.sm))
                 .background(colors.textPrimary.copy(alpha = 0.06f))
-                .padding(horizontal = 12.dp, vertical = 11.dp),
-            textStyle = TextStyle(color = colors.textPrimary, fontSize = 13.sp),
+                .padding(horizontal = Space.md, vertical = Space.md),
+            textStyle = Type.sectionTitle.copy(color = colors.textPrimary, fontWeight = FontWeight.Normal),
             cursorBrush = SolidColor(colors.accent),
             singleLine = true,
             visualTransformation = if (password) {
@@ -969,7 +954,7 @@ private fun SettingsField(
                     if (value.isEmpty()) {
                         BasicText(
                             text = placeholder,
-                            style = TextStyle(color = colors.textTertiary, fontSize = 13.sp)
+                            style = Type.sectionTitle.copy(color = colors.textTertiary, fontWeight = FontWeight.Normal)
                         )
                     }
                     innerTextField()
@@ -990,7 +975,7 @@ private fun ConfirmRevokeDialog(
         visible = visible,
         onDismiss = onCancel,
         panelModifier = Modifier
-            .padding(24.dp)
+            .padding(Space.xl)
             .widthIn(max = 380.dp)
     ) {
         GlassSurface(
@@ -1000,28 +985,24 @@ private fun ConfirmRevokeDialog(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
                 ) { },
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(Radius.xl),
             tint = colors.glassTintStrong.copy(alpha = 0.96f),
             blurRadius = 0.dp,
             lensHeight = 0.dp,
             shadow = true
         ) {
-            Column(Modifier.padding(22.dp)) {
+            Column(Modifier.padding(Space.xl)) {
                 BasicText(
                     text = "撤回隐私同意？",
-                    style = TextStyle(
-                        color = colors.textPrimary,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    style = Type.title.copy(color = colors.textPrimary)
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(Space.sm))
                 BasicText(
                     text = "撤回后将清除本地书签、历史、Cookie、缓存与设置，并返回隐私告知页。此操作不可撤销。",
-                    style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                    style = Type.bodySmall.copy(color = colors.textSecondary)
                 )
-                Spacer(Modifier.height(18.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Spacer(Modifier.height(Space.lg))
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                     GlassPillButton(
                         label = "取消",
                         onClick = onCancel,
@@ -1051,7 +1032,7 @@ private fun ConfirmClearDialog(
         visible = visible,
         onDismiss = onCancel,
         panelModifier = Modifier
-            .padding(24.dp)
+            .padding(Space.xl)
             .widthIn(max = 380.dp)
     ) {
         GlassSurface(
@@ -1061,28 +1042,24 @@ private fun ConfirmClearDialog(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
                 ) { },
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(Radius.xl),
             tint = colors.glassTintStrong.copy(alpha = 0.94f),
             blurRadius = 0.dp,
             lensHeight = 0.dp,
             shadow = true
         ) {
-            Column(Modifier.padding(22.dp)) {
+            Column(Modifier.padding(Space.xl)) {
                 BasicText(
                     text = "清除浏览数据？",
-                    style = TextStyle(
-                        color = colors.textPrimary,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    style = Type.title.copy(color = colors.textPrimary)
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(Space.sm))
                 BasicText(
                     text = "将删除 Cookie、缓存、书签与历史记录，此操作不可撤销。",
-                    style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+                    style = Type.bodySmall.copy(color = colors.textSecondary)
                 )
-                Spacer(Modifier.height(18.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Spacer(Modifier.height(Space.lg))
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                     GlassPillButton(label = "取消", onClick = onCancel, backdrop = com.kyant.backdrop.backdrops.emptyBackdrop())
                     GlassPillButton(
                         label = "确认清除",
