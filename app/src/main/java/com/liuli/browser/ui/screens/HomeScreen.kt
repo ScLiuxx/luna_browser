@@ -13,6 +13,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -65,7 +67,6 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -200,20 +201,22 @@ fun HomeScreen(
                     Column(Modifier.weight(1f)) {
                         BasicText(
                             text = "琉璃浏览器",
-                            style = TextStyle(
+                            style = Type.display.copy(
                                 color = colors.textPrimary,
-                                fontSize = if (isTablet) 30.sp else 24.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                                fontSize = if (isTablet) 28.sp else 23.sp
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Spacer(Modifier.height(2.dp))
                         BasicText(
                             text = if (isPrivate) "隐私标签 · 不记录历史" else "轻盈 · 安全 · 一镜到底",
-                            style = TextStyle(
+                            style = Type.bodySmall.copy(
                                 color = if (isPrivate) colors.accentSecondary else colors.textTertiary,
-                                fontSize = 12.sp,
                                 fontWeight = if (isPrivate) FontWeight.Medium else FontWeight.Normal
-                            )
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     if (!isTablet) {
@@ -245,19 +248,20 @@ fun HomeScreen(
 
                 Spacer(Modifier.height(if (isTablet) 30.dp else 24.dp))
 
-                SectionTitle("常用网站")
+                SectionTitle("常用网站", "轻触即可打开")
                 Spacer(Modifier.height(Space.md))
                 QuickLinkGrid(
                     backdrop = backdrop,
                     links = QuickLinks.take(if (isTablet) 10 else 8),
                     columns = columns,
                     isTablet = isTablet,
+                    reduceMotion = reduceMotion,
                     onOpenUrl = onOpenUrl
                 )
 
                 if (recentTabs.isNotEmpty()) {
                     Spacer(Modifier.height(if (isTablet) 30.dp else 24.dp))
-                    SectionTitle("继续浏览")
+                    SectionTitle("继续浏览", "轻触继续浏览")
                     Spacer(Modifier.height(Space.md))
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -315,7 +319,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun SectionTitle(title: String) {
+private fun SectionTitle(title: String, hint: String) {
     val colors = LocalLiuliColors.current
     Row(
         Modifier.fillMaxWidth(),
@@ -323,11 +327,12 @@ private fun SectionTitle(title: String) {
     ) {
         BasicText(
             text = title,
-            style = Type.title.copy(color = colors.textPrimary)
+            style = Type.sectionTitle.copy(color = colors.textPrimary)
         )
         Spacer(Modifier.weight(1f))
+        // 右侧提示跟着区块走：两个区块的交互不同，提示文案也不该共用一句。
         BasicText(
-            text = "轻触即可打开",
+            text = hint,
             style = Type.label.copy(color = colors.textTertiary)
         )
     }
@@ -347,9 +352,21 @@ private fun HomeSearchBar(
     // 搜索框获得焦点时轻微放大，输入时玻璃件也跟着"醒"过来。
     val focused by interactionSource.collectIsFocusedAsState()
     val focusScale by animateFloatAsState(
-        targetValue = if (focused) 1.012f else 1f,
+        targetValue = if (focused) 1.018f else 1f,
         animationSpec = MotionSpec.pageSpring(),
         label = "search-focus-scale"
+    )
+    // 玻璃本身是半透明的，只靠放大看不出焦点落在哪：
+    // 放大镜染上强调色、占位文字提亮，焦点才立得住。
+    val focusTint by animateColorAsState(
+        targetValue = if (focused) colors.accent else colors.textSecondary,
+        animationSpec = MotionSpec.color(Motion.Quick),
+        label = "search-icon-tint"
+    )
+    val hintTint by animateColorAsState(
+        targetValue = if (focused) colors.textSecondary else colors.textTertiary,
+        animationSpec = MotionSpec.color(Motion.Quick),
+        label = "search-hint-tint"
     )
     GlassSurface(
         backdrop = backdrop,
@@ -380,7 +397,7 @@ private fun HomeSearchBar(
                     .clip(CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                GlyphIcon(Glyph.Search, colors.textSecondary, size = 21.dp)
+                GlyphIcon(Glyph.Search, focusTint, size = 21.dp)
             }
             BasicTextField(
                 value = query,
@@ -403,7 +420,7 @@ private fun HomeSearchBar(
                     if (query.isEmpty()) {
                         BasicText(
                             text = "搜索或输入网址",
-                            style = Type.title.copy(color = colors.textTertiary)
+                            style = Type.title.copy(color = hintTint)
                         )
                     }
                     innerTextField()
@@ -427,6 +444,7 @@ private fun HomeSearchBar(
                     modifier = Modifier
                         .heightIn(min = Dimens.minTouch)
                         .clip(RoundedCornerShape(Radius.pill))
+                        .background(colors.accent.copy(alpha = 0.14f))
                         .clickable(
                             interactionSource = goInteraction,
                             indication = null,
@@ -435,7 +453,7 @@ private fun HomeSearchBar(
                             onClick = onSubmit
                         )
                         .pressScale(pressedScale = 0.90f, interactionSource = goInteraction)
-                        .padding(horizontal = 14.dp),
+                        .padding(horizontal = 16.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     BasicText(
@@ -457,28 +475,71 @@ private fun QuickLinkGrid(
     links: List<QuickLink>,
     columns: Int,
     isTablet: Boolean,
+    reduceMotion: Boolean,
     onOpenUrl: (String) -> Unit
 ) {
+    // 常用网站逐块浮现：九宫格一次整片亮起像张贴图，
+    // 错开落位才看得出是"摆上去"的。
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        links.chunked(columns).forEach { rowLinks ->
+        links.chunked(columns).forEachIndexed { rowIndex, rowLinks ->
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                rowLinks.forEach { link ->
-                    QuickLinkTile(
-                        link = link,
-                        backdrop = backdrop,
-                        isTablet = isTablet,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onOpenUrl(link.url) }
-                    )
+                rowLinks.forEachIndexed { columnIndex, link ->
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .gridReveal(
+                                index = rowIndex * columns + columnIndex,
+                                reduceMotion = reduceMotion
+                            )
+                    ) {
+                        QuickLinkTile(
+                            link = link,
+                            backdrop = backdrop,
+                            isTablet = isTablet,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { onOpenUrl(link.url) }
+                        )
+                    }
                 }
                 repeat(columns - rowLinks.size) {
                     Spacer(Modifier.weight(1f))
                 }
             }
         }
+    }
+}
+
+/**
+ * 常用网站逐块浮现。
+ *
+ * 延迟值必须在组合作用域里取好再进 LaunchedEffect，
+ * 因为 [MotionSpec.staggerDelay] 是 @Composable，不能在协程里调用。
+ */
+@Composable
+private fun Modifier.gridReveal(index: Int, reduceMotion: Boolean): Modifier {
+    val stagger = MotionSpec.staggerDelay(index, stepMillis = 22)
+    var revealed by remember { mutableStateOf(false) }
+    LaunchedEffect(index) {
+        if (stagger > 0) delay(stagger.toLong())
+        revealed = true
+    }
+    val alpha by animateFloatAsState(
+        targetValue = if (revealed) 1f else 0f,
+        animationSpec = if (reduceMotion) tween(durationMillis = 0) else MotionSpec.value(Motion.Slow),
+        label = "grid-alpha"
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (revealed) 1f else 0.94f,
+        animationSpec = MotionSpec.pageSpring(reduceMotion),
+        label = "grid-scale"
+    )
+    return graphicsLayer {
+        this.alpha = alpha
+        scaleX = scale
+        scaleY = scale
     }
 }
 
@@ -526,9 +587,8 @@ private fun QuickLinkTile(
             ) {
                 BasicText(
                     text = link.label.take(1),
-                    style = TextStyle(
+                    style = Type.title.copy(
                         color = Color.White,
-                        fontSize = if (isTablet) 18.sp else 16.sp,
                         fontWeight = FontWeight.Bold
                     )
                 )
@@ -536,11 +596,12 @@ private fun QuickLinkTile(
             Spacer(Modifier.height(9.dp))
             BasicText(
                 text = link.label,
-                style = TextStyle(
-                    color = colors.textPrimary,
-                    fontSize = if (isTablet) 13.sp else 11.sp,
-                    fontWeight = FontWeight.Medium
-                ),
+                style = if (isTablet) {
+                    Type.bodySmall.copy(fontWeight = FontWeight.Medium)
+                } else {
+                    Type.label
+                },
+                color = colors.textPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -567,6 +628,7 @@ private fun RecentTabCard(
                 interactionSource = interaction,
                 indication = null,
                 role = Role.Button,
+                onClickLabel = "继续浏览",
                 onClick = onClick
             )
             .pressScale(pressedScale = 0.95f, interactionSource = interaction),
@@ -594,9 +656,8 @@ private fun RecentTabCard(
             Column(Modifier.weight(1f)) {
                 BasicText(
                     text = tab.pageTitle(),
-                    style = TextStyle(
+                    style = Type.body.copy(
                         color = colors.textPrimary,
-                        fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
                     ),
                     maxLines = 1,
@@ -605,10 +666,7 @@ private fun RecentTabCard(
                 Spacer(Modifier.height(Space.xs))
                 BasicText(
                     text = tab.displayHost,
-                    style = TextStyle(
-                        color = colors.textTertiary,
-                        fontSize = 11.sp
-                    ),
+                    style = Type.label.copy(color = colors.textTertiary),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -650,38 +708,42 @@ private fun PrivacyCard(
             Column(Modifier.weight(1f)) {
                 BasicText(
                     text = "隐私优先，数据留在本地",
-                    style = TextStyle(
+                    style = Type.body.copy(
                         color = colors.textPrimary,
-                        fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
-                    )
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.height(Space.xxs))
                 BasicText(
                     text = "隐私护盾默认开启 · 退出即清除数据",
-                    style = TextStyle(
-                        color = colors.textTertiary,
-                        fontSize = 11.sp
-                    )
+                    style = Type.label.copy(color = colors.textTertiary),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
+            // 按下反馈要跟点击共用同一个 interactionSource，
+            // 否则 pressScale 监听的是另一个源，按下时不会缩。
+            val libraryInteraction = remember { MutableInteractionSource() }
             Box(
                 Modifier
+                    .heightIn(min = 44.dp)
                     .clip(RoundedCornerShape(Radius.pill))
                     .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
+                        interactionSource = libraryInteraction,
                         indication = null,
                         role = Role.Button,
+                        onClickLabel = "打开书签",
                         onClick = onOpenLibrary
                     )
-                    .pressScale(pressedScale = 0.90f)
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                    .pressScale(pressedScale = 0.90f, interactionSource = libraryInteraction)
+                    .padding(horizontal = 14.dp)
             ) {
                 BasicText(
                     text = "书签",
-                    style = TextStyle(
+                    style = Type.bodySmall.copy(
                         color = colors.accent,
-                        fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                 )

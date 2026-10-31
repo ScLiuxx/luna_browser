@@ -10,6 +10,7 @@ import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
@@ -240,6 +241,17 @@ fun BrowserScreen(
             )
         }
 
+        // 收起/展开时内容边距跟着一起过渡：硬切会让玻璃件里的内容"跳"一下。
+        val barPaddingH by animateDpAsState(
+            targetValue = if (collapsed) 6.dp else 8.dp,
+            animationSpec = MotionSpec.pageSpring(0.01.dp),
+            label = "address-padding-h"
+        )
+        val barPaddingV by animateDpAsState(
+            targetValue = if (collapsed) 3.dp else 6.dp,
+            animationSpec = MotionSpec.pageSpring(0.01.dp),
+            label = "address-padding-v"
+        )
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -259,8 +271,8 @@ fun BrowserScreen(
                 lensHeight = 18.dp,
                 lensAmount = 26.dp,
                 contentPadding = PaddingValues(
-                    horizontal = if (collapsed) 6.dp else 8.dp,
-                    vertical = if (collapsed) 3.dp else 6.dp
+                    horizontal = barPaddingH,
+                    vertical = barPaddingV
                 )
             ) {
                 Crossfade(
@@ -825,6 +837,33 @@ private fun AddressIdleContent(
         animationSpec = MotionSpec.pageSpring(),
         label = "shield-badge-scale"
     )
+    // 收起/展开时，护盾徽标、图标、角标与间距都跟着连续变化：
+    // 直接换尺寸会让这几个元素在收起的一瞬间"缩"一下，与整体形变脱节。
+    val shieldSize by animateDpAsState(
+        targetValue = if (compact) 30.dp else 38.dp,
+        animationSpec = MotionSpec.pageSpring(0.01.dp),
+        label = "shield-size"
+    )
+    val shieldGlyphSize by animateDpAsState(
+        targetValue = if (compact) 15.dp else 18.dp,
+        animationSpec = MotionSpec.pageSpring(0.01.dp),
+        label = "shield-glyph-size"
+    )
+    val shieldBadgeSize by animateDpAsState(
+        targetValue = if (compact) 13.dp else 15.dp,
+        animationSpec = MotionSpec.pageSpring(0.01.dp),
+        label = "shield-badge-size"
+    )
+    val shieldGap by animateDpAsState(
+        targetValue = if (compact) 6.dp else 10.dp,
+        animationSpec = MotionSpec.pageSpring(0.01.dp),
+        label = "shield-gap"
+    )
+    val shieldBadgeFont by animateIntAsState(
+        targetValue = if (compact) 7 else 8,
+        animationSpec = MotionSpec.intValue(Motion.Quick),
+        label = "shield-badge-font"
+    )
     Row(
         Modifier
             .fillMaxWidth()
@@ -848,7 +887,7 @@ private fun AddressIdleContent(
         }
         Box(
             Modifier
-                .size(if (compact) 30.dp else 38.dp)
+                .size(shieldSize)
                 .pressScale(pressedScale = 0.9f, interactionSource = shieldInteraction)
                 .clip(CircleShape)
                 .background(animatedSecurityTint.copy(alpha = if (colors.isDark) 0.18f else 0.10f))
@@ -868,7 +907,7 @@ private fun AddressIdleContent(
             // 安全图标本身也会换（锁↔感叹号↔隐身），换形时淡入淡出而不是硬切。
             AnimatedContent(
                 targetState = securityGlyph,
-                modifier = Modifier.size(if (compact) 15.dp else 18.dp),
+                modifier = Modifier.size(shieldGlyphSize),
                 contentAlignment = Alignment.Center,
                 transitionSpec = {
                     ((fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick)) +
@@ -884,7 +923,7 @@ private fun AddressIdleContent(
                 },
                 label = "security-glyph"
             ) { glyph ->
-                GlyphIcon(glyph, animatedSecurityTint, size = if (compact) 15.dp else 18.dp)
+                GlyphIcon(glyph, animatedSecurityTint, size = shieldGlyphSize)
             }
             // 角标常驻组合，用缩放与透明度控制显隐，不突然冒出或消失。
             Box(
@@ -895,7 +934,7 @@ private fun AddressIdleContent(
                         scaleY = shieldBadgeScale
                         alpha = shieldBadgeScale
                     }
-                    .size(if (compact) 13.dp else 15.dp)
+                    .size(shieldBadgeSize)
                     .clip(CircleShape)
                     .background(colors.accent),
                 contentAlignment = Alignment.Center
@@ -905,119 +944,145 @@ private fun AddressIdleContent(
                         text = blockedTrackers.coerceAtMost(99).toString(),
                         style = TextStyle(
                             color = Color.White,
-                            fontSize = if (compact) 7.sp else 8.sp,
+                            fontSize = shieldBadgeFont.sp,
                             fontWeight = FontWeight.Bold
                         )
                     )
                 }
             }
         }
-        Spacer(Modifier.width(if (compact) 6.dp else 10.dp))
-        if (compact) {
-            val compactInteraction = remember { MutableInteractionSource() }
-            Row(
-                Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable(
-                        interactionSource = compactInteraction,
-                        indication = null,
-                        role = Role.Button,
-                        onClickLabel = "展开工具栏",
-                        onClick = onExpand
-                    )
-                    .pressScale(pressedScale = 0.97f, interactionSource = compactInteraction)
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                BasicText(
-                    text = tab.displayHost,
-                    style = TextStyle(
-                        color = colors.textPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            CompactExpandButton(onExpand)
-        } else {
-            val urlInteraction = remember { MutableInteractionSource() }
-            Column(
-                Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable(
-                        interactionSource = urlInteraction,
-                        indication = null,
-                        role = Role.Button,
-                        onClickLabel = "编辑网址",
-                        onClick = onClick
-                    )
-                    .pressScale(pressedScale = 0.98f, interactionSource = urlInteraction)
-                    .padding(horizontal = 4.dp, vertical = 4.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+        Spacer(Modifier.width(shieldGap))
+        // 收起态与展开态之间做交叉过渡，而不是硬切：
+        // 硬切会让整条地址栏的内容在收起瞬间"闪"一下，
+        // 展开的两行（主机名 + 页面标题）也无法自然地收成一行。
+        AnimatedContent(
+            targetState = compact,
+            modifier = Modifier.weight(1f),
+            transitionSpec = {
+                (fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick)) +
+                    expandHorizontally(
+                        animationSpec = MotionSpec.sizeValue(reduced),
+                        expandFrom = Alignment.Start
+                    )) togetherWith
+                    (fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)) +
+                        shrinkHorizontally(
+                            animationSpec = MotionSpec.sizeValue(reduced),
+                            shrinkTowards = Alignment.Start
+                        ))
+            },
+            label = "address-idle-body"
+        ) { isCompact ->
+            if (isCompact) {
+                val compactInteraction = remember { MutableInteractionSource() }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     BasicText(
                         text = tab.displayHost,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(
+                                interactionSource = compactInteraction,
+                                indication = null,
+                                role = Role.Button,
+                                onClickLabel = "展开工具栏",
+                                onClick = onExpand
+                            )
+                            .pressScale(pressedScale = 0.97f, interactionSource = compactInteraction)
+                            .padding(horizontal = 4.dp),
                         style = TextStyle(
                             color = colors.textPrimary,
-                            fontSize = 15.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold
                         ),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    // "桌面版"徽标淡入淡出：切到桌面模式时徽标是"化"出来的，
-                    // 而不是硬生生地插进标题旁边。
-                    AnimatedVisibility(
-                        visible = tab.desktopMode,
-                        enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
-                            expandHorizontally(animationSpec = MotionSpec.sizeValue()),
-                        exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
-                            shrinkHorizontally(animationSpec = MotionSpec.sizeValue())
-                    ) {
-                        Box(
-                            Modifier
-                                .padding(start = 6.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(colors.accent.copy(alpha = 0.14f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            BasicText(
-                                text = "桌面版",
-                                style = TextStyle(
-                                    color = colors.accent,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                    CompactExpandButton(onExpand)
+                }
+            } else {
+                val urlInteraction = remember { MutableInteractionSource() }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(
+                                interactionSource = urlInteraction,
+                                indication = null,
+                                role = Role.Button,
+                                onClickLabel = "编辑网址",
+                                onClick = onClick
                             )
+                            .pressScale(pressedScale = 0.98f, interactionSource = urlInteraction)
+                            .padding(horizontal = 4.dp, vertical = 4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            BasicText(
+                                text = tab.displayHost,
+                                style = TextStyle(
+                                    color = colors.textPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            // "桌面版"徽标淡入淡出：切到桌面模式时徽标是"化"出来的，
+                            // 而不是硬生生地插进标题旁边。
+                            AnimatedVisibility(
+                                visible = tab.desktopMode,
+                                enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
+                                    expandHorizontally(animationSpec = MotionSpec.sizeValue()),
+                                exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
+                                    shrinkHorizontally(animationSpec = MotionSpec.sizeValue())
+                            ) {
+                                Box(
+                                    Modifier
+                                        .padding(start = 6.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(colors.accent.copy(alpha = 0.14f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    BasicText(
+                                        text = "桌面版",
+                                        style = TextStyle(
+                                            color = colors.accent,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    )
+                                }
+                            }
                         }
+                        Spacer(Modifier.height(1.dp))
+                        BasicText(
+                            text = tab.pageTitle(),
+                            style = TextStyle(color = colors.textTertiary, fontSize = 10.sp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    PlainToolButton(
+                        glyph = if (tab.isLoading) Glyph.Stop else Glyph.Reload,
+                        description = if (tab.isLoading) "停止加载" else "刷新",
+                        enabled = true,
+                        onClick = onReload
+                    )
+                    if (isTablet) {
+                        PlainToolButton(
+                            glyph = Glyph.More,
+                            description = "菜单",
+                            enabled = true,
+                            onClick = onMenu
+                        )
                     }
                 }
-                Spacer(Modifier.height(1.dp))
-                BasicText(
-                    text = tab.pageTitle(),
-                    style = TextStyle(color = colors.textTertiary, fontSize = 10.sp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            PlainToolButton(
-                glyph = if (tab.isLoading) Glyph.Stop else Glyph.Reload,
-                description = if (tab.isLoading) "停止加载" else "刷新",
-                enabled = true,
-                onClick = onReload
-            )
-            if (isTablet) {
-                PlainToolButton(
-                    glyph = Glyph.More,
-                    description = "菜单",
-                    enabled = true,
-                    onClick = onMenu
-                )
             }
         }
     }

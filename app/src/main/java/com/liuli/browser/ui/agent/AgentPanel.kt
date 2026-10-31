@@ -54,10 +54,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -235,6 +237,24 @@ fun AgentPanel(
         if (voiceReplies) speakLatest()
     }
 
+    // 这几项在列表区域之外也要用（自动滚动、回到底部按钮），
+    // 提前读一次快照，避免同一份状态在两个作用域里各读一遍。
+    val currentPlan = agent.plan
+    val currentReport = agent.report
+    val currentCreation = agent.creation
+    // 面板空空如也时显示占位页，而不是空列表。
+    val emptyPanel = currentPlan == null &&
+        currentReport == null &&
+        currentCreation == null &&
+        agent.messages.isEmpty()
+    // 列表里的内容条数：消息 + 计划/报告/创作卡片。末尾恒有一行思考位。
+    val contentItems = agent.messages.size +
+        (if (currentPlan != null) 1 else 0) +
+        (if (currentReport != null) 1 else 0) +
+        (if (currentCreation != null) 1 else 0)
+    // 滚动落点：忙碌时停在思考行，否则停在最后一条内容上。
+    val scrollIndex = if (agent.busy) contentItems else (contentItems - 1).coerceAtLeast(0)
+
     val modeLabel = when {
         isPrivate -> "本机"
         agent.cloudConfigured -> "云端"
@@ -263,13 +283,9 @@ fun AgentPanel(
         agent.report?.createdAt,
         agent.creation?.createdAt
     ) {
-        val target = agent.messages.size +
-            (if (agent.plan != null) 1 else 0) +
-            (if (agent.report != null) 1 else 0) +
-            (if (agent.creation != null) 1 else 0) +
-            (if (agent.busy) 1 else 0)
-        if (target == 0) return@LaunchedEffect
-        listState.animateScrollToItem(target - 1)
+        // 空面板还没有列表可滚；否则滚到最新的一条。
+        if (emptyPanel) return@LaunchedEffect
+        listState.animateScrollToItem(scrollIndex)
     }
 
     fun submit(text: String) {
@@ -475,19 +491,14 @@ fun AgentPanel(
                 val currentPlan = agent.plan
                 val currentReport = agent.report
                 val currentCreation = agent.creation
-                if (currentPlan == null && agent.messages.isEmpty()) {
-                    EmptyState(
-                        tabTitle = tabTitle,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                    )
-                } else {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
+                        modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(Space.xxs),
                         contentPadding = PaddingValues(vertical = Space.xs)
                     ) {

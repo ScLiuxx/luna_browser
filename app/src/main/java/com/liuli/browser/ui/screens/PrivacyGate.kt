@@ -1,9 +1,12 @@
 package com.liuli.browser.ui.screens
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,10 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.liuli.browser.ui.components.BrandOrb
 import com.liuli.browser.ui.components.GlassPillButton
@@ -48,10 +49,12 @@ import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.components.PrivacyPolicyDialog
 import com.liuli.browser.ui.liquid.pressScale
+import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
 import com.liuli.browser.ui.theme.Radius
+import com.liuli.browser.ui.theme.Space
 import com.liuli.browser.ui.theme.Type
 
 @Composable
@@ -66,7 +69,7 @@ fun PrivacyGate(
     LaunchedEffect(Unit) { entered = true }
     val progress by animateFloatAsState(
         targetValue = if (entered) 1f else 0f,
-        animationSpec = MotionSpec.value(Motion.Slow),
+        animationSpec = MotionSpec.value(Motion.Normal),
         label = "gate-entrance"
     )
 
@@ -104,65 +107,77 @@ fun PrivacyGate(
                         // 品牌球先落位，标题与副标题跟上。
                         BrandOrb(
                             size = 58.dp,
-                            modifier = Modifier.gateReveal(0, pop = true)
+                            modifier = Modifier.gateReveal(gateDelay(tier = 0, item = 0), pop = true)
                         )
-                        Spacer(Modifier.width(14.dp))
-                        Column {
+                        Spacer(Modifier.width(Space.md))
+                        Column(Modifier.weight(1f)) {
                             BasicText(
                                 text = "欢迎使用琉璃浏览器",
                                 style = Type.display.copy(color = colors.textPrimary),
-                                modifier = Modifier.gateReveal(1)
+                                modifier = Modifier.gateReveal(gateDelay(tier = 0, item = 1)),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Spacer(Modifier.height(3.dp))
                             BasicText(
                                 text = "液态玻璃设计 · Chromium 内核 · 一镜到底",
-                                style = Type.label.copy(color = colors.textTertiary),
-                                modifier = Modifier.gateReveal(2)
+                                style = Type.bodySmall.copy(color = colors.textTertiary),
+                                modifier = Modifier.gateReveal(gateDelay(tier = 0, item = 2)),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
 
-                    Spacer(Modifier.height(18.dp))
+                    Spacer(Modifier.height(Space.lg))
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        GateBadge("无广告", Glyph.Sparkle, 3)
-                        GateBadge("无账号", Glyph.Shield, 4)
-                        GateBadge("本地数据", Glyph.Lock, 5)
+                    // 徽标横排可能在大字号下超出宽度，可横向滚动比硬裁切好。
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(Space.sm)
+                    ) {
+                        GateBadge("无广告", Glyph.Sparkle, gateDelay(tier = 1, item = 0))
+                        GateBadge("无账号", Glyph.Shield, gateDelay(tier = 1, item = 1))
+                        GateBadge("本地数据", Glyph.Lock, gateDelay(tier = 1, item = 2))
                     }
 
-                    Spacer(Modifier.height(18.dp))
+                    Spacer(Modifier.height(Space.lg))
 
                     BasicText(
                         text = "在开始浏览前，请了解我们如何保护你的隐私：",
-                        style = TextStyle(color = colors.textSecondary, fontSize = 13.sp)
+                        style = Type.bodySmall.copy(color = colors.textSecondary),
+                        modifier = Modifier.gateReveal(gateDelay(tier = 2, item = 0))
                     )
-                    Spacer(Modifier.height(10.dp))
-                    GatePoint("不收集、不上传任何浏览数据", 0)
-                    GatePoint("仅申请联网权限", 1)
-                    GatePoint("网页的定位、相机、麦克风请求默认拒绝", 2)
-                    GatePoint("隐私护盾默认开启：拦截跟踪器与跟踪参数", 3)
-                    GatePoint("退出应用时自动清除 Cookie、缓存与历史", 4)
-                    GatePoint("书签与设置只保存在本机，可随时清除", 5)
+                    Spacer(Modifier.height(Space.sm))
+                    GatePoint("不收集、不上传任何浏览数据", gateDelay(tier = 2, item = 1))
+                    GatePoint("仅申请联网权限", gateDelay(tier = 2, item = 2))
+                    GatePoint("网页的定位、相机、麦克风请求默认拒绝", gateDelay(tier = 2, item = 3))
+                    GatePoint("隐私护盾默认开启：拦截跟踪器与跟踪参数", gateDelay(tier = 2, item = 4))
+                    GatePoint("退出应用时自动清除 Cookie、缓存与历史", gateDelay(tier = 2, item = 5))
+                    GatePoint("书签与设置只保存在本机，可随时清除", gateDelay(tier = 2, item = 6))
 
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(Space.lg))
 
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(14.dp))
+                            .gateReveal(gateDelay(tier = 3, item = 0))
+                            .clip(RoundedCornerShape(Radius.sm))
                             .background(colors.textPrimary.copy(alpha = 0.05f))
-                            .padding(horizontal = 12.dp, vertical = 9.dp)
+                            .padding(horizontal = Space.md, vertical = Space.sm)
                     ) {
                         BasicText(
                             text = "点击“同意并继续”即表示你已阅读并同意隐私说明",
-                            style = TextStyle(color = colors.textTertiary, fontSize = 10.sp)
+                            style = Type.caption.copy(color = colors.textTertiary)
                         )
                     }
 
-                    Spacer(Modifier.height(18.dp))
+                    Spacer(Modifier.height(Space.lg))
 
                     Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        Modifier
+                            .gateReveal(gateDelay(tier = 3, item = 1))
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Space.md),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         GlassPillButton(
@@ -181,29 +196,36 @@ fun PrivacyGate(
                         )
                     }
 
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(Space.sm))
 
+                    // "不同意并退出"是退路，不能和同意按钮一样重：
+                    // 文字降级，但按下时要有明确反馈，否则用户不知道点没点上。
+                    val declineInteraction = remember { MutableInteractionSource() }
+                    val declinePressed by declineInteraction.collectIsPressedAsState()
+                    val declineTint by animateColorAsState(
+                        targetValue = if (declinePressed) colors.textSecondary else colors.textTertiary,
+                        animationSpec = MotionSpec.color(Motion.Quick),
+                        label = "decline-tint"
+                    )
                     Box(
                         Modifier
+                            .gateReveal(gateDelay(tier = 3, item = 2))
                             .fillMaxWidth()
-                            .heightIn(min = 48.dp)
-                            .clip(RoundedCornerShape(50))
+                            .heightIn(min = Dimens.minTouch)
+                            .clip(RoundedCornerShape(Radius.pill))
                             .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
+                                interactionSource = declineInteraction,
                                 indication = null,
                                 role = Role.Button,
                                 onClickLabel = "不同意并退出",
                                 onClick = onDecline
                             )
-                            .pressScale(pressedScale = 0.94f),
+                            .pressScale(pressedScale = 0.94f, interactionSource = declineInteraction),
                         contentAlignment = Alignment.Center
                     ) {
                         BasicText(
                             text = "不同意并退出",
-                            style = TextStyle(
-                                color = colors.textTertiary,
-                                fontSize = 12.sp
-                            )
+                            style = Type.bodySmall.copy(color = declineTint)
                         )
                     }
                 }
@@ -215,23 +237,37 @@ fun PrivacyGate(
 }
 
 @Composable
-private fun GateBadge(label: String, glyph: Glyph, index: Int = 0) {
+private fun GateBadge(label: String, glyph: Glyph, delayMillis: Int) {
     val colors = LocalLiuliColors.current
     Row(
         Modifier
-            .gateReveal(index)
+            .gateReveal(delayMillis)
             .clip(RoundedCornerShape(Radius.pill))
             .background(colors.textPrimary.copy(alpha = 0.05f))
-            .padding(horizontal = 9.dp, vertical = 5.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(horizontal = Space.sm, vertical = Space.xs),
+        horizontalArrangement = Arrangement.spacedBy(Space.xs),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        GlyphIcon(glyph, colors.accent, size = 11.dp)
+        GlyphIcon(glyph, colors.accent, size = 12.dp)
         BasicText(
             text = label,
-            style = Type.micro.copy(color = colors.textSecondary)
+            style = Type.label.copy(color = colors.textSecondary)
         )
     }
+}
+
+/**
+ * 隐私门内的出场延迟。
+ *
+ * 分层是为了控制节奏：整块玻璃先落位，里面的元素再一层层浮现。
+ * 层与层之间留出固定间隔，层内逐条错开；
+ * "减少动态效果"开启时 staggerDelay 全部返回 0，整屏一次亮起。
+ */
+@Composable
+private fun gateDelay(tier: Int, item: Int): Int {
+    val tierDelay = MotionSpec.staggerDelay(tier, stepMillis = 150)
+    val itemDelay = MotionSpec.staggerDelay(item, stepMillis = 22)
+    return tierDelay + itemDelay
 }
 
 /**
@@ -241,11 +277,10 @@ private fun GateBadge(label: String, glyph: Glyph, index: Int = 0) {
  * 因为 [MotionSpec.staggerDelay] 是 @Composable，不能在协程里调用。
  */
 @Composable
-private fun Modifier.gateReveal(index: Int, pop: Boolean = false): Modifier {
-    val stagger = MotionSpec.staggerDelay(index, stepMillis = 40)
+private fun Modifier.gateReveal(delayMillis: Int, pop: Boolean = false): Modifier {
     var appeared by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (stagger > 0) kotlinx.coroutines.delay(stagger.toLong())
+        if (delayMillis > 0) kotlinx.coroutines.delay(delayMillis.toLong())
         appeared = true
     }
     val alpha by animateFloatAsState(
@@ -265,13 +300,12 @@ private fun Modifier.gateReveal(index: Int, pop: Boolean = false): Modifier {
 }
 
 @Composable
-private fun GatePoint(text: String, index: Int = 0) {
+private fun GatePoint(text: String, delayMillis: Int) {
     val colors = LocalLiuliColors.current
     // 隐私要点逐条浮现：六条同时亮起会让人抓不住重点。
-    val stagger = MotionSpec.staggerDelay(index, stepMillis = 22)
     var appeared by remember(text) { mutableStateOf(false) }
     LaunchedEffect(text) {
-        if (stagger > 0) kotlinx.coroutines.delay(stagger.toLong())
+        if (delayMillis > 0) kotlinx.coroutines.delay(delayMillis.toLong())
         appeared = true
     }
     val alpha by animateFloatAsState(
@@ -291,17 +325,17 @@ private fun GatePoint(text: String, index: Int = 0) {
     ) {
         Box(
             Modifier
-                .size(15.dp)
+                .size(18.dp)
                 .clip(CircleShape)
                 .background(colors.success.copy(alpha = 0.14f)),
             contentAlignment = Alignment.Center
         ) {
-            GlyphIcon(Glyph.Check, colors.success, size = 8.dp)
+            GlyphIcon(Glyph.Check, colors.success, size = 10.dp)
         }
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(Space.sm))
         BasicText(
             text = text,
-            style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+            style = Type.bodySmall.copy(color = colors.textSecondary)
         )
     }
 }
