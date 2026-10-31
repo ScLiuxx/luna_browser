@@ -110,6 +110,8 @@ data class CreationRequest(
                     input.contains("接地气") -> AgentTone.Casual
                 input.contains("详细") || input.contains("展开") || input.contains("长一点") ->
                     AgentTone.Detailed
+                // 未指定语气时，改写默认走书面化；否则改写只会原样返回，等于没改。
+                kind == AgentCreationKind.Rewrite -> AgentTone.Formal
                 else -> AgentTone.Neutral
             }
             val explicit = sequenceOf("改写：", "改写:", "润色：", "润色:", "原文：", "原文:")
@@ -254,7 +256,7 @@ object CreationEngine {
             kind = request.kind,
             title = title,
             body = body,
-            cardText = cardText(request, title, points),
+            cardText = cardText(request, title, points, body),
             sourceUrl = request.pageUrl,
             sourceTitle = request.pageTitle.trim().ifBlank { title },
             createdAt = System.currentTimeMillis(),
@@ -303,8 +305,8 @@ object CreationEngine {
             AgentTone.Concise -> concise(sentences)
             AgentTone.Formal -> formal(sentences)
             AgentTone.Casual -> casual(sentences)
-            AgentTone.Detailed -> detailed(sentences)
-            AgentTone.Neutral -> sentences
+            // 本机无法真正扩写，"详细"只表示保留原文全部句子。
+            AgentTone.Detailed, AgentTone.Neutral -> sentences
         }
         return rewritten.joinToString("\n\n") { it.trim() }
     }
@@ -354,10 +356,18 @@ object CreationEngine {
     private fun cardText(
         request: CreationRequest,
         title: String,
-        points: List<String>
+        points: List<String>,
+        body: String
     ): String {
-        val summary = points.firstOrNull()?.take(MAX_CARD_CHARS)
-            ?: request.pageTitle.trim().take(MAX_CARD_CHARS)
+        // 改写类用改写后的首句做摘要，其余类型取页面要点。
+        val summary = if (request.kind == AgentCreationKind.Rewrite) {
+            body.lineSequence()
+                .map { it.trim() }
+                .firstOrNull { it.isNotBlank() }
+                ?.take(MAX_CARD_CHARS)
+        } else {
+            points.firstOrNull()?.take(MAX_CARD_CHARS)
+        } ?: request.pageTitle.trim().take(MAX_CARD_CHARS)
         val host = hostOf(request.pageUrl) ?: return summary
         return "$summary —— $host"
     }
@@ -367,38 +377,37 @@ object CreationEngine {
     // ---------------------------------------------------------------------
 
     private fun concise(sentences: List<String>): List<String> {
-        val kept = sentences.take(MAX_SHORT_POINTS)
-        return kept.map { sentence ->
-            var text = sentence
-            FILLER_WORDS.forEach { text = text.replace(it, "") }
-            text.replace(WHITESPACE, " ").trim()
-        }.filter { it.isNotBlank() }
+        return sentences.take(MAX_SHORT_POINTS)
+            .map { stripFillers(it) }
+            .filter { it.isNotBlank() }
     }
 
     private fun formal(sentences: List<String>): List<String> {
-        return sentences.map { sentence ->
-            var text = sentence
-            TO_FORMAL.forEach { (from, to) -> text = text.replace(from, to) }
-            CASUAL_TAILS.forEach { tail -> text = text.replace("$tail ", " ") }
-            text.replace(WHITESPACE, " ").trim()
-        }.filter { it.isNotBlank() }
+        return sentences
+            .map { sentence ->
+                var text = stripFillers(sentence)
+                TO_FORMAL.forEach { (from, to) -> text = text.replace(from, to) }
+                CASUAL_TAILS.forEach { tail -> text = text.replace("$tail ", " ") }
+                text.replace(WHITESPACE, " ").trim()
+            }
+            .filter { it.isNotBlank() }
     }
 
     private fun casual(sentences: List<String>): List<String> {
-        return sentences.map { sentence ->
-            var text = sentence
-            TO_CASUAL.forEach { (from, to) -> text = text.replace(from, to) }
-            text.replace(WHITESPACE, " ").trim()
-        }.filter { it.isNotBlank() }
+        return sentences
+            .map { sentence ->
+                var text = sentence
+                TO_CASUAL.forEach { (from, to) -> text = text.replace(from, to) }
+                text.replace(WHITESPACE, " ").trim()
+            }
+            .filter { it.isNotBlank() }
     }
 
-    private fun detailed(sentences: List<String>): List<String> {
-        val lead = sentences.firstOrNull()?.take(MAX_POINT_CHARS)
-        val rest = sentences.drop(1)
-        return buildList {
-            lead?.let { add(it.trim()) }
-            addAll(rest)
-        }.filter { it.isNotBlank() }
+    /** 先删冗词再换词，否则"然后就是"会被替换成"随后就是"而无法整体删除。 */
+    private fun stripFillers(sentence: String): String {
+        var text = sentence
+        FILLER_WORDS.forEach { text = text.replace(it, "") }
+        return text.replace(WHITESPACE, " ").trim()
     }
 
     // ---------------------------------------------------------------------
@@ -553,7 +562,7 @@ object CreationEngine {
         return out.toString()
     }
 
-    private const val HTML_STYLE = """
+    private val HTML_STYLE = """
         :root { color-scheme: light dark; }
         body { margin: 0; padding: 24px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans CJK SC", sans-serif; line-height: 1.8; color: #1d1d1f; background: #f7f7fa; }
         main { max-width: 720px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 28px 30px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06); }

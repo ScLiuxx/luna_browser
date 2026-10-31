@@ -23,7 +23,6 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
-import android.webkit.ReferrerPolicy
 import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
@@ -930,9 +929,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             setSupportMultipleWindows(true)
             allowFileAccess = false
             allowContentAccess = false
-            // Prevent the page from leaking the full URL (with tracking params)
-            // or the current site in the Referer header of cross-origin requests.
-            referrerPolicy = ReferrerPolicy.NO_REFERRER
             @Suppress("DEPRECATION")
             setPluginState(WebSettings.PluginState.OFF)
             @Suppress("DEPRECATION")
@@ -1010,6 +1006,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             // never mixes with regular browsing.
             if (tab.isPrivate) {
                 PrivacyGuard.installPrivate(view)
+            }
+            // 隐私护盾开启时声明 no-referrer，避免页面把当前站点与完整 URL
+            // 通过 Referer 头泄露给第三方。
+            if (privacyShieldActive) {
+                PrivacyGuard.installReferrerPolicy(view)
             }
             if (url != null && url != tab.url) tab.blockedTrackers = 0
             tab.url = url ?: tab.url

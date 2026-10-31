@@ -1080,6 +1080,9 @@ private fun CreationCard(
             ActionButton("HTML", accent = false) {
                 onExport(AgentCreationFormat.Html)
             }
+            ActionButton("纯文本", accent = false) {
+                onExport(AgentCreationFormat.Text)
+            }
             ActionButton("分享", accent = false) { onShare() }
             ActionButton("卡片", accent = false) { onShareCard() }
             ActionButton("收起", accent = false, onClick = onDismiss)

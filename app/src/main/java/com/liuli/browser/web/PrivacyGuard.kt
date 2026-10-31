@@ -12,7 +12,7 @@ object PrivacyGuard {
     const val INSTALL_FLAG = "__liuliFingerprintGuard"
     const val PRIVATE_FLAG = "__liuliPrivateGuard"
 
-    private const val SCRIPT = """
+    private val SCRIPT = """
         (function () {
           if (window.__liuliFingerprintGuard) { return; }
           window.__liuliFingerprintGuard = true;
@@ -445,7 +445,7 @@ object PrivacyGuard {
      * 隐私标签的存储隔离：阻止 localStorage / sessionStorage / IndexedDB /
      * Cache / Service Worker 等任何持久化，避免隐私浏览与普通浏览交叉污染。
      */
-    private const val PRIVATE_SCRIPT = """
+    private val PRIVATE_SCRIPT = """
         (function () {
           if (window.__liuliPrivateGuard) { return; }
           window.__liuliPrivateGuard = true;
@@ -498,11 +498,39 @@ object PrivacyGuard {
         })()
     """.trimIndent()
 
+    /**
+     * 按 W3C Referrer Policy 规范声明 no-referrer：
+     * 页面自身发出的请求不再携带 Referer 头，避免泄露当前站点与完整 URL。
+     */
+    private val REFERRER_SCRIPT = """
+        (function () {
+          try {
+            var head = document.head || document.documentElement;
+            if (!head) { return; }
+            var existing = document.querySelector('meta[name="referrer"]');
+            if (existing) { return; }
+            var meta = document.createElement('meta');
+            meta.setAttribute('name', 'referrer');
+            meta.setAttribute('content', 'no-referrer');
+            head.insertBefore(meta, head.firstChild);
+          } catch (e) {}
+        })()
+    """.trimIndent()
+
     fun install(webView: WebView) {
         webView.evaluateJavascript(SCRIPT, null)
     }
 
     fun installPrivate(webView: WebView) {
         webView.evaluateJavascript(PRIVATE_SCRIPT, null)
+    }
+
+    /**
+     * 抑制 Referer 头。Android 没有提供 ReferrerPolicy 设置项，
+     * 只能按 W3C 规范插入 `<meta name="referrer">` 让页面自己声明策略；
+     * 页面若自带策略，以页面自身的为准。
+     */
+    fun installReferrerPolicy(webView: WebView) {
+        webView.evaluateJavascript(REFERRER_SCRIPT, null)
     }
 }

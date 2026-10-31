@@ -34,11 +34,7 @@
 - Android SDK Platform 37、Build-Tools 37.0.0
 - Gradle 9.7.1
 
-> 仓库未提交二进制文件 `gradle/wrapper/gradle-wrapper.jar`。首次克隆后请先执行
-> `gradle wrapper --gradle-version 9.7.1` 生成 Wrapper，或直接使用已安装的 Gradle 9.7.1 构建。
-
 ```bash
-gradle wrapper --gradle-version 9.7.1
 ./gradlew :app:assembleDebug
 ```
 
@@ -78,6 +74,7 @@ app/src/main/java/com/liuli/browser
 - 仅申请 `INTERNET` 权限，不申请存储、定位、相机、麦克风、通讯录等权限。
 - 网页的定位/相机/麦克风请求默认拒绝。
 - 默认阻止第三方 Cookie，禁用自动填充与文件访问。
+- 隐私护盾开启时声明 `no-referrer`，避免把当前站点与完整 URL 通过 Referer 头泄露给第三方。
 - 退出应用时默认清除 Cookie、缓存、历史、站点存储与标签会话（书签保留）。
 - 所有拦截与过滤在本机完成，不上传访问记录或设备标识。
 
