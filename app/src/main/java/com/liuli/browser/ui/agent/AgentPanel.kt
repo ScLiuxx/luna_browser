@@ -191,6 +191,7 @@ fun AgentPanel(
     val colors = LocalLiuliColors.current
     var input by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     // 已经演过入场动画的消息：滚出去再回来不重播。
@@ -496,6 +497,14 @@ fun AgentPanel(
                         .weight(1f)
                         .fillMaxWidth()
                 ) {
+                    // 空面板用占位页填满，否则只是一片空白，看不出这里能做什么。
+                    if (emptyPanel) {
+                        EmptyState(
+                            tabTitle = tabTitle,
+                            modifier = Modifier
+                                .fillMaxSize()
+                        )
+                    }
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
@@ -627,6 +636,61 @@ fun AgentPanel(
                         }
                         if (agent.busy) {
                             item(key = "thinking") { ThinkingRow() }
+                        }
+                    }
+                    // 往上翻阅旧回答时，右下角浮出"回到最新"：
+                    // 没有它，用户只能一直往下拖才知道有新消息来了。
+                    val showJumpToLatest by remember {
+                        derivedStateOf {
+                            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()
+                            last != null && last.index < contentItems - 1
+                        }
+                    }
+                    AnimatedVisibility(
+                        visible = showJumpToLatest && !emptyPanel,
+                        enter = fadeIn(MotionSpec.enter(Motion.Quick)) + scaleIn(
+                            animationSpec = MotionSpec.enter(Motion.Quick),
+                            initialScale = 0.7f
+                        ),
+                        exit = fadeOut(MotionSpec.exit(Motion.Quick)) + scaleOut(
+                            animationSpec = MotionSpec.exit(Motion.Quick),
+                            targetScale = 0.7f
+                        ),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = Space.md, bottom = Space.sm)
+                    ) {
+                        val jumpInteraction = remember { MutableInteractionSource() }
+                        Box(
+                            Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (colors.isDark) {
+                                        Color(0xFF1B2130)
+                                    } else {
+                                        Color.White.copy(alpha = 0.92f)
+                                    }
+                                )
+                                .semantics {
+                                    contentDescription = "回到最新"
+                                    role = Role.Button
+                                }
+                                .clickable(
+                                    interactionSource = jumpInteraction,
+                                    indication = null,
+                                    role = Role.Button,
+                                    onClickLabel = "回到最新",
+                                    onClick = {
+                                        scope.launch {
+                                            listState.animateScrollToItem(contentItems)
+                                        }
+                                    }
+                                )
+                                .pressScale(pressedScale = 0.86f, interactionSource = jumpInteraction),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            GlyphIcon(Glyph.ChevronDown, colors.textSecondary, size = 18.dp)
                         }
                     }
                 }

@@ -1,5 +1,6 @@
 package com.liuli.browser.ui.liquid
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -46,6 +48,7 @@ import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.MotionSpec
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -192,11 +195,28 @@ fun LiquidIconButton(
     val interactiveHighlight = remember(animationScope) {
         InteractiveHighlight(animationScope = animationScope)
     }
-    val tint = if (selected) {
-        colors.accent.copy(alpha = if (colors.isDark) 0.30f else 0.20f)
-    } else {
-        colors.glassTint.copy(alpha = if (colors.isDark) 0.42f else 0.50f)
-    }
+    // 选中态的颜色用插值过渡，而不是啪地换色：
+    // 工具栏按钮被选中时，玻璃底色与图标一起渐变过去。
+    val tint by animateColorAsState(
+        targetValue = if (selected) {
+            colors.accent.copy(alpha = if (colors.isDark) 0.30f else 0.20f)
+        } else {
+            colors.glassTint.copy(alpha = if (colors.isDark) 0.42f else 0.50f)
+        },
+        animationSpec = MotionSpec.color(),
+        label = "liquid-icon-button-tint"
+    )
+    val glyphTint by animateColorAsState(
+        targetValue = if (selected) {
+            colors.accent
+        } else if (enabled) {
+            colors.textPrimary
+        } else {
+            colors.textTertiary.copy(alpha = 0.4f)
+        },
+        animationSpec = MotionSpec.color(),
+        label = "liquid-icon-button-glyph-tint"
+    )
     val interaction = remember { MutableInteractionSource() }
 
     Box(
@@ -268,7 +288,7 @@ fun LiquidIconButton(
     ) {
         GlyphIcon(
             glyph = glyph,
-            tint = if (selected) colors.accent else if (enabled) colors.textPrimary else colors.textTertiary.copy(alpha = 0.4f),
+            tint = glyphTint,
             size = glyphSize
         )
     }

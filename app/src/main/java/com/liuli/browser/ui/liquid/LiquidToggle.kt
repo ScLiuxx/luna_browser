@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -46,6 +47,7 @@ import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.reduceMotion
 import kotlinx.coroutines.flow.collectLatest
 
 /**
@@ -68,6 +70,9 @@ fun LiquidToggle(
     val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
     val dragWidth = with(density) { 20f.dp.toPx() }
     val animationScope = rememberCoroutineScope()
+    // "减弱动态效果"时不再用弹簧回弹，拇指直接落位。
+    // 用 rememberUpdatedState 包裹：开关本身可以热切换，回调里要读到最新值。
+    val reduced = rememberUpdatedState(reduceMotion)
     // 状态切换时给一次轻触反馈：液态形变看得见，震动摸得着。
     val haptics = LocalHapticFeedback.current
     var didDrag by remember { mutableStateOf(false) }
@@ -125,7 +130,12 @@ fun LiquidToggle(
             // 否则两者会互相打断，拇指出现抖动。
             // targetValue 与 fraction 一致说明拖拽自己已经同步过了，跳过。
             if (!didDrag && current != dampedDragAnimation.targetValue) {
-                dampedDragAnimation.updateValue(current)
+                if (reduced.value) {
+                    // 减弱动效：直接落位，不做弹簧回弹。
+                    dampedDragAnimation.snapValue(current)
+                } else {
+                    dampedDragAnimation.updateValue(current)
+                }
             }
         }
     }
@@ -134,7 +144,11 @@ fun LiquidToggle(
             val target = if (isSelected) 1f else 0f
             if (target != fraction) {
                 fraction = target
-                dampedDragAnimation.animateToValue(target)
+                if (reduced.value) {
+                    dampedDragAnimation.snapValue(target)
+                } else {
+                    dampedDragAnimation.animateToValue(target)
+                }
             }
         }
     }

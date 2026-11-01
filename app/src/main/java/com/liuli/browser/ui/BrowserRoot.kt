@@ -16,8 +16,6 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -182,8 +180,11 @@ private fun screenTransition(
     // 网页与首页之间靠共享元素承接，这里只做轻微缩放，避免抢戏。
     val enterScale = if (to == ScreenLayer.Content) 0.985f else 1f
     val exitScale = if (from == ScreenLayer.Content) 1.015f else 1f
-    return (fadeIn(MotionSpec.enter(reduced)) + scaleIn(initialScale = enterScale)) togetherWith
-        (fadeOut(MotionSpec.exit(reduced)) + scaleOut(targetScale = exitScale))
+    // 缩放也要走 MotionSpec：默认的 spring 会绕开"减弱动效"开关。
+    return (fadeIn(MotionSpec.enter(reduced)) +
+        scaleIn(animationSpec = MotionSpec.pageSpring(reduced), initialScale = enterScale)) togetherWith
+        (fadeOut(MotionSpec.exit(reduced)) +
+            scaleOut(animationSpec = MotionSpec.pageSpring(reduced), targetScale = exitScale))
 }
 
 private val RailItems = listOf(

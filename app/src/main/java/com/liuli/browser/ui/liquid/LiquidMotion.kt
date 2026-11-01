@@ -25,6 +25,7 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.util.fastCoerceIn
 import androidx.compose.ui.util.fastFirstOrNull
@@ -140,19 +141,37 @@ class DampedDragAnimation(
     val valueDampingRatio: Float = 1f,
     /** 数值动画的刚度。 */
     val valueStiffness: Float = 1000f,
+    /**
+     * 是否响应系统的"减少动态效果"。
+     * 开启后弹簧不过冲、收得更快，液滴不再有甩出去的过冲感。
+     */
+    val reducedMotion: Boolean = false,
     val onDragStarted: DampedDragAnimation.(position: Offset) -> Unit,
     val onDragStopped: DampedDragAnimation.() -> Unit,
     val onDrag: DampedDragAnimation.(size: IntSize, dragAmount: Offset) -> Unit,
 ) {
-    private val valueAnimationSpec = spring(
-        dampingRatio = valueDampingRatio,
-        stiffness = valueStiffness,
-        visibilityThreshold = visibilityThreshold
-    )
+    private val valueAnimationSpec = if (reducedMotion) {
+        // 减少动态效果：临界阻尼 + 高刚度，快而稳，不产生过冲。
+        spring(dampingRatio = 1f, stiffness = 2000f, visibilityThreshold = visibilityThreshold)
+    } else {
+        spring(
+            dampingRatio = valueDampingRatio,
+            stiffness = valueStiffness,
+            visibilityThreshold = visibilityThreshold
+        )
+    }
     private val velocityAnimationSpec = spring(0.5f, 300f, visibilityThreshold * 10f)
     private val pressProgressAnimationSpec = spring(1f, 1000f, 0.001f)
-    private val scaleXAnimationSpec = spring(0.6f, 250f, 0.001f)
-    private val scaleYAnimationSpec = spring(0.7f, 250f, 0.001f)
+    private val scaleXAnimationSpec = if (reducedMotion) {
+        spring(1f, 800f, 0.001f)
+    } else {
+        spring(0.6f, 250f, 0.001f)
+    }
+    private val scaleYAnimationSpec = if (reducedMotion) {
+        spring(1f, 800f, 0.001f)
+    } else {
+        spring(0.7f, 250f, 0.001f)
+    }
 
     private val valueAnimation = Animatable(initialValue, visibilityThreshold)
     private val velocityAnimation = Animatable(0f, 5f)
@@ -162,6 +181,16 @@ class DampedDragAnimation(
 
     private val mutatorMutex = MutatorMutex()
     private val velocityTracker = VelocityTracker()
+    // 手指速度单独跟踪：数值动画的速度说的是"自己动得多快"，
+    // 甩动手感需要的是"手指甩得多快"，两者不是一回事。
+    private val pointerVelocityTracker = VelocityTracker()
+
+    /**
+     * 最近一次拖拽中手指的横向速度（像素/秒）。
+     * 调用方按自己的单位换算（例如除以标签宽度得到"标签/秒"）。
+     */
+    var pointerVelocity: Float = 0f
+        private set
 
     val value: Float get() = valueAnimation.value
     val progress: Float
@@ -175,6 +204,9 @@ class DampedDragAnimation(
     val modifier: Modifier = Modifier.pointerInput(Unit) {
         inspectDragGestures(
             onDragStart = { down ->
+                pointerVelocityTracker.resetTracking()
+                pointerVelocityTracker.addPointerInputChange(down)
+                pointerVelocity = 0f
                 onDragStarted(down.position)
                 press()
             },
@@ -187,6 +219,8 @@ class DampedDragAnimation(
                 release()
             }
         ) { change, dragAmount ->
+            pointerVelocityTracker.addPointerInputChange(change)
+            pointerVelocity = pointerVelocityTracker.calculateVelocity().x
             onDrag(size, dragAmount)
         }
     }
@@ -233,12 +267,29 @@ class DampedDragAnimation(
         }
     }
 
-    fun animateToValue(value: Float) {
+    /**
+     * 上报拖拽速度（value 单位/秒）。
+     * 液滴据此在运动方向上拉伸，停手后自然回弹。
+     */
+    fun reportDragVelocity(dragVelocity: Float) {
+        animationScope.launch {
+            velocityAnimation.animateTo(dragVelocity, velocityAnimationSpec)
+        }
+    }
+
+    /**
+     * 弹到目标值。
+     * [initialVelocity] 用于甩动：松手时把手指的速度交给弹簧，
+     * 液滴会带着惯性继续走，狠甩比轻推落得更远。
+     */
+    fun animateToValue(value: Float, initialVelocity: Float = 0f) {
         animationScope.launch {
             mutatorMutex.mutate {
                 press()
                 val targetValue = value.coerceIn(valueRange)
-                launch { valueAnimation.animateTo(targetValue, valueAnimationSpec) }
+                launch {
+                    valueAnimation.animateTo(targetValue, valueAnimationSpec, initialVelocity)
+                }
                 if (velocity != 0f) {
                     launch { velocityAnimation.animateTo(0f, velocityAnimationSpec) }
                 }

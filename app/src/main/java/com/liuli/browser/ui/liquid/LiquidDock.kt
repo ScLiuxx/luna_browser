@@ -26,10 +26,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -73,11 +73,29 @@ import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
+import com.liuli.browser.ui.theme.reduceMotion
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.sign
 
 internal val LocalLiquidBottomTabScale = staticCompositionLocalOf { { 1f } }
+
+/**
+ * 甩动预测时长（秒）。
+ * 松手时按这段时间外推手指位移来决定液滴落点：
+ * 轻推只补齐最后一点位移，狠甩能跨过一格。
+ */
+private const val FLING_PROJECTION_SECONDS = 0.1f
+
+/** 甩动速度上限（标签/秒）：防止一次猛甩把液滴甩出屏幕。 */
+private const val MAX_FLING_VELOCITY = 4f
+
+/**
+ * 液滴能被拽出边缘的最大距离（dp）。
+ * 用固定距离而不是标签宽度的比例：平板上标签更宽，
+ * 按比例算会甩出去一大截。
+ */
+private const val OVERSCROLL_DP = 12f
 
 @Composable
 fun RowScope.LiquidBottomTab(
@@ -137,6 +155,9 @@ fun LiquidDock(
     val accentColor = colors.accent
     val containerColor = colors.dockTint
     val tabsBackdrop = rememberLayerBackdrop()
+    // 减少动态效果：液滴不再过冲，回位更快。
+    val reduced = reduceMotion
+    val glideSpec = MotionSpec.glideSpring()
 
     BoxWithConstraints(
         modifier,
@@ -144,7 +165,13 @@ fun LiquidDock(
     ) {
         val density = LocalDensity.current
         val tabWidth = with(density) {
-            (constraints.maxWidth.toFloat() - 8.dp.toPx()) / items.size
+            (constraints.maxWidth.toFloat() - 8.dp.toPx()) / items.size.coerceAtLeast(1)
+        }
+        val lastIndex = (items.size - 1).coerceAtLeast(0)
+        val maxValue = lastIndex.toFloat()
+        // 越界的余量：换算成标签单位，值域两端各留一点。
+        val overscrollValue = with(density) {
+            if (tabWidth > 0f) OVERSCROLL_DP.dp.toPx() / tabWidth else 0f
         }
 
         val offsetAnimation = remember { Animatable(0f) }
@@ -161,42 +188,82 @@ fun LiquidDock(
         val animationScope = rememberCoroutineScope()
         // 切换标签时给一次轻触反馈，与液滴甩动同步。
         val haptics = LocalHapticFeedback.current
-        var currentIndex by remember(selectedIndex) { mutableIntStateOf(selectedIndex) }
-        val dampedDragAnimation = remember(animationScope) {
+        // 当前选中项用稳定的状态对象持有：
+        // 若跟着 selectedIndex 重建，remember 里捕获的回调会一直读到旧值。
+        val currentIndexState = remember { mutableIntStateOf(selectedIndex) }
+        val currentIndex = currentIndexState.value
+        // 手指真正走过的位置（标签单位）。
+        // 必须自己累加：边界处 value 会被夹住，靠它累加液滴到头就"卡死"了。
+        val dragPositionState = remember { mutableFloatStateOf(selectedIndex.toFloat()) }
+        // 最近一次给过轻触反馈的标签序号：
+        // 跨过分界才震一下，同一个标签内来回蹭不会连着震。
+        val hapticIndexState = remember { mutableIntStateOf(selectedIndex) }
+
+        // reduced 参与 key：系统"减少动态效果"开关变了要重建，
+        // 否则液滴还会用旧的弹簧曲线。
+        val dampedDragAnimation = remember(animationScope, reduced) {
             DampedDragAnimation(
                 animationScope = animationScope,
                 initialValue = selectedIndex.toFloat(),
-                valueRange = 0f..(items.size - 1).toFloat(),
+                // 值域两端各留一点余量：越界时液滴能被拽出去一点，
+                // 松手再弹回来，而不是硬邦邦地卡在边界上。
+                valueRange = -overscrollValue..(maxValue + overscrollValue),
                 visibilityThreshold = 0.001f,
                 initialScale = 1f,
                 pressedScale = 78f / 56f,
                 // 液滴甩到目标位置时允许轻微过冲，而不是直落到位。
                 valueDampingRatio = 0.62f,
                 valueStiffness = 700f,
-                onDragStarted = {},
+                reducedMotion = reduced,
+                onDragStarted = {
+                    // 抓住液滴时从它当前所在的位置接着走，避免跳一下。
+                    dragPositionState.floatValue = value
+                },
                 onDragStopped = {
-                    val targetIndex = targetValue.fastRoundToInt().fastCoerceIn(0, items.lastIndex)
-                    currentIndex = targetIndex
-                    animateToValue(targetIndex.toFloat())
+                    // 甩动速度换算成"标签/秒"，用它预测落点：
+                    // 轻推补齐最后一点位移，狠甩能跨过一格。
+                    val flingVelocity = (pointerVelocity / tabWidth * if (isLtr) 1f else -1f)
+                        .fastCoerceIn(-MAX_FLING_VELOCITY, MAX_FLING_VELOCITY)
+                    val projected =
+                        dragPositionState.floatValue + flingVelocity * FLING_PROJECTION_SECONDS
+                    val targetIndex = projected.fastRoundToInt().fastCoerceIn(0, lastIndex)
+                    val changed = targetIndex != currentIndexState.value
+                    currentIndexState.value = targetIndex
+                    dragPositionState.floatValue = targetIndex.toFloat()
+                    // 带着甩动的惯性落位：弹簧从当前速度继续走，
+                    // 到位时自然过冲一下再稳住。
+                    animateToValue(targetIndex.toFloat(), flingVelocity)
                     animationScope.launch {
-                        offsetAnimation.animateTo(0f, Motion.GlideSpring.spring(0.5f))
+                        offsetAnimation.animateTo(0f, glideSpec)
                     }
-                    onSelected(targetIndex)
+                    // 落回原来的标签就不必通知外部，避免无谓的跳转。
+                    if (changed) {
+                        onSelected(targetIndex)
+                    }
                 },
                 onDrag = { _, dragAmount ->
                     // 液滴必须 1:1 跟手：弹簧会让它落后于手指半拍，
                     // 拖起来"粘滞"，液态感全无。这里直接落位，
                     // 松手后再由 onDragStopped 的过冲弹簧接管。
-                    val raw = targetValue + dragAmount.x / tabWidth * if (isLtr) 1f else -1f
+                    val raw =
+                        dragPositionState.floatValue + dragAmount.x / tabWidth * if (isLtr) 1f else -1f
+                    dragPositionState.floatValue = raw
                     // 越界时给阻尼：拖到头还能继续拽，但明显变沉，
                     // 告诉用户"到边了"，而不是硬邦邦地卡住。
-                    val max = (items.size - 1).toFloat()
                     val next = when {
                         raw < 0f -> raw * 0.35f
-                        raw > max -> max + (raw - max) * 0.35f
+                        raw > maxValue -> maxValue + (raw - maxValue) * 0.35f
                         else -> raw
-                    }.fastCoerceIn(0f, max)
+                    }.fastCoerceIn(-overscrollValue, maxValue + overscrollValue)
                     snapValue(next)
+                    // 甩动速度：液滴沿运动方向的拉伸要用它。
+                    reportDragVelocity(pointerVelocity / tabWidth * if (isLtr) 1f else -1f)
+                    // 跨过标签分界时给一次轻触：拖动过程中能感知到自己滑过了几个。
+                    val crossed = raw.fastRoundToInt().fastCoerceIn(0, lastIndex)
+                    if (crossed != hapticIndexState.value) {
+                        hapticIndexState.value = crossed
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    }
                     animationScope.launch {
                         offsetAnimation.snapTo(offsetAnimation.value + dragAmount.x)
                     }
@@ -204,8 +271,13 @@ fun LiquidDock(
             )
         }
         LaunchedEffect(selectedIndex, dampedDragAnimation) {
-            currentIndex = selectedIndex
-            dampedDragAnimation.animateToValue(selectedIndex.toFloat())
+            currentIndexState.value = selectedIndex
+            dragPositionState.floatValue = selectedIndex.toFloat()
+            hapticIndexState.value = selectedIndex
+            // 已经在位就不必再弹一次，否则每次重组液滴都会"闪"一下。
+            if (dampedDragAnimation.targetValue != selectedIndex.toFloat()) {
+                dampedDragAnimation.animateToValue(selectedIndex.toFloat())
+            }
         }
 
         val interactiveHighlight = remember(animationScope) {
@@ -250,7 +322,9 @@ fun LiquidDock(
                 if (index != currentIndex) {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 }
-                currentIndex = index
+                currentIndexState.value = index
+                dragPositionState.floatValue = index.toFloat()
+                hapticIndexState.value = index
                 dampedDragAnimation.animateToValue(index.toFloat())
                 onSelected(index)
             })
@@ -330,9 +404,12 @@ fun LiquidDock(
                     layerBlock = {
                         scaleX = dampedDragAnimation.scaleX
                         scaleY = dampedDragAnimation.scaleY
-                        val velocity = dampedDragAnimation.velocity / 10f
-                        scaleX /= 1f - (velocity * 0.75f).fastCoerceIn(-0.2f, 0.2f)
-                        scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
+                        // 甩动时沿运动方向把液滴"抻长"：被拖着走时形变，
+                        // 停手后弹回原状。取绝对值，左右两个方向的手感才对称。
+                        val stretch = (abs(dampedDragAnimation.velocity) / 10f * 0.75f)
+                            .fastCoerceIn(0f, 0.2f)
+                        scaleX *= 1f + stretch
+                        scaleY *= 1f - stretch * 0.34f
                     },
                     onDrawSurface = {
                         val progress = dampedDragAnimation.pressProgress
@@ -407,16 +484,16 @@ private fun RowScope.DockItems(
                             .background(colors.accent),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (tabCount > 0) {
-                            BasicText(
-                                text = tabCount.coerceAtMost(99).toString(),
-                                style = TextStyle(
-                                    color = Color.White,
-                                    fontSize = 7.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                        // 数字常驻：清零时容器缩到 0，文字跟着消失，
+                        // 不用硬切，角标不会"啪"地闪一下。
+                        BasicText(
+                            text = tabCount.coerceAtMost(99).toString(),
+                            style = TextStyle(
+                                color = Color.White,
+                                fontSize = 7.sp,
+                                fontWeight = FontWeight.Bold
                             )
-                        }
+                        )
                     }
                 }
             }

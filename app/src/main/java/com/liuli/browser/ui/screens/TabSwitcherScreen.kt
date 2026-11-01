@@ -1,12 +1,18 @@
 package com.liuli.browser.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -60,6 +66,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.LayerBackdrop
@@ -102,6 +109,10 @@ fun TabSwitcherScreen(
     val columns = if (isTablet) 3 else 2
     // 已经演过入场动画的标签：滚动出去再回来不重播。
     val revealedIds = remember { mutableStateListOf<Long>() }
+    // 网格重排（当前标签置顶、关闭后回填）时的位移曲线：
+    // 用弹性而不是瞬移，卡片是"滑"过去的，不是闪一下。
+    val placementSpec = MotionSpec.pageSpring(IntOffset.VisibilityThreshold)
+    val haptics = LocalHapticFeedback.current
 
     BackHandler(onBack = onDismiss)
 
@@ -128,7 +139,11 @@ fun TabSwitcherScreen(
                     )
                     Spacer(Modifier.height(Space.xxs))
                     BasicText(
-                        text = "${tabs.size} 个标签 · 轻触切换",
+                        text = if (tabs.isEmpty()) {
+                            "还没有打开的标签页"
+                        } else {
+                            "${tabs.size} 个标签 · 轻触切换"
+                        },
                         style = Type.label.copy(color = colors.textTertiary)
                     )
                 }
@@ -153,40 +168,72 @@ fun TabSwitcherScreen(
 
             Spacer(Modifier.height(Space.lg))
 
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(columns),
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(
-                    start = if (isTablet) Space.xl else Space.lg,
-                    end = if (isTablet) Space.xl else Space.lg,
-                    top = Space.xs,
-                    bottom = bottomSpace + Space.xl
-                ),
-                horizontalArrangement = Arrangement.spacedBy(Space.md),
-                verticalArrangement = Arrangement.spacedBy(Space.md)
+            Box(
+                Modifier.weight(1f).fillMaxWidth(),
+                contentAlignment = Alignment.Center
             ) {
-                itemsIndexed(ordered, key = { _, tab -> tab.id }) { index, tab ->
-                    // 逐张浮现：错峰延迟由 MotionSpec 统一给出，已演过的标签不重播。
-                    val stagger = MotionSpec.staggerDelay(index)
-                    var revealed by remember(tab.id) {
-                        mutableStateOf(tab.id in revealedIds)
-                    }
-                    LaunchedEffect(tab.id) {
-                        if (!revealed) {
-                            delay(stagger.toLong())
-                            revealed = true
-                            if (tab.id !in revealedIds) revealedIds.add(tab.id)
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(columns),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = if (isTablet) Space.xl else Space.lg,
+                        end = if (isTablet) Space.xl else Space.lg,
+                        top = Space.xs,
+                        bottom = bottomSpace + Space.xl
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(Space.md),
+                    verticalArrangement = Arrangement.spacedBy(Space.md)
+                ) {
+                    itemsIndexed(ordered, key = { _, tab -> tab.id }) { index, tab ->
+                        // 逐张浮现：错峰延迟由 MotionSpec 统一给出，已演过的标签不重播。
+                        val stagger = MotionSpec.staggerDelay(index)
+                        var revealed by remember(tab.id) {
+                            mutableStateOf(tab.id in revealedIds)
                         }
+                        LaunchedEffect(tab.id) {
+                            if (!revealed) {
+                                delay(stagger.toLong())
+                                revealed = true
+                                if (tab.id !in revealedIds) revealedIds.add(tab.id)
+                            }
+                        }
+                        TabCard(
+                            tab = tab,
+                            // 当前标签置顶、关闭标签后其余卡片回填时，
+                            // 用位移动画过渡；淡入淡出交给上面的错峰逻辑，
+                            // 两套动画不要互相打架。
+                            modifier = Modifier.animateItem(
+                                fadeInSpec = null,
+                                placementSpec = placementSpec,
+                                fadeOutSpec = null
+                            ),
+                            revealed = revealed,
+                            isActive = tab.id == activeId,
+                            sharedScope = sharedScope,
+                            animatedScope = animatedScope,
+                            onOpen = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelectTab(tab)
+                            },
+                            onClose = { onCloseTab(tab.id) }
+                        )
                     }
-                    TabCard(
-                        tab = tab,
-                        revealed = revealed,
-                        isActive = tab.id == activeId,
-                        sharedScope = sharedScope,
-                        animatedScope = animatedScope,
-                        onOpen = { onSelectTab(tab) },
-                        onClose = { onCloseTab(tab.id) }
+                }
+
+                // 空状态：没有标签页时也要有内容，并带入场动画，
+                // 否则网格空白一片，用户会以为界面卡住了。
+                AnimatedVisibility(
+                    visible = tabs.isEmpty(),
+                    enter = fadeIn(MotionSpec.enter()) + scaleIn(
+                        MotionSpec.pageSpring(),
+                        initialScale = 0.92f
+                    ),
+                    exit = fadeOut(MotionSpec.exit()) + scaleOut(
+                        MotionSpec.exit(),
+                        targetScale = 0.96f
                     )
+                ) {
+                    EmptyTabState()
                 }
             }
 
@@ -221,6 +268,7 @@ fun TabSwitcherScreen(
 @Composable
 private fun TabCard(
     tab: BrowserTab,
+    modifier: Modifier = Modifier,
     revealed: Boolean,
     isActive: Boolean,
     sharedScope: SharedTransitionScope,
@@ -230,6 +278,9 @@ private fun TabCard(
 ) {
     val colors = LocalLiuliColors.current
     var closing by remember(tab.id) { mutableStateOf(false) }
+    // 关闭按钮触发过之后，本次手势不再打开这张卡片：
+    // "关掉它"和"切到它"必须是两件独立的事。
+    var closeTriggered by remember(tab.id) { mutableStateOf(false) }
 
     // 动效规格先在组合作用域里取好：动画参数位不是 @Composable 上下文。
     val enterFadeSpec = MotionSpec.enter()
@@ -287,7 +338,7 @@ private fun TabCard(
     val haptics = LocalHapticFeedback.current
 
     Box(
-        Modifier
+        modifier
             .fillMaxWidth()
             .aspectRatio(0.70f)
             // 按压回弹放在最外层，整张卡片（含背景与共享快照）一起缩小。
@@ -309,7 +360,10 @@ private fun TabCard(
                 interactionSource = cardInteraction,
                 indication = null,
                 role = Role.Button,
-                onClick = onOpen
+                onClick = {
+                    // 关闭按钮按过就不该再打开这张卡片。
+                    if (!closeTriggered) onOpen()
+                }
             )
     ) {
         val snapshot = tab.snapshot
@@ -383,7 +437,19 @@ private fun TabCard(
                     tint = colors.accentSecondary
                 )
             }
-            if (isActive) {
+            // "当前"标记用进场动画切换：活动标签变化时标记是"长"进去的，
+            // 而不是啪地一下出现，旁边的隐私标记也会顺势让位。
+            AnimatedVisibility(
+                visible = isActive,
+                enter = fadeIn(MotionSpec.enter()) + scaleIn(
+                    MotionSpec.pageSpring(),
+                    initialScale = 0.6f
+                ),
+                exit = fadeOut(MotionSpec.exit(Motion.Quick)) + scaleOut(
+                    MotionSpec.exit(),
+                    targetScale = 0.6f
+                )
+            ) {
                 TabBadge(
                     glyph = Glyph.Check,
                     text = "当前",
@@ -408,6 +474,8 @@ private fun TabCard(
                     role = Role.Button,
                     onClickLabel = "关闭标签页"
                 ) {
+                    // 先记一笔：这次点击属于"关闭"，不能再触发卡片的打开。
+                    closeTriggered = true
                     if (!closing) {
                         // 关闭标签页是破坏性操作，给一次明确的触感确认。
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -471,6 +539,43 @@ private fun TabBadge(
         BasicText(
             text = text,
             style = Type.micro.copy(color = Color.White)
+        )
+    }
+}
+
+/**
+ * 没有标签页时的空状态。
+ * 网格空白一片会让人以为界面卡住了，这里给出明确的下一步。
+ */
+@Composable
+private fun EmptyTabState() {
+    val colors = LocalLiuliColors.current
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(horizontal = Space.xl)
+    ) {
+        Box(
+            Modifier
+                .size(76.dp)
+                .clip(CircleShape)
+                .background(colors.glassTintStrong),
+            contentAlignment = Alignment.Center
+        ) {
+            GlyphIcon(
+                glyph = Glyph.Tabs,
+                tint = colors.textTertiary,
+                size = 34.dp
+            )
+        }
+        Spacer(Modifier.height(Space.md))
+        BasicText(
+            text = "还没有打开的标签页",
+            style = Type.title.copy(color = colors.textPrimary)
+        )
+        Spacer(Modifier.height(Space.xs))
+        BasicText(
+            text = "点右上角的加号开一个新标签页",
+            style = Type.bodySmall.copy(color = colors.textTertiary)
         )
     }
 }

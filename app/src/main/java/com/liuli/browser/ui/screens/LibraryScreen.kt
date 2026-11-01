@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -45,6 +46,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -269,7 +273,11 @@ private fun LibraryTab(
                 onClick = onClick
             )
             .pressScale(pressedScale = 0.92f, interactionSource = interactionSource)
-            .padding(horizontal = Space.lg, vertical = Space.sm)
+            // 分段控件本身很矮，补足最小触控高度，
+            // 否则"收藏/历史"这两个小胶囊很难点中。
+            .heightIn(min = Dimens.minTouch)
+            .padding(horizontal = Space.lg, vertical = Space.sm),
+        contentAlignment = Alignment.Center
     ) {
         BasicText(
             text = label,
@@ -342,6 +350,11 @@ private fun LibraryRow(
         Box(
             Modifier
                 .size(Dimens.minTouch)
+                // 关闭图标是纯图形，读屏软件读不到它，得自己报出这一项的名字。
+                .semantics {
+                    contentDescription = "删除"
+                    role = Role.Button
+                }
                 .clickable(
                     interactionSource = deleteInteraction,
                     indication = null,

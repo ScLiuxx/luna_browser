@@ -7,7 +7,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -53,6 +52,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -62,6 +62,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
@@ -199,6 +201,16 @@ fun SettingsScreen(
                             Modifier
                                 .size(Dimens.minTouch)
                                 .clip(CircleShape)
+                                // 色块是纯图形，读屏软件只会念出"按钮"，
+                                // 得自己报出色名，并说明当前是否已选中。
+                                .semantics {
+                                    contentDescription = if (selected) {
+                                        "${palette.label}主题色，已选中"
+                                    } else {
+                                        "${palette.label}主题色"
+                                    }
+                                    role = Role.Button
+                                }
                                 .clickable(
                                     interactionSource = interaction,
                                     indication = null,
@@ -265,7 +277,10 @@ fun SettingsScreen(
                                     role = Role.RadioButton
                                 ) { settings.updateDarkMode(index) }
                                 .pressScale(pressedScale = 0.92f, interactionSource = interaction)
-                                .padding(horizontal = Space.md, vertical = Space.sm)
+                                // 胶囊本身只有一行字高，补足最小触控高度。
+                                .heightIn(min = Dimens.minTouch)
+                                .padding(horizontal = Space.md, vertical = Space.sm),
+                            contentAlignment = Alignment.Center
                         ) {
                             BasicText(
                                 text = option.label,
@@ -815,19 +830,27 @@ private fun ToggleRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = Dimens.minTouch)
-            .padding(vertical = Space.sm),
+            .heightIn(min = Dimens.minTouch),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // 标题整块都是开关的点击区：既要点得中，也要报得出开/关。
+        // 竖向内边距从外层挪到这里，点击区才真正覆盖到 48dp。
         Column(
             Modifier
                 .weight(1f)
+                .heightIn(min = Dimens.minTouch)
+                .semantics {
+                    role = Role.Switch
+                    toggleableState = ToggleableState(checked)
+                    contentDescription = title
+                }
                 .clickable(
                     interactionSource = interaction,
                     indication = null,
                     role = Role.Switch
                 ) { onCheckedChange(!checked) }
                 .pressScale(pressedScale = 0.98f, interactionSource = interaction)
+                .padding(vertical = Space.sm)
         ) {
             BasicText(
                 text = title,
@@ -894,11 +917,21 @@ private fun AboutRow(label: String, value: String) {
         BasicText(
             text = label,
             style = Type.bodySmall.copy(color = colors.textSecondary),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
+        // 值可能很长（WebView 版本号、包名），限一行并省略。
+        // 它也分一份权重，否则超长值会把左侧标签整个挤没。
         BasicText(
             text = value,
-            style = Type.bodySmall.copy(color = colors.textPrimary)
+            style = Type.bodySmall.copy(
+                color = colors.textPrimary,
+                textAlign = TextAlign.End
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
         )
     }
 }

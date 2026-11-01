@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -51,6 +52,7 @@ import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.reduceMotion
 import kotlinx.coroutines.flow.collectLatest
 
 /**
@@ -82,6 +84,9 @@ fun LiquidSlider(
         val trackWidth = constraints.maxWidth
         val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
         val animationScope = rememberCoroutineScope()
+        // "减弱动态效果"时滑块直接落位，不再用弹簧回弹。
+        // 用 rememberUpdatedState 包裹：开关本身可以热切换，回调里要读到最新值。
+        val reduced = rememberUpdatedState(reduceMotion)
         var didDrag by remember { mutableStateOf(false) }
         // 拖拽期间的即时值：手指按下到松手之间，拇指必须 1:1 跟手。
         var dragValue by remember { mutableFloatStateOf(value()) }
@@ -105,7 +110,8 @@ fun LiquidSlider(
                 onDragStopped = {
                     if (didDrag) {
                         onValueChange(dragValue)
-                        animateToValue(dragValue)
+                        // 减弱动效时直接落位，不做弹簧回弹。
+                        if (reduced.value) snapValue(dragValue) else animateToValue(dragValue)
                     }
                     // 必须复位：否则之后的外部赋值（比如重置按钮）会被当成拖拽中而不再动。
                     didDrag = false
@@ -142,7 +148,12 @@ fun LiquidSlider(
                 // dragValue 与外部值一致说明这次变化就是拖拽自己造成的，跳过。
                 if (!didDrag && current != dragValue) {
                     dragValue = current
-                    dampedDragAnimation.updateValue(current)
+                    // 减弱动效时直接落位，不做弹簧回弹。
+                    if (reduced.value) {
+                        dampedDragAnimation.snapValue(current)
+                    } else {
+                        dampedDragAnimation.updateValue(current)
+                    }
                 }
             }
         }
@@ -159,7 +170,12 @@ fun LiquidSlider(
                             val target =
                                 (if (isLtr) valueRange.start + delta
                                 else valueRange.endInclusive - delta).coerceIn(valueRange)
-                            dampedDragAnimation.animateToValue(target)
+                            // 减弱动效时直接落位，不做弹簧回弹。
+                            if (reduced.value) {
+                                dampedDragAnimation.snapValue(target)
+                            } else {
+                                dampedDragAnimation.animateToValue(target)
+                            }
                             onValueChange(target)
                         }
                     }
@@ -192,7 +208,12 @@ fun LiquidSlider(
                     progressBarRangeInfo = ProgressBarRangeInfo(value(), valueRange)
                     setProgress { target ->
                         val clamped = target.coerceIn(valueRange)
-                        dampedDragAnimation.animateToValue(clamped)
+                        // 减弱动效时直接落位，不做弹簧回弹。
+                        if (reduced.value) {
+                            dampedDragAnimation.snapValue(clamped)
+                        } else {
+                            dampedDragAnimation.animateToValue(clamped)
+                        }
                         onValueChange(clamped)
                         true
                     }
