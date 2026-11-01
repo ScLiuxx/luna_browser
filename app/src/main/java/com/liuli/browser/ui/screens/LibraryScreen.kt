@@ -56,6 +56,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -65,6 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.LayerBackdrop
@@ -352,7 +354,15 @@ private fun SegmentTab(
     )
     Box(
         Modifier
-            .onGloballyPositioned { onBoundsChanged(it.boundsInParent()) }
+            .onGloballyPositioned {
+                val origin = it.positionInParent()
+                onBoundsChanged(
+                    Rect(
+                        offset = origin,
+                        size = it.size.toSize()
+                    )
+                )
+            }
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,

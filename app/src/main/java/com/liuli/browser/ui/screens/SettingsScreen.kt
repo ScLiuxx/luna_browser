@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -72,6 +73,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.LayerBackdrop
@@ -857,7 +859,13 @@ private fun DarkModeSegmented(
                 )
                 Box(
                     Modifier
-                        .onGloballyPositioned { segmentBounds[index] = it.boundsInParent() }
+                        .onGloballyPositioned {
+                            val origin = it.positionInParent()
+                            segmentBounds[index] = Rect(
+                                offset = origin,
+                                size = it.size.toSize()
+                            )
+                        }
                         .clickable(
                             interactionSource = interaction,
                             indication = null,
