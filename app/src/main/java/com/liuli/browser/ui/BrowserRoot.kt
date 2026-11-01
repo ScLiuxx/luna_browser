@@ -12,14 +12,14 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
@@ -83,6 +83,7 @@ import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.NavItem
 import com.liuli.browser.ui.liquid.LiquidDock
+import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.screens.BrowserScreen
 import com.liuli.browser.ui.screens.HomeScreen
 import com.liuli.browser.ui.screens.LibraryScreen
@@ -90,6 +91,7 @@ import com.liuli.browser.ui.screens.SettingsScreen
 import com.liuli.browser.ui.screens.TabSwitcherScreen
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
 import com.liuli.browser.web.AppOverlay
 import com.liuli.browser.web.BrowserTab
@@ -105,6 +107,7 @@ import com.liuli.browser.web.agent.AgentReportFormat
 import com.liuli.browser.web.agent.CreationEngine
 import com.liuli.browser.web.agent.ResearchEngine
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -132,11 +135,35 @@ private fun MainScreen.layer(): ScreenLayer = when (this) {
 private enum class ScreenLayer { Content, Page, Overlay }
 
 /**
+ * 这一对页面之间是否有共享元素在飞行。
+ *
+ * 地址栏（首页 ↔ 网页）与标签页快照（网页 ↔ 标签页）都是共享元素：
+ * 它们在两层之间"一镜到底"地移动。飞行途中容器如果大幅缩放，
+ * 正在飞的图片就会和它要落进去的卡片错位，所以这类转场只能轻微缩放。
+ */
+private fun MainScreen.sharesElementWith(other: MainScreen): Boolean = when {
+    this == other -> false
+    // 地址栏：首页 ↔ 网页
+    this == MainScreen.Home && other == MainScreen.Browser -> true
+    this == MainScreen.Browser && other == MainScreen.Home -> true
+    // 标签页快照：网页 ↔ 标签页
+    this == MainScreen.Browser && other == MainScreen.Tabs -> true
+    this == MainScreen.Tabs && other == MainScreen.Browser -> true
+    else -> false
+}
+
+/**
  * 主页面转场。
  *
  * 此前所有页面之间都是纯 fadeIn/fadeOut，五个页面观感完全一致、缺方向感，
  * 而且两屏交叉淡化时中间帧会发灰。现在按层级区分方向：
  * 浮层升起时底层轻微后退，网页与首页之间保持克制以免破坏共享元素转场。
+ *
+ * 方向感来自"前后景"而不是单纯的淡入淡出：
+ * - 浮层（标签 / 书签 / 设置）朝观众压过来，底层同时后退并压暗；
+ * - 关闭时完全镜像，系统返回键看到的就是打开时的倒放；
+ * - 共享元素在飞的那两对只用同一条（不过冲的）曲线做极轻缩放，
+ *   容器与共享元素同步，不会一个弹一个不弹。
  */
 private fun screenTransition(
     initial: MainScreen,
@@ -144,47 +171,78 @@ private fun screenTransition(
     isTablet: Boolean,
     reduced: Boolean
 ): ContentTransform {
+    // "减少动态效果"此前只管得到弹簧版本：补间一律照播。
+    // 位移与缩放必须在这里自己掐掉，否则这个开关等于没开。
+    if (reduced) {
+        return fadeIn(MotionSpec.enter(reduced, Motion.Fast)) togetherWith
+            fadeOut(MotionSpec.exit(reduced, Motion.Fast))
+    }
     val from = initial.layer()
     val to = target.layer()
+    val sharedFlight = initial.sharesElementWith(target)
+    // 共享元素用的是不过冲的临界阻尼；容器跟着用同一条曲线，两者才同步。
+    val scaleSpec = if (sharedFlight) {
+        MotionSpec.sharedSpring(reduced, 0.01f)
+    } else {
+        MotionSpec.pageSpring(reduced)
+    }
     val offsetSpec = MotionSpec.pageSpring(reduced, IntOffset.Zero)
+    // 浮层前移、底层后退的幅度：没有共享元素时给足前后景差，
+    // 有共享元素在飞时只留一点点，避免图片与卡片错位。
+    val overlayScale = if (sharedFlight) 0.985f else 0.94f
+    val baseScale = if (sharedFlight) 0.99f else 0.95f
+    // 底层被压暗但不完全消失：留一层"还看得见的网页"，
+    // 用户才知道自己还在哪个标签上。
+    val dimAlpha = 0.35f
+
     // 浮层升起 / 落下：纵向滑动，桌面端从右侧滑入。
     if (from != to && (to == ScreenLayer.Overlay || from == ScreenLayer.Overlay)) {
-        val enterTransition: EnterTransition
-        val exitTransition: ExitTransition
         if (to == ScreenLayer.Overlay) {
-            enterTransition = if (isTablet) {
+            val enter = if (isTablet) {
                 slideInHorizontally(animationSpec = offsetSpec) { it / 6 }
             } else {
                 slideInVertically(animationSpec = offsetSpec) { it / 8 }
             }
-            exitTransition = if (isTablet) {
+            val exit = if (isTablet) {
                 slideOutHorizontally(animationSpec = offsetSpec) { -it / 8 }
             } else {
                 slideOutVertically(animationSpec = offsetSpec) { -it / 10 }
             }
-        } else {
-            enterTransition = if (isTablet) {
-                slideInHorizontally(animationSpec = offsetSpec) { -it / 8 }
-            } else {
-                slideInVertically(animationSpec = offsetSpec) { -it / 10 }
-            }
-            exitTransition = if (isTablet) {
-                slideOutHorizontally(animationSpec = offsetSpec) { it / 6 }
-            } else {
-                slideOutVertically(animationSpec = offsetSpec) { it / 8 }
-            }
+            // 浮层朝观众压过来，底层往后退并压暗。
+            return (enter +
+                scaleIn(animationSpec = scaleSpec, initialScale = overlayScale) +
+                fadeIn(MotionSpec.enter(reduced))) togetherWith
+                (exit +
+                    scaleOut(animationSpec = scaleSpec, targetScale = baseScale) +
+                    fadeOut(MotionSpec.exit(reduced), targetAlpha = dimAlpha))
         }
-        return (fadeIn(MotionSpec.enter(reduced)) + enterTransition) togetherWith
-            (fadeOut(MotionSpec.exit(reduced)) + exitTransition)
+        val enter = if (isTablet) {
+            slideInHorizontally(animationSpec = offsetSpec) { -it / 8 }
+        } else {
+            slideInVertically(animationSpec = offsetSpec) { -it / 10 }
+        }
+        val exit = if (isTablet) {
+            slideOutHorizontally(animationSpec = offsetSpec) { it / 6 }
+        } else {
+            slideOutVertically(animationSpec = offsetSpec) { it / 8 }
+        }
+        // 原路退回：底面回到前景，浮层缩回原处。
+        return (enter +
+            scaleIn(animationSpec = scaleSpec, initialScale = baseScale) +
+            fadeIn(MotionSpec.enter(reduced), initialAlpha = dimAlpha)) togetherWith
+            (exit +
+                scaleOut(animationSpec = scaleSpec, targetScale = overlayScale) +
+                fadeOut(MotionSpec.exit(reduced)))
     }
     // 网页与首页之间靠共享元素承接，这里只做轻微缩放，避免抢戏。
-    val enterScale = if (to == ScreenLayer.Content) 0.985f else 1f
-    val exitScale = if (from == ScreenLayer.Content) 1.015f else 1f
-    // 缩放也要走 MotionSpec：默认的 spring 会绕开"减弱动效"开关。
-    return (fadeIn(MotionSpec.enter(reduced)) +
-        scaleIn(animationSpec = MotionSpec.pageSpring(reduced), initialScale = enterScale)) togetherWith
-        (fadeOut(MotionSpec.exit(reduced)) +
-            scaleOut(animationSpec = MotionSpec.pageSpring(reduced), targetScale = exitScale))
+    val enterScale = if (to == ScreenLayer.Content) 0.99f else 1f
+    val exitScale = if (from == ScreenLayer.Content) 1.01f else 1f
+    // 交叉淡化的时长要和共享元素的飞行时间相当：
+    // 淡出比淡入短，中途会露出背景，交叉淡化中间帧发灰。
+    return (fadeIn(MotionSpec.enter(reduced, Motion.Slow)) +
+        scaleIn(animationSpec = scaleSpec, initialScale = enterScale)) togetherWith
+        (fadeOut(MotionSpec.exit(reduced, Motion.Slow)) +
+            scaleOut(animationSpec = scaleSpec, targetScale = exitScale))
 }
 
 private val RailItems = listOf(
@@ -220,6 +278,8 @@ fun BrowserRoot(
     }
     val colors = LocalLiuliColors.current
     val density = LocalDensity.current
+    // 全局"减少动态效果"开关：本文件里所有动效都要看它。
+    val reduced = settings.reduceMotion
     val agentPolicies = remember(activity) { AgentPolicyStore(activity.applicationContext) }
     // 本机历史只读传入；Agent 不会把它上传，云端路径也不读取该回调。
     val agent = remember(settings, agentPolicies, library) {
@@ -479,45 +539,96 @@ fun BrowserRoot(
         val navBottom = WindowInsets.navigationBars.getBottom(density)
         val navBottomDp = with(density) { navBottom.toDp() }
         val bottomSpace = if (isTablet) navBottomDp + 22.dp else Dimens.dockHeight + navBottomDp + 22.dp
+        // 侧栏展开/收起的尺寸补间：形态变化属于布局变化，
+        // 即便开了"减少动态效果"也保留，只是时长缩短。
+        val railSizeSpec = MotionSpec.sizeValue(reduced, if (reduced) Motion.Fast else Motion.Normal)
+        // Dock 与提示都要"滑着来"：Dock 从下方升起，提示从底部冒出来。
+        // "减少动态效果"时只保留淡化，去掉位移。
+        // 这里刻意用非组合版本的 MotionSpec：开关切换时组合结构不变。
+        val dockEnter = if (reduced) {
+            fadeIn(MotionSpec.enter(reduced, Motion.Fast))
+        } else {
+            fadeIn(MotionSpec.enter(reduced)) + slideInVertically(
+                animationSpec = MotionSpec.pageSpring(reduced, IntOffset.Zero),
+                initialOffsetY = { it / 2 }
+            )
+        }
+        val dockExit = if (reduced) {
+            fadeOut(MotionSpec.exit(reduced, Motion.Fast))
+        } else {
+            fadeOut(MotionSpec.exit(reduced)) + slideOutVertically(
+                animationSpec = MotionSpec.pageSpring(reduced, IntOffset.Zero),
+                targetOffsetY = { it / 3 }
+            )
+        }
+        val toastEnter = if (reduced) {
+            fadeIn(MotionSpec.enter(reduced, Motion.Fast))
+        } else {
+            fadeIn(MotionSpec.enter(reduced)) + slideInVertically(
+                animationSpec = MotionSpec.pageSpring(reduced, IntOffset.Zero),
+                initialOffsetY = { it / 2 }
+            )
+        }
+        val toastExit = if (reduced) {
+            fadeOut(MotionSpec.exit(reduced, Motion.Fast))
+        } else {
+            fadeOut(MotionSpec.exit(reduced)) + slideOutVertically(
+                animationSpec = MotionSpec.pageSpring(reduced, IntOffset.Zero),
+                targetOffsetY = { it / 3 }
+            )
+        }
 
         Row(Modifier.fillMaxSize()) {
-            if (isTablet) {
-                Box(
-                    Modifier
-                        .statusBarsPadding()
-                        .navigationBarsPadding()
-                        .padding(start = 12.dp, top = 8.dp, bottom = 8.dp)
-                ) {
-                    val selectedIndex = when (screen) {
-                        MainScreen.Tabs -> 1
-                        MainScreen.Library -> 2
-                        MainScreen.Settings -> 3
-                        MainScreen.Home, MainScreen.Browser -> 0
-                    }
-                    GlassNavigationRail(
-                        items = RailItems,
-                        selectedIndex = selectedIndex,
-                        onSelect = { index ->
-                            when (index) {
-                                0 -> {
-                                    if (vm.overlay != AppOverlay.None) vm.closeOverlay()
-                                    if (vm.activeTab?.isHome != true) vm.openHomeTab()
-                                    showSharedSnapshot = false
+            // 侧栏随形态出现/消失：折叠屏展开、旋转屏幕时它从左侧展开，
+            // 而不是"啪"地跳出来把网页挤走。
+            // 展开用的是尺寸补间，属于布局变化，即便开了"减少动态效果"也保留，
+            // 只是时长缩短、不再额外淡入淡出。
+            AnimatedVisibility(
+                visible = isTablet,
+                enter = fadeIn(MotionSpec.enter(reduced, Motion.Fast)) +
+                    expandHorizontally(animationSpec = railSizeSpec),
+                exit = fadeOut(MotionSpec.exit(reduced, Motion.Fast)) +
+                    shrinkHorizontally(animationSpec = railSizeSpec),
+                modifier = Modifier.fillMaxHeight()
+            ) {
+                Row(Modifier.fillMaxHeight()) {
+                    Box(
+                        Modifier
+                            .statusBarsPadding()
+                            .navigationBarsPadding()
+                            .padding(start = 12.dp, top = 8.dp, bottom = 8.dp)
+                    ) {
+                        val selectedIndex = when (screen) {
+                            MainScreen.Tabs -> 1
+                            MainScreen.Library -> 2
+                            MainScreen.Settings -> 3
+                            MainScreen.Home, MainScreen.Browser -> 0
+                        }
+                        GlassNavigationRail(
+                            items = RailItems,
+                            selectedIndex = selectedIndex,
+                            onSelect = { index ->
+                                when (index) {
+                                    0 -> {
+                                        if (vm.overlay != AppOverlay.None) vm.closeOverlay()
+                                        if (vm.activeTab?.isHome != true) vm.openHomeTab()
+                                        showSharedSnapshot = false
+                                    }
+                                    1 -> openTabs()
+                                    2 -> openLibrary()
+                                    3 -> openSettings()
                                 }
-                                1 -> openTabs()
-                                2 -> openLibrary()
-                                3 -> openSettings()
-                            }
-                        },
-                        onNewTab = {
-                            vm.openHomeTab()
-                            showSharedSnapshot = false
-                        },
-                        backdrop = auroraBackdrop,
-                        tabCount = vm.tabs.size
-                    )
+                            },
+                            onNewTab = {
+                                vm.openHomeTab()
+                                showSharedSnapshot = false
+                            },
+                            backdrop = auroraBackdrop,
+                            tabCount = vm.tabs.size
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
                 }
-                Spacer(Modifier.width(12.dp))
             }
 
             Box(
@@ -538,7 +649,7 @@ fun BrowserRoot(
                         targetState = screen,
                         modifier = Modifier.fillMaxSize(),
                         transitionSpec = {
-                            screenTransition(initialState, targetState, isTablet, settings.reduceMotion)
+                            screenTransition(initialState, targetState, isTablet, reduced)
                         },
                         label = "main-screen"
                     ) { target ->
@@ -551,7 +662,7 @@ fun BrowserRoot(
                                     isPrivate = activeTab?.isPrivate == true,
                                     isTablet = isTablet,
                                     bottomSpace = bottomSpace,
-                                    reduceMotion = settings.reduceMotion,
+                                    reduceMotion = reduced,
                                     sharedScope = shared,
                                     animatedScope = animated,
                                     onSearchSubmit = { submitSearch(it) },
@@ -735,16 +846,10 @@ fun BrowserRoot(
                 }
 
                 Box(Modifier.align(Alignment.BottomCenter)) {
-                    androidx.compose.animation.AnimatedVisibility(
+                    Visibility(
                         visible = !isTablet && screen == MainScreen.Home,
-                        enter = fadeIn(MotionSpec.enter()) + slideInVertically(
-                            animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
-                            initialOffsetY = { it / 2 }
-                        ),
-                        exit = fadeOut(MotionSpec.exit()) + slideOutVertically(
-                            animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
-                            targetOffsetY = { it / 3 }
-                        )
+                        enter = dockEnter,
+                        exit = dockExit
                     ) {
                         LiquidDock(
                             items = DockItems,
@@ -765,31 +870,49 @@ fun BrowserRoot(
                     }
                 }
 
-                val message = vm.message
-                // 提示弹出时给一次轻触反馈：用户往往没在看屏幕，
-                // 震动是唯一能立刻知道"操作结果"的通道。
+                // 提示队列：一次操作可能连着产生多个结果（保存、导出、跳转……），
+                // 逐条播完比"后一条把前一条顶掉"更完整，
+                // 否则用户只会看到最后一个结果，前面失败的原因全丢了。
+                val toastChannel = remember { Channel<String>(Channel.UNLIMITED) }
+                // 退场时文案必须留着：玻璃壳不能先塌成空白再淡出。
+                var toastText by remember { mutableStateOf<String?>(null) }
+                var toastVisible by remember { mutableStateOf(false) }
                 val haptics = LocalHapticFeedback.current
-                LaunchedEffect(message) {
-                    if (message != null) {
+                // 新提示入队。
+                LaunchedEffect(vm.message) {
+                    val message = vm.message ?: return@LaunchedEffect
+                    toastChannel.send(message)
+                    vm.consumeMessage()
+                }
+                // 播放队列：一条播完再接下一条。
+                LaunchedEffect(Unit) {
+                    while (true) {
+                        val message = toastChannel.receive()
+                        toastText = message
+                        toastVisible = true
+                        // 提示弹出时给一次轻触反馈：用户往往没在看屏幕，
+                        // 震动是唯一能立刻知道"操作结果"的通道。
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         delay(2600)
-                        vm.consumeMessage()
+                        toastVisible = false
+                        // 等退场动画走完再换下一条，两条提示不会挤在一起。
+                        delay(Motion.Slow.toLong())
                     }
                 }
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = message != null,
-                    enter = fadeIn(MotionSpec.enter()) + slideInVertically(
-                        animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
-                        initialOffsetY = { it / 2 }
-                    ),
-                    exit = fadeOut(MotionSpec.exit()) + slideOutVertically(
-                        animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
-                        targetOffsetY = { it / 3 }
-                    ),
+                Visibility(
+                    visible = toastVisible,
+                    enter = toastEnter,
+                    exit = toastExit,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding()
-                        .padding(bottom = if (isTablet) 24.dp else 88.dp, start = 20.dp, end = 20.dp)
+                        // 提示压在 Dock 上方，留出 Dock 的高度加一点余量，
+                        // 两者不会叠在一起。
+                        .padding(
+                            bottom = if (isTablet) 24.dp else Dimens.dockHeight + 22.dp,
+                            start = 20.dp,
+                            end = 20.dp
+                        )
                 ) {
                     GlassSurface(
                         backdrop = chromeBackdrop,
@@ -804,7 +927,10 @@ fun BrowserRoot(
                         // 提示可能很长（比如保存失败的原因），允许换行并限高，
                         // 否则超出宽度会被裁掉，看不出到底出了什么问题。
                         BasicText(
-                            text = message.orEmpty(),
+                            // 这里必须用队列里的文案而不是 vm.message：
+                            // message 一被消费就是 null，直接渲染它会让玻璃壳
+                            // 先塌成空白再淡出。
+                            text = toastText.orEmpty(),
                             style = TextStyle(
                                 color = colors.textPrimary,
                                 fontSize = 12.sp,

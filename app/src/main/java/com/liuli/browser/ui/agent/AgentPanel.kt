@@ -90,6 +90,7 @@ import com.liuli.browser.ui.components.GlassIconButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
@@ -116,6 +117,7 @@ import com.liuli.browser.web.agent.AgentSiteMode
 import com.liuli.browser.web.agent.CreationEngine
 import com.liuli.browser.web.agent.ResearchEngine
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 @Composable
@@ -540,7 +542,7 @@ fun AgentPanel(
                                         initialOffsetY = { it / 6 }
                                     )
                             }
-                            AnimatedVisibility(
+                            Visibility(
                                 visible = appeared,
                                 enter = enterTransition,
                                 exit = fadeOut(animationSpec = fadeOutSpec)
@@ -560,7 +562,7 @@ fun AgentPanel(
                                     mutableStateOf(false)
                                 }
                                 LaunchedEffect(currentPlan.goal) { appeared = true }
-                                AnimatedVisibility(
+                                Visibility(
                                     visible = appeared,
                                     enter = fadeIn(animationSpec = fadeInSpec) +
                                         scaleIn(
@@ -583,7 +585,7 @@ fun AgentPanel(
                                     mutableStateOf(false)
                                 }
                                 LaunchedEffect(currentReport.createdAt) { appeared = true }
-                                AnimatedVisibility(
+                                Visibility(
                                     visible = appeared,
                                     enter = fadeIn(animationSpec = fadeInSpec) +
                                         scaleIn(
@@ -611,7 +613,7 @@ fun AgentPanel(
                                     mutableStateOf(false)
                                 }
                                 LaunchedEffect(currentCreation.createdAt) { appeared = true }
-                                AnimatedVisibility(
+                                Visibility(
                                     visible = appeared,
                                     enter = fadeIn(animationSpec = fadeInSpec) +
                                         scaleIn(
@@ -646,7 +648,7 @@ fun AgentPanel(
                             last != null && last.index < contentItems - 1
                         }
                     }
-                    AnimatedVisibility(
+                    Visibility(
                         visible = showJumpToLatest && !emptyPanel,
                         enter = fadeIn(MotionSpec.enter(Motion.Quick)) + scaleIn(
                             animationSpec = MotionSpec.enter(Motion.Quick),

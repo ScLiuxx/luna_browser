@@ -1,5 +1,6 @@
 package com.liuli.browser.ui.components
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -8,17 +9,24 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastCoerceAtMost
 import androidx.compose.ui.util.lerp
@@ -29,13 +37,17 @@ import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.isRenderEffectSupported
+import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
+import com.kyant.shapes.RoundedRectangularShape
 import com.liuli.browser.ui.liquid.InteractiveHighlight
 import com.liuli.browser.ui.liquid.LiquidIconButton
 import com.liuli.browser.ui.liquid.LiquidTextAction
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.Motion
+import com.liuli.browser.ui.theme.MotionSpec
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -70,6 +82,8 @@ fun GlassSurface(
     onClick: (() -> Unit)? = null,
     /** 是否描出边缘。玻璃件没有轮廓会整个融进背景，深色下尤其明显。 */
     edgeStroke: Boolean = true,
+    /** 是否画内阴影。有内阴影的玻璃才像一块有厚度的板，而不是一层贴图。 */
+    innerShadow: Boolean = false,
     content: @Composable BoxScope.() -> Unit = {}
 ) {
     val colors = LocalLiuliColors.current
@@ -79,6 +93,9 @@ fun GlassSurface(
     } else {
         requestedTint.copy(alpha = max(requestedTint.alpha, if (colors.isDark) 0.90f else 0.88f))
     }
+    // 折射着色器只认圆角形状，喂给它别的形状会直接抛异常。
+    // 玻璃件统一用圆角形状，这里再兜一次底，免得调用方踩到崩溃。
+    val lensEnabled = lensHeight > 0.dp && lensAmount > 0.dp && shape.supportsLens()
 
     // 有 onClick 定开启液态跟随，interactive 单独开启则只跟随不接管点击
     val liquidEnabled = interactive || onClick != null
@@ -120,13 +137,19 @@ fun GlassSurface(
                 shape = { shape },
                 effects = {
                     vibrancy()
-                    if (blurRadius > 0.dp && isRenderEffectSupported()) blur(blurRadius.toPx())
-                    if (lensHeight > 0.dp && isRenderEffectSupported()) {
-                        lens(
-                            refractionHeight = lensHeight.toPx(),
-                            refractionAmount = lensAmount.toPx(),
-                            chromaticAberration = true
-                        )
+                    if (isRenderEffectSupported()) {
+                        // 模糊不能无限盖过玻璃本身的大小：模糊会把背后的图层向外撑开，
+                        // 小玻璃上就会露出一圈被拉散的边，也白费一份显存。
+                        // 这里只做兜底，正常尺寸的玻璃件不受影响。
+                        val blurPx = blurRadius.toPx().coerceAtMost(size.minDimension * 0.35f)
+                        if (blurPx > 0f) blur(blurPx)
+                        if (lensEnabled) {
+                            lens(
+                                refractionHeight = lensHeight.toPx(),
+                                refractionAmount = lensAmount.toPx(),
+                                chromaticAberration = true
+                            )
+                        }
                     }
                 },
                 layerBlock = if (liquidEnabled) {
@@ -161,6 +184,19 @@ fun GlassSurface(
                 } else {
                     null
                 },
+                innerShadow = if (innerShadow) {
+                    {
+                        // 内阴影压在下沿：光从上方来，厚玻璃的下沿会自己遮掉一点光，
+                        // 有它面板才像一块有厚度的板，而不是一张贴图。
+                        InnerShadow(
+                            radius = 16.dp,
+                            offset = DpOffset(0.dp, -16.dp),
+                            color = Color.Black.copy(alpha = if (colors.isDark) 0.26f else 0.10f)
+                        )
+                    }
+                } else {
+                    null
+                },
                 shadow = if (shadow) {
                     {
                         Shadow(
@@ -175,11 +211,10 @@ fun GlassSurface(
                     drawRect(effectiveTint)
                     // 边缘描边：没有它，深色背景上的玻璃会整个"融"进去，
                     // 轮廓消失，只剩一团模糊的色块。
+                    // 描边必须跟着形状走：玻璃是圆角矩形、边框却是直角矩形的话，
+                    // 四个角会露出不属于玻璃的直角。
                     if (edgeStroke) {
-                        drawRect(
-                            color = colors.glassBorder,
-                            style = Stroke(width = 1.dp.toPx())
-                        )
+                        drawShapeOutline(shape, colors.glassBorder, 1.dp.toPx())
                     }
                 }
             )
@@ -207,12 +242,19 @@ fun GlassIconButton(
     accent: Boolean = false,
     enabled: Boolean = true
 ) {
+    // 底层只把图标调暗，玻璃底座依旧是满亮的，看不出按钮已经失效。
+    // 整块一起压暗，并在明暗之间过渡，禁用态才立得住。
+    val dimAlpha by animateFloatAsState(
+        targetValue = if (enabled) 1f else 0.62f,
+        animationSpec = MotionSpec.value(Motion.Quick),
+        label = "glass-icon-button-alpha"
+    )
     LiquidIconButton(
         glyph = glyph,
         description = contentDescription,
         onClick = onClick,
         backdrop = backdrop,
-        modifier = modifier,
+        modifier = modifier.graphicsLayer { alpha = dimAlpha },
         size = maxOf(size, Dimens.minTouch),
         glyphSize = glyphSize,
         selected = accent,
@@ -231,17 +273,62 @@ fun GlassPillButton(
     enabled: Boolean = true,
     contentPadding: PaddingValues = PaddingValues(horizontal = 18.dp)
 ) {
+    // 胶囊按钮此前完全没有禁用态：文字与底色和可用时一模一样，
+    // 用户按下去没反应才知道按钮是灰的。这里整体压暗并过渡。
+    val dimAlpha by animateFloatAsState(
+        targetValue = if (enabled) 1f else 0.42f,
+        animationSpec = MotionSpec.value(Motion.Quick),
+        label = "glass-pill-button-alpha"
+    )
     LiquidTextAction(
         label = label,
         onClick = onClick,
         backdrop = backdrop,
-        modifier = modifier,
+        modifier = modifier.graphicsLayer { alpha = dimAlpha },
         accent = accent,
         glyph = glyph,
         enabled = enabled,
         contentPadding = contentPadding
     )
 }
+
+/**
+ * 沿着形状轮廓描边。
+ *
+ * 用矩形描边时，玻璃本身是圆角矩形、边框却是直角矩形，
+ * 四个角上会露出不属于玻璃的直角，一眼就穿帮。
+ */
+private fun DrawScope.drawShapeOutline(shape: Shape, color: Color, width: Float) {
+    val outline = shape.createOutline(size, layoutDirection, this)
+    when (outline) {
+        is Outline.Rounded -> drawPath(
+            // RoundRect 在 1.12 里没有公开 topLeft/size/cornerRadius，
+            // 直接用它拼路径最省事，也能保留四个角各自不同的圆角。
+            path = Path().apply { addRoundRect(outline.roundRect) },
+            color = color,
+            style = Stroke(width = width)
+        )
+        is Outline.Generic -> drawPath(
+            path = outline.path,
+            color = color,
+            style = Stroke(width = width)
+        )
+        else -> drawRect(
+            color = color,
+            style = Stroke(width = width)
+        )
+    }
+}
+
+/**
+ * 折射着色器只认三类形状：库自带的 RoundedRectangularShape、
+ * 绝对圆角与普通圆角（CornerBasedShape，CircleShape 也是这一类）。
+ * 喂给它别的形状会抛 UnsupportedOperationException，
+ * 玻璃件在加折射前先问一句：形状不支持就只留模糊与高光，
+ * 总好过整个面板崩掉。
+ */
+private fun Shape.supportsLens(): Boolean =
+    this is RoundedRectangularShape || this is CornerBasedShape
 
 @Composable
 fun GlassDivider(modifier: Modifier = Modifier) {

@@ -1,13 +1,11 @@
 package com.liuli.browser.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -18,16 +16,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.emptyBackdrop
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.Radius
+import com.liuli.browser.ui.theme.Space
+import com.liuli.browser.ui.theme.Type
 
 const val PRIVACY_POLICY_TEXT = """琉璃浏览器如何保护你的隐私
 
@@ -62,57 +61,61 @@ fun PrivacyPolicyDialog(visible: Boolean, onDismiss: () -> Unit) {
         visible = visible,
         onDismiss = onDismiss,
         panelModifier = Modifier
-            .padding(22.dp)
+            .padding(Space.xl)
             .widthIn(max = 520.dp)
             .heightIn(max = 640.dp)
     ) {
+        // 面板背后没有可折射的内容（emptyBackdrop），模糊与折射都无从谈起。
+        // 想要它读起来像玻璃而不是灰卡片，靠的是内阴影给出的厚度，
+        // 再加一层从上方落下来的光。
         GlassSurface(
             backdrop = emptyBackdrop(),
-            modifier = Modifier
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) { },
-            shape = RoundedCornerShape(28.dp),
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(Radius.xl),
             tint = colors.glassTintStrong.copy(alpha = 0.96f),
             blurRadius = 0.dp,
             lensHeight = 0.dp,
+            innerShadow = true,
             shadow = true
         ) {
-            Column(Modifier.padding(20.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    GlyphIcon(Glyph.Shield, colors.success, size = 22.dp)
-                    Spacer(Modifier.width(10.dp))
-                    BasicText(
-                        text = "隐私说明",
-                        style = TextStyle(
-                            color = colors.textPrimary,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.SemiBold
-                        ),
-                        modifier = Modifier.weight(1f)
+            Box(
+                Modifier.background(
+                    Brush.verticalGradient(
+                        0f to Color.White.copy(alpha = if (colors.isDark) 0.07f else 0.32f),
+                        0.55f to Color.Transparent
                     )
-                    GlassIconButton(
-                        glyph = Glyph.Close,
-                        contentDescription = "关闭隐私说明",
-                        onClick = onDismiss,
-                        backdrop = emptyBackdrop(),
-                        size = 40.dp,
-                        glyphSize = 16.dp
+                )
+            ) {
+                Column(Modifier.padding(Space.xl)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        GlyphIcon(Glyph.Shield, colors.success, size = 22.dp)
+                        Spacer(Modifier.width(Space.md))
+                        BasicText(
+                            text = "隐私说明",
+                            style = Type.title.copy(color = colors.textPrimary),
+                            modifier = Modifier.weight(1f)
+                        )
+                        GlassIconButton(
+                            glyph = Glyph.Close,
+                            contentDescription = "关闭隐私说明",
+                            onClick = onDismiss,
+                            backdrop = emptyBackdrop(),
+                            size = 40.dp,
+                            glyphSize = 16.dp
+                        )
+                    }
+                    Spacer(Modifier.height(Space.md))
+                    BasicText(
+                        text = PRIVACY_POLICY_TEXT,
+                        style = Type.bodySmall.copy(
+                            color = colors.textSecondary,
+                            lineHeight = 19.sp
+                        ),
+                        modifier = Modifier
+                            .heightIn(max = 520.dp)
+                            .verticalScroll(rememberScrollState())
                     )
                 }
-                Spacer(Modifier.height(12.dp))
-                BasicText(
-                    text = PRIVACY_POLICY_TEXT,
-                    style = TextStyle(
-                        color = colors.textSecondary,
-                        fontSize = 12.sp,
-                        lineHeight = 19.sp
-                    ),
-                    modifier = Modifier
-                        .heightIn(max = 520.dp)
-                        .verticalScroll(rememberScrollState())
-                )
             }
         }
     }

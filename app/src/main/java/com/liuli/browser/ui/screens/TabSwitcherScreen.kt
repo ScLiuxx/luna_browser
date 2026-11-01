@@ -75,6 +75,7 @@ import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
@@ -222,7 +223,7 @@ fun TabSwitcherScreen(
 
                 // 空状态：没有标签页时也要有内容，并带入场动画，
                 // 否则网格空白一片，用户会以为界面卡住了。
-                AnimatedVisibility(
+                Visibility(
                     visible = tabs.isEmpty(),
                     enter = fadeIn(MotionSpec.enter()) + scaleIn(
                         MotionSpec.pageSpring(),

@@ -596,12 +596,11 @@ private fun QuickLinkTile(
             Spacer(Modifier.height(9.dp))
             BasicText(
                 text = link.label,
-                style = if (isTablet) {
+                style = (if (isTablet) {
                     Type.bodySmall.copy(fontWeight = FontWeight.Medium)
                 } else {
                     Type.label
-                },
-                color = colors.textPrimary,
+                }).copy(color = colors.textPrimary),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

@@ -4,6 +4,8 @@ import androidx.activity.ComponentActivity
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -29,6 +31,7 @@ import com.liuli.browser.ui.screens.PrivacyGate
 import com.liuli.browser.ui.theme.LiuliTheme
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.LocalReduceMotion
+import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
 import com.liuli.browser.ui.theme.reduceMotion
 
@@ -74,13 +77,33 @@ fun LiuliApp(
                 AnimatedContent(
                     targetState = settings.privacyAccepted,
                     transitionSpec = {
-                        (fadeIn(MotionSpec.enter(reduced)) + slideInVertically(
-                            animationSpec = MotionSpec.pageSpring(reduced, IntOffset.Zero),
-                            initialOffsetY = { it / 12 }
-                        )) togetherWith (fadeOut(MotionSpec.exit(reduced)) + slideOutVertically(
-                            animationSpec = MotionSpec.pageSpring(reduced, IntOffset.Zero),
-                            targetOffsetY = { -it / 16 }
-                        ))
+                        if (reduced) {
+                            // "减少动态效果"：只交叉淡化，不做位移与缩放。
+                            fadeIn(MotionSpec.enter(reduced, Motion.Fast)) togetherWith
+                                fadeOut(MotionSpec.exit(reduced, Motion.Fast))
+                        } else {
+                            // 主界面朝观众压过来，隐私页往后退：
+                            // 同意之后界面像"走近了一步"，而不是硬切。
+                            val enter = fadeIn(MotionSpec.enter(reduced)) +
+                                slideInVertically(
+                                    animationSpec = MotionSpec.pageSpring(reduced, IntOffset.Zero),
+                                    initialOffsetY = { it / 12 }
+                                ) +
+                                scaleIn(
+                                    animationSpec = MotionSpec.pageSpring(reduced),
+                                    initialScale = 0.98f
+                                )
+                            val exit = fadeOut(MotionSpec.exit(reduced)) +
+                                slideOutVertically(
+                                    animationSpec = MotionSpec.pageSpring(reduced, IntOffset.Zero),
+                                    targetOffsetY = { -it / 16 }
+                                ) +
+                                scaleOut(
+                                    animationSpec = MotionSpec.pageSpring(reduced),
+                                    targetScale = 1.02f
+                                )
+                            enter togetherWith exit
+                        }
                     },
                     label = "gate-transition"
                 ) { accepted ->

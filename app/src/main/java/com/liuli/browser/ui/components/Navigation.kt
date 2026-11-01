@@ -24,9 +24,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +60,8 @@ import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
 import com.liuli.browser.ui.theme.Radius
 import com.liuli.browser.ui.theme.Space
+import com.liuli.browser.ui.theme.reduceMotion
+import kotlinx.coroutines.delay
 
 data class NavItem(
     val glyph: Glyph,
@@ -69,14 +74,59 @@ fun BrandOrb(
     size: Dp = 40.dp
 ) {
     val colors = LocalLiuliColors.current
-    Canvas(modifier.size(size)) {
+    val reduced = reduceMotion
+    // 呼吸：球体每隔两秒涨落一次，幅度极小，
+    // 只为让这颗静止的品牌标记有一点生命感。
+    // 减少动态效果开启时循环根本不启动，球体纹丝不动。
+    var breathTarget by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(reduced) {
+        if (reduced) {
+            breathTarget = 0f
+            return@LaunchedEffect
+        }
+        while (true) {
+            delay(2400)
+            breathTarget = if (breathTarget > 0.5f) 0f else 1f
+        }
+    }
+    val breath by animateFloatAsState(
+        targetValue = breathTarget,
+        animationSpec = MotionSpec.value(Motion.Slow),
+        label = "brand-orb-breath"
+    )
+    // 呼吸只做极小的涨缩：品牌标记在导航栏里是常驻元素，
+    // 动得太明显会抢走内容的注意力。
+    val swell = 1f + 0.02f * breath
+
+    Canvas(
+        modifier
+            .size(size)
+            .graphicsLayer {
+                scaleX = swell
+                scaleY = swell
+            }
+    ) {
         val radius = this.size.minDimension / 2f
         val center = Offset(this.size.width / 2f, this.size.height / 2f)
         // 高光位置用「圆心左上方 40%/35%」定义，而不是写死的像素偏移：
         // 尺寸变化时高光仍落在球体的左上肩部，符合球面受光直觉。
+        // 呼吸时高光跟着轻轻游走，球面不会像一张静止的贴纸。
+        val drift = breath * radius * 0.06f
         val highlightCenter = Offset(
-            center.x - radius * 0.40f,
-            center.y - radius * 0.35f
+            center.x - radius * 0.40f + drift,
+            center.y - radius * 0.35f - drift * 0.6f
+        )
+        // 外发光：球体从背景里"浮"起来，而不是直接贴在背景上。
+        drawCircle(
+            brush = Brush.radialGradient(
+                0f to colors.accent.copy(alpha = if (colors.isDark) 0.26f else 0.12f),
+                0.5f to colors.accent.copy(alpha = if (colors.isDark) 0.10f else 0.05f),
+                1f to Color.Transparent,
+                center = center,
+                radius = radius * 1.5f
+            ),
+            radius = radius * 1.5f,
+            center = center
         )
         drawCircle(
             brush = Brush.radialGradient(
@@ -86,6 +136,19 @@ fun BrandOrb(
                 1f to colors.accentSecondary,
                 center = highlightCenter,
                 radius = radius * 1.7f
+            ),
+            radius = radius,
+            center = center
+        )
+        // 明暗交界：右下侧压暗。没有这一层，球体只剩一团平贴的渐变，
+        // 看上去像贴纸而不是一个立体的球。
+        drawCircle(
+            brush = Brush.radialGradient(
+                0f to Color.Black.copy(alpha = if (colors.isDark) 0.30f else 0.16f),
+                0.5f to Color.Black.copy(alpha = if (colors.isDark) 0.14f else 0.07f),
+                1f to Color.Transparent,
+                center = Offset(center.x + radius * 0.45f, center.y + radius * 0.55f),
+                radius = radius * 1.35f
             ),
             radius = radius,
             center = center
@@ -300,29 +363,26 @@ fun GlassNavigationRail(
                 }
             }
             Spacer(Modifier.height(6.dp))
-            val newTabInteraction = remember { MutableInteractionSource() }
-            val newTabPress = Modifier.pressScale(
-                pressedScale = 0.92f,
-                interactionSource = newTabInteraction
-            )
-            Box(
-                Modifier
+            // 新建标签页此前是一块半透明的纯色圆片：没有模糊、没有折射，
+            // 在一整列液态玻璃里显得是另一个世界的零件。改成玻璃件之后，
+            // 它和导航栏终于用上了同一套材质。
+            GlassSurface(
+                backdrop = backdrop,
+                modifier = Modifier
                     .size(48.dp)
-                    .clip(CircleShape)
-                    .background(colors.accent.copy(alpha = if (colors.isDark) 0.28f else 0.16f))
                     .semantics {
                         contentDescription = "新建标签页"
                         role = Role.Button
-                    }
-                    .then(newTabPress)
-                    .clickable(
-                        interactionSource = newTabInteraction,
-                        indication = null,
-                        role = Role.Button,
-                        onClickLabel = "新建标签页",
-                        onClick = onNewTab
-                    ),
-                contentAlignment = Alignment.Center
+                    },
+                // 50 表示短边的一半，圆形玻璃件；用圆角形状而不是 CircleShape，
+                // 折射着色器只认圆角形状。
+                shape = RoundedCornerShape(50),
+                tint = colors.accent.copy(alpha = if (colors.isDark) 0.24f else 0.14f),
+                blurRadius = 12.dp,
+                lensHeight = 10.dp,
+                lensAmount = 14.dp,
+                contentAlignment = Alignment.Center,
+                onClick = onNewTab
             ) {
                 GlyphIcon(Glyph.Plus, colors.accent, size = 22.dp)
             }
