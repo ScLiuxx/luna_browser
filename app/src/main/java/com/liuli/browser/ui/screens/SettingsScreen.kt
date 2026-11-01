@@ -3,17 +3,19 @@ package com.liuli.browser.ui.screens
 import android.os.Build
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +43,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -48,9 +51,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -80,6 +87,7 @@ import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.components.PrivacyPolicyDialog
 import com.liuli.browser.ui.liquid.LiquidSlider
 import com.liuli.browser.ui.liquid.LiquidToggle
+import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.AccentPalettes
 import com.liuli.browser.ui.theme.DarkModeOption
@@ -111,6 +119,12 @@ fun SettingsScreen(
     onRevokePrivacy: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    // 标签页上限的数字是补间上去的：拖动滑块时能看清自己走了几格。
+    val maxTabs by animateIntAsState(
+        targetValue = settings.maxTabs,
+        animationSpec = MotionSpec.intValue(Motion.Quick),
+        label = "max-tabs"
+    )
     val activePolicyHost = AgentPolicyStore.normalizeHost(vm.activeTab?.url)
     val activePolicy = agentPolicies.policyFor(activePolicyHost)
     var showPrivacy by rememberSaveable { mutableStateOf(false) }
@@ -247,51 +261,10 @@ fun SettingsScreen(
                 Spacer(Modifier.height(Space.md))
                 SettingsLabel("深色模式", null)
                 Spacer(Modifier.height(Space.sm))
-                Row(
-                    Modifier
-                        .clip(RoundedCornerShape(Radius.pill))
-                        .background(colors.textPrimary.copy(alpha = 0.06f))
-                        .padding(Space.xs),
-                    horizontalArrangement = Arrangement.spacedBy(Space.xs)
-                ) {
-                    DarkModeOption.entries.forEachIndexed { index, option ->
-                        val selected = settings.darkMode == index
-                        val interaction = remember { MutableInteractionSource() }
-                        val background by animateColorAsState(
-                            targetValue = if (selected) colors.glassTintStrong else Color.Transparent,
-                            animationSpec = MotionSpec.color(),
-                            label = "dark-mode-bg"
-                        )
-                        val labelColor by animateColorAsState(
-                            targetValue = if (selected) colors.textPrimary else colors.textSecondary,
-                            animationSpec = MotionSpec.color(),
-                            label = "dark-mode-label"
-                        )
-                        Box(
-                            Modifier
-                                .clip(RoundedCornerShape(Radius.pill))
-                                .background(background)
-                                .clickable(
-                                    interactionSource = interaction,
-                                    indication = null,
-                                    role = Role.RadioButton
-                                ) { settings.updateDarkMode(index) }
-                                .pressScale(pressedScale = 0.92f, interactionSource = interaction)
-                                // 胶囊本身只有一行字高，补足最小触控高度。
-                                .heightIn(min = Dimens.minTouch)
-                                .padding(horizontal = Space.md, vertical = Space.sm),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            BasicText(
-                                text = option.label,
-                                style = Type.bodySmall.copy(
-                                    color = labelColor,
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                                )
-                            )
-                        }
-                    }
-                }
+                DarkModeSegmented(
+                    selected = settings.darkMode,
+                    onSelect = { settings.updateDarkMode(it) }
+                )
                 Spacer(Modifier.height(Space.md))
                 ToggleRow(
                     title = "动态流光背景",
@@ -335,11 +308,24 @@ fun SettingsScreen(
                             animationSpec = MotionSpec.color(),
                             label = "engine-label"
                         )
+                        // 按下时给一行浅色高亮：玻璃件没有水波纹，
+                        // 手指按下去时没有这层提示就完全没反应。
+                        val pressed by interaction.collectIsPressedAsState()
+                        val highlight by animateColorAsState(
+                            targetValue = if (pressed) {
+                                colors.textPrimary.copy(alpha = 0.06f)
+                            } else {
+                                Color.Transparent
+                            },
+                            animationSpec = MotionSpec.color(Motion.Quick),
+                            label = "engine-row-highlight"
+                        )
                         Row(
                             Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = Dimens.minTouch)
                                 .clip(RoundedCornerShape(Radius.sm))
+                                .background(highlight)
                                 .clickable(
                                     interactionSource = interaction,
                                     indication = null,
@@ -400,7 +386,8 @@ fun SettingsScreen(
                         contentDescription = "标签页上限"
                     )
                     BasicText(
-                        text = "${settings.maxTabs} 个",
+                        // 数字也是补间上去的：拖动滑块时能看清自己走了几格。
+                        text = "$maxTabs 个",
                         style = Type.bodySmall.copy(
                             color = colors.textPrimary,
                             fontWeight = FontWeight.Medium
@@ -489,7 +476,7 @@ fun SettingsScreen(
                     style = Type.micro.copy(color = colors.textTertiary, lineHeight = 14.sp)
                 )
                 // 低风险免确认只在"允许"站点出现，出现与收起都有过渡。
-                AnimatedVisibility(
+                Visibility(
                     visible = activePolicyHost != null && activePolicy.mode == AgentSiteMode.Allowed,
                     enter = fadeIn(MotionSpec.enter()) + expandVertically(
                         animationSpec = MotionSpec.sizeValue()
@@ -524,7 +511,7 @@ fun SettingsScreen(
                     backdrop = backdrop
                 )
                 // 云端配置区：展开云端推理后才出现，展开/收起有过渡。
-                AnimatedVisibility(
+                Visibility(
                     visible = settings.agentCloudEnabled,
                     enter = fadeIn(MotionSpec.enter()) + expandVertically(
                         animationSpec = MotionSpec.sizeValue()
@@ -776,7 +763,9 @@ private fun SettingsSection(
     ) {
         BasicText(
             text = title,
-            style = Type.sectionTitle.copy(color = colors.textSecondary),
+            // 分区名用强调色：卡片里的字段名比它还大也更深，
+            // 不给分区名一点色彩，整屏就分不出组。
+            style = Type.sectionTitle.copy(color = colors.accent),
             modifier = Modifier.padding(start = Space.xs, bottom = Space.sm)
         )
         GlassSurface(
@@ -791,6 +780,103 @@ private fun SettingsSection(
         ) {
             Column(Modifier.fillMaxWidth()) {
                 content()
+            }
+        }
+    }
+}
+
+/**
+ * 深色模式分段控件。
+ *
+ * 指示器是一块独立底色，位置与宽度按分段实测值滑动：
+ * 每段各自带底色、靠淡入淡出换人，看上去是"闪"而不是"滑"。
+ */
+@Composable
+private fun DarkModeSegmented(
+    selected: Int,
+    onSelect: (Int) -> Unit
+) {
+    val colors = LocalLiuliColors.current
+    val density = LocalDensity.current
+    // 每个分段的真实位置：指示器按实际尺寸滑过去，不能靠估算。
+    val segmentBounds = remember { mutableStateMapOf<Int, Rect>() }
+    val selectedBounds = segmentBounds[selected]
+    val indicatorLeft by animateDpAsState(
+        targetValue = selectedBounds?.left?.let { with(density) { it.toDp() } } ?: 0.dp,
+        animationSpec = MotionSpec.pageSpring(0.01.dp),
+        label = "dark-indicator-left"
+    )
+    val indicatorTop by animateDpAsState(
+        targetValue = selectedBounds?.top?.let { with(density) { it.toDp() } } ?: 0.dp,
+        animationSpec = MotionSpec.pageSpring(0.01.dp),
+        label = "dark-indicator-top"
+    )
+    val indicatorWidth by animateDpAsState(
+        targetValue = selectedBounds?.width?.let { with(density) { it.toDp() } } ?: 0.dp,
+        animationSpec = MotionSpec.pageSpring(0.01.dp),
+        label = "dark-indicator-width"
+    )
+    val indicatorHeight by animateDpAsState(
+        targetValue = selectedBounds?.height?.let { with(density) { it.toDp() } } ?: 0.dp,
+        animationSpec = MotionSpec.pageSpring(0.01.dp),
+        label = "dark-indicator-height"
+    )
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(Radius.pill))
+            .background(colors.textPrimary.copy(alpha = 0.06f))
+    ) {
+        // 指示器画在文字下面，切换时底色滑过去，文字始终压在最上层。
+        if (selectedBounds != null) {
+            Box(
+                Modifier
+                    .offset(x = indicatorLeft, y = indicatorTop)
+                    .width(indicatorWidth)
+                    .height(indicatorHeight)
+                    .clip(RoundedCornerShape(Radius.pill))
+                    .background(colors.glassTintStrong)
+            )
+        }
+        Row(
+            Modifier.padding(Space.xs),
+            horizontalArrangement = Arrangement.spacedBy(Space.xs)
+        ) {
+            DarkModeOption.entries.forEachIndexed { index, option ->
+                val isSelected = index == selected
+                val interaction = remember { MutableInteractionSource() }
+                val labelColor by animateColorAsState(
+                    targetValue = if (isSelected) colors.textPrimary else colors.textSecondary,
+                    animationSpec = MotionSpec.color(),
+                    label = "dark-mode-label"
+                )
+                // 字重也平滑过渡：选中瞬间换字重，文字会明显"跳"一下。
+                val weight by animateFloatAsState(
+                    targetValue = if (isSelected) 600f else 400f,
+                    animationSpec = MotionSpec.value(Motion.Quick),
+                    label = "dark-mode-weight"
+                )
+                Box(
+                    Modifier
+                        .onGloballyPositioned { segmentBounds[index] = it.boundsInParent() }
+                        .clickable(
+                            interactionSource = interaction,
+                            indication = null,
+                            role = Role.RadioButton
+                        ) { onSelect(index) }
+                        .pressScale(pressedScale = 0.92f, interactionSource = interaction)
+                        // 胶囊本身只有一行字高，补足最小触控高度。
+                        .heightIn(min = Dimens.minTouch)
+                        .padding(horizontal = Space.md, vertical = Space.sm),
+                    contentAlignment = Alignment.Center
+                ) {
+                    BasicText(
+                        text = option.label,
+                        style = Type.bodySmall.copy(
+                            color = labelColor,
+                            fontWeight = FontWeight(weight.toInt())
+                        )
+                    )
+                }
             }
         }
     }
@@ -827,6 +913,18 @@ private fun ToggleRow(
 ) {
     val colors = LocalLiuliColors.current
     val interaction = remember { MutableInteractionSource() }
+    // 按下时给一行浅色高亮：玻璃件没有水波纹，
+    // 手指按下去时没有这层提示就完全没反应。
+    val pressed by interaction.collectIsPressedAsState()
+    val highlight by animateColorAsState(
+        targetValue = if (pressed) {
+            colors.textPrimary.copy(alpha = 0.06f)
+        } else {
+            Color.Transparent
+        },
+        animationSpec = MotionSpec.color(Motion.Quick),
+        label = "toggle-row-highlight"
+    )
     Row(
         Modifier
             .fillMaxWidth()
@@ -839,6 +937,8 @@ private fun ToggleRow(
             Modifier
                 .weight(1f)
                 .heightIn(min = Dimens.minTouch)
+                .clip(RoundedCornerShape(Radius.sm))
+                .background(highlight)
                 .semantics {
                     role = Role.Switch
                     toggleableState = ToggleableState(checked)
@@ -849,8 +949,9 @@ private fun ToggleRow(
                     indication = null,
                     role = Role.Switch
                 ) { onCheckedChange(!checked) }
-                .pressScale(pressedScale = 0.98f, interactionSource = interaction)
-                .padding(vertical = Space.sm)
+                .pressScale(pressedScale = 0.97f, interactionSource = interaction)
+                // 横向留白与搜索引擎那几行对齐，卡片里各行的起点才一致。
+                .padding(horizontal = Space.xs, vertical = Space.sm)
         ) {
             BasicText(
                 text = title,
@@ -957,6 +1058,23 @@ private fun SettingsField(
     password: Boolean = false
 ) {
     val colors = LocalLiuliColors.current
+    var focused by remember { mutableStateOf(false) }
+    // 聚焦时底色偏向强调色并描出细边：玻璃件没有光标提示，
+    // 不给这层反馈，用户不知道键盘落在哪个框里。
+    val fieldBackground by animateColorAsState(
+        targetValue = if (focused) {
+            colors.accent.copy(alpha = 0.10f)
+        } else {
+            colors.textPrimary.copy(alpha = 0.06f)
+        },
+        animationSpec = MotionSpec.color(),
+        label = "field-background"
+    )
+    val fieldBorder by animateColorAsState(
+        targetValue = if (focused) colors.accent.copy(alpha = 0.55f) else Color.Transparent,
+        animationSpec = MotionSpec.color(),
+        label = "field-border"
+    )
     Column {
         BasicText(
             text = label,
@@ -968,8 +1086,10 @@ private fun SettingsField(
             onValueChange = onValueChange,
             modifier = Modifier
                 .fillMaxWidth()
+                .onFocusChanged { focused = it.isFocused }
                 .clip(RoundedCornerShape(Radius.sm))
-                .background(colors.textPrimary.copy(alpha = 0.06f))
+                .background(fieldBackground)
+                .border(1.dp, fieldBorder, RoundedCornerShape(Radius.sm))
                 .padding(horizontal = Space.md, vertical = Space.md),
             textStyle = Type.sectionTitle.copy(color = colors.textPrimary, fontWeight = FontWeight.Normal),
             cursorBrush = SolidColor(colors.accent),
@@ -983,14 +1103,44 @@ private fun SettingsField(
                 keyboardType = if (password) KeyboardType.Password else KeyboardType.Uri
             ),
             decorationBox = { innerTextField ->
-                Box {
-                    if (value.isEmpty()) {
-                        BasicText(
-                            text = placeholder,
-                            style = Type.sectionTitle.copy(color = colors.textTertiary, fontWeight = FontWeight.Normal)
-                        )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) {
+                        if (value.isEmpty()) {
+                            BasicText(
+                                text = placeholder,
+                                style = Type.sectionTitle.copy(color = colors.textTertiary, fontWeight = FontWeight.Normal)
+                            )
+                        }
+                        innerTextField()
                     }
-                    innerTextField()
+                    // 清除按钮：全选删除太慢，长按也不够直觉，
+                    // 给一个能直接擦掉的入口。
+                    Visibility(
+                        visible = value.isNotEmpty(),
+                        enter = fadeIn(animationSpec = MotionSpec.enter(Motion.Quick)),
+                        exit = fadeOut(animationSpec = MotionSpec.exit(Motion.Quick))
+                    ) {
+                        val clearInteraction = remember { MutableInteractionSource() }
+                        Box(
+                            Modifier
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .semantics {
+                                    contentDescription = "清除$label"
+                                    role = Role.Button
+                                }
+                                .clickable(
+                                    interactionSource = clearInteraction,
+                                    indication = null,
+                                    role = Role.Button,
+                                    onClickLabel = "清除"
+                                ) { onValueChange("") }
+                                .pressScale(pressedScale = 0.82f, interactionSource = clearInteraction),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            GlyphIcon(Glyph.Close, colors.textTertiary, size = 13.dp)
+                        }
+                    }
                 }
             }
         )
