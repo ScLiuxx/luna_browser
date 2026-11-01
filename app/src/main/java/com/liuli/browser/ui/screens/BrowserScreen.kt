@@ -2,12 +2,12 @@ package com.liuli.browser.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntAsState
@@ -24,6 +24,11 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -56,8 +61,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -72,9 +80,13 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -93,6 +105,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.fastFirstOrNull
 import com.kyant.backdrop.Backdrop
 import com.liuli.browser.data.SearchEngine
 import com.liuli.browser.data.SettingsStore
@@ -103,11 +116,14 @@ import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
+import com.liuli.browser.ui.theme.Radius
+import com.liuli.browser.ui.theme.Space
 import com.liuli.browser.ui.theme.reduceMotion
 import com.liuli.browser.web.BrowserTab
 import com.liuli.browser.web.BrowserViewModel
@@ -118,6 +134,9 @@ import com.liuli.browser.web.agent.AgentReport
 import com.liuli.browser.web.agent.AgentReportFormat
 import com.liuli.browser.web.agent.AgentResearchPage
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -218,7 +237,82 @@ fun BrowserScreen(
         label = "address-edit-progress"
     )
 
-    Box(Modifier.fillMaxSize()) {
+    // 边缘滑动手势：左边缘右滑 = 后退，右边缘左滑 = 前进。
+    // 状态放在这里，手势协程与提示气泡共用同一份进度。
+    val swipeActive = remember { mutableStateOf(false) }
+    val swipeDirection = remember { mutableIntStateOf(0) }
+    val swipeProgress = remember { mutableFloatStateOf(0f) }
+    // 地址栏底边的位置：手势起点落在它下面才接管，
+    // 否则在地址栏上横划会跟地址栏抢手势。
+    val chromeBottom = remember { mutableFloatStateOf(0f) }
+    val swipeHintAlpha by animateFloatAsState(
+        targetValue = if (swipeActive.value) 1f else 0f,
+        animationSpec = MotionSpec.value(Motion.Quick),
+        label = "swipe-hint-alpha"
+    )
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .pointerInput(canNavigateBack, tab.canGoForward, tab.isFullscreen, menuOpen, shieldOpen, agentOpen, editing) {
+                val edge = 26.dp.toPx()
+                val trigger = 72.dp.toPx()
+                val fling = 900.dp.toPx()
+                // 底部控件所在的区域不接管：横划按钮会误触发点击。
+                val bottomGuard = 140.dp.toPx()
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val width = size.width.toFloat()
+                    val fromLeft = down.position.x <= edge
+                    val fromRight = down.position.x >= width - edge
+                    // 只认屏幕左右边缘的起手：页面中间的横向滑动留给网页自己，
+                    // 纵向滚动更是完全不受这条手势影响。
+                    if (!fromLeft && !fromRight) return@awaitEachGesture
+                    if (down.position.y < chromeBottom.floatValue) return@awaitEachGesture
+                    if (down.position.y > size.height - bottomGuard) return@awaitEachGesture
+                    // 面板、全屏与编辑态各有各的手势，这里不去抢。
+                    if (menuOpen || shieldOpen || agentOpen || editing || tab.isFullscreen) {
+                        return@awaitEachGesture
+                    }
+                    val forward = fromRight
+                    if (forward && !tab.canGoForward) return@awaitEachGesture
+                    if (!forward && !canNavigateBack) return@awaitEachGesture
+                    val tracker = VelocityTracker()
+                    tracker.addPosition(down.uptimeMillis, down.position)
+                    var travel = 0f
+                    var dragging = false
+                    val pointer = down.id
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.fastFirstOrNull { it.id == pointer } ?: break
+                        if (!change.pressed) break
+                        travel += change.positionChange().x
+                        tracker.addPosition(change.uptimeMillis, change.position)
+                        if (!dragging && abs(travel) > viewConfiguration.touchSlop) {
+                            // 方向要对上起手的那条边：右边缘往左滑才是前进。
+                            dragging = if (forward) travel < 0f else travel > 0f
+                            if (dragging) {
+                                swipeDirection.intValue = if (forward) 1 else -1
+                                swipeActive.value = true
+                            }
+                        }
+                        if (dragging) {
+                            // 接管之后才消费事件，之前让网页照常滚动。
+                            change.consume()
+                            swipeProgress.floatValue = (abs(travel) / trigger).coerceIn(0f, 1f)
+                        }
+                    }
+                    val velocity = tracker.calculateVelocity().x
+                    val far = if (forward) travel <= -trigger else travel >= trigger
+                    val fast = if (forward) velocity <= -fling else velocity >= fling
+                    val committed = dragging && (far || fast)
+                    swipeActive.value = false
+                    if (committed) {
+                        if (forward) vm.goForward() else vm.handleBack()
+                    }
+                }
+            }
+    ) {
         if (sharedSnapshot != null && sharedSnapshotKey != null) {
             val snapshotSharedModifier = with(sharedScope) {
                 Modifier.sharedBounds(
@@ -255,6 +349,10 @@ fun BrowserScreen(
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
+                // 记下地址栏的底边位置，边缘手势只在它下面接管。
+                .onGloballyPositioned {
+                    chromeBottom.floatValue = it.positionInParent().y + it.size.height
+                }
                 .statusBarsPadding()
                 .padding(top = 6.dp, start = if (isTablet) 18.dp else 10.dp, end = if (isTablet) 18.dp else 10.dp)
                 .widthIn(max = 1000.dp),
@@ -313,9 +411,12 @@ fun BrowserScreen(
                                 tab = tab,
                                 isTablet = isTablet,
                                 onClick = {
+                                    // 光标落在末尾而不是整条选中：
+                                    // 多数人点地址栏是为了改最后一段路径，
+                                    // 全选会让人一打字就把整条地址抹掉。
                                     editValue = TextFieldValue(
                                         text = tab.url,
-                                        selection = TextRange(0, tab.url.length)
+                                        selection = TextRange(tab.url.length)
                                     )
                                     editing = true
                                 },
@@ -345,16 +446,21 @@ fun BrowserScreen(
             }
 
             // 加载进度条：淡入淡出，不再"啪"地一下冒出来。
-            AnimatedVisibility(
-                visible = tab.isLoading || tab.progress in 1..99,
+            // 进度动画放在可见性判断之外：放进去的话每次重新出现都要从 0 重新长，
+            // 加载快的站点会看到进度条闪一下，而不是接着上一段继续走。
+            val progressFraction by animateFloatAsState(
+                targetValue = tab.progress.coerceIn(0, 100) / 100f,
+                // 进度是连续上报的，补间每来一个新值就重算一次，视觉上会一顿一顿地追；
+                // 弹簧则是一路把它拉过去。弹簧会略微过冲，落到宽度上时再夹住。
+                animationSpec = MotionSpec.pageSpring(),
+                label = "page-progress"
+            )
+            Visibility(
+                // 出错时进度会停在半路，此时不该再显示进度条。
+                visible = tab.errorText == null && (tab.isLoading || tab.progress in 1..99),
                 enter = fadeIn(MotionSpec.enter(Motion.Quick)),
                 exit = fadeOut(MotionSpec.exit(Motion.Quick))
             ) {
-                val fraction by animateFloatAsState(
-                    targetValue = tab.progress.coerceIn(0, 100) / 100f,
-                    animationSpec = MotionSpec.value(Motion.Normal),
-                    label = "page-progress"
-                )
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -365,7 +471,8 @@ fun BrowserScreen(
                 ) {
                     Box(
                         Modifier
-                            .fillMaxWidth(fraction)
+                            // 留一小截可见的头：进度为 0 时也要看得出页面在加载
+                            .fillMaxWidth(progressFraction.coerceIn(0.015f, 1f))
                             .fillMaxHeight()
                             .clip(RoundedCornerShape(50))
                             .background(
@@ -378,8 +485,9 @@ fun BrowserScreen(
             }
         }
 
-        AnimatedVisibility(
-            visible = !tab.isFullscreen && !isTablet && !collapsed,
+        Visibility(
+            // 菜单面板浮在底栏上方，两者同时出现会挤在一起。
+            visible = !tab.isFullscreen && !isTablet && !collapsed && !menuOpen,
             modifier = Modifier.align(Alignment.BottomCenter),
             enter = fadeIn(MotionSpec.enter()) + slideInVertically(
                 animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
@@ -410,7 +518,7 @@ fun BrowserScreen(
                     .widthIn(max = 560.dp)
             )
         }
-        AnimatedVisibility(
+        Visibility(
             visible = !tab.isFullscreen && !isTablet && collapsed,
             enter = fadeIn(MotionSpec.enter()) + slideInVertically(
                 animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
@@ -431,7 +539,7 @@ fun BrowserScreen(
             )
         }
 
-        AnimatedVisibility(
+        Visibility(
             visible = tab.errorText != null,
             enter = fadeIn(MotionSpec.enter()) + scaleIn(
                 animationSpec = MotionSpec.pageSpring(),
@@ -454,15 +562,18 @@ fun BrowserScreen(
             )
         }
 
-        AnimatedVisibility(
-            visible = menuOpen,
-            enter = fadeIn(MotionSpec.enter()),
-            exit = fadeOut(MotionSpec.exit())
-        ) {
+        // 遮罩的深浅单独做动画：直接切背景色会"啪"地盖下来，
+        // 遮罩与面板错开半拍才像同一件事。
+        val menuScrim by animateFloatAsState(
+            targetValue = if (menuOpen) 1f else 0f,
+            animationSpec = MotionSpec.value(Motion.Quick),
+            label = "menu-scrim"
+        )
+        if (menuScrim > 0.001f) {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.12f))
+                    .background(Color.Black.copy(alpha = 0.18f * menuScrim))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
@@ -470,7 +581,7 @@ fun BrowserScreen(
             )
         }
 
-        AnimatedVisibility(
+        Visibility(
             visible = menuOpen,
             enter = slideInVertically(
                 animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
@@ -508,12 +619,13 @@ fun BrowserScreen(
             )
         }
 
-        AnimatedVisibility(
+        Visibility(
             visible = shieldOpen,
             enter = fadeIn(MotionSpec.enter()),
             exit = fadeOut(MotionSpec.exit())
         ) {
             PrivacyShieldPanel(
+                visible = shieldOpen,
                 blocked = tab.blockedTrackers,
                 blockThirdParty = settings.blockThirdPartyCookies,
                 fingerprintProtection = settings.fingerprintProtection,
@@ -525,7 +637,7 @@ fun BrowserScreen(
         }
 
         // P7 一镜到底：Agent 球从右下角缩小隐去，面板从同一角展开，避免场景跳变。
-        AnimatedVisibility(
+        Visibility(
             visible = settings.agentEnabled && !tab.isFullscreen && !menuOpen && !shieldOpen && !agentOpen,
             enter = fadeIn(MotionSpec.enter()) + scaleIn(
                 animationSpec = MotionSpec.pageSpring(),
@@ -555,7 +667,7 @@ fun BrowserScreen(
             )
         }
 
-        AnimatedVisibility(
+        Visibility(
             visible = agentOpen,
             enter = fadeIn(MotionSpec.enter()) + scaleIn(
                 animationSpec = MotionSpec.pageSpring(),
@@ -628,11 +740,49 @@ fun BrowserScreen(
                 onSharePage = { onShare(tab.url, tab.pageTitle()) }
             )
         }
+
+        // 边缘滑动的提示：告诉用户这一划是"后退"还是"前进"，
+        // 力度跟着手指走。没提示的话这条手势几乎不可能被猜到。
+        if (swipeHintAlpha > 0.01f) {
+            Box(
+                Modifier
+                    .align(
+                        if (swipeDirection.intValue > 0) Alignment.CenterEnd else Alignment.CenterStart
+                    )
+                    .padding(horizontal = 20.dp)
+                    .graphicsLayer {
+                        alpha = swipeHintAlpha
+                        val scale = 0.82f + 0.18f * swipeProgress.floatValue
+                        scaleX = scale
+                        scaleY = scale
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                GlassSurface(
+                    backdrop = backdrop,
+                    modifier = Modifier.size(52.dp),
+                    shape = CircleShape,
+                    tint = colors.glassTintStrong,
+                    blurRadius = 18.dp,
+                    lensHeight = 12.dp,
+                    lensAmount = 18.dp,
+                    contentPadding = PaddingValues(0.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    GlyphIcon(
+                        glyph = if (swipeDirection.intValue > 0) Glyph.Forward else Glyph.Back,
+                        tint = colors.textPrimary,
+                        size = 22.dp
+                    )
+                }
+            }
+        }
     }
 }
 
 @Composable
 private fun PrivacyShieldPanel(
+    visible: Boolean,
     blocked: Int,
     blockThirdParty: Boolean,
     fingerprintProtection: Boolean,
@@ -642,6 +792,19 @@ private fun PrivacyShieldPanel(
     onClose: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    // 卡片本体用弹簧缩放：只做整体淡入的话，卡片像"贴"在屏幕上，没有厚度。
+    // 关闭时 visible 变 false，缩回一点，遮罩同时淡出。
+    var entered by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { entered = true }
+    val cardScale by animateFloatAsState(
+        targetValue = when {
+            !visible -> 0.94f
+            entered -> 1f
+            else -> 0.92f
+        },
+        animationSpec = MotionSpec.pageSpring(),
+        label = "shield-card-scale"
+    )
     Box(
         Modifier
             .fillMaxSize()
@@ -657,11 +820,15 @@ private fun PrivacyShieldPanel(
             modifier = Modifier
                 .padding(22.dp)
                 .widthIn(max = 380.dp)
+                .graphicsLayer {
+                    scaleX = cardScale
+                    scaleY = cardScale
+                }
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
                 ) { },
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(Radius.xl),
             tint = colors.glassTintStrong.copy(alpha = 0.96f),
             blurRadius = 0.dp,
             lensHeight = 0.dp,
@@ -810,6 +977,12 @@ private fun AddressIdleContent(
 ) {
     val colors = LocalLiuliColors.current
     val reduced = reduceMotion
+    // 地址栏要显示的站点名。data:/about: 这类地址没有主机名，
+    // 直接显示整条原始 URL 会被撑爆（data: 的正文可能几十 KB）。
+    val hostLabel = tab.addressLabel()
+    // 加载中标题还停在域名上，上下两行会显示成同一个词；
+    // 换成加载状态，用户才知道页面正在打开。
+    val subtitle = if (tab.isLoading) "正在加载…" else tab.pageTitle()
     val securityGlyph = when {
         tab.isPrivate -> Glyph.Incognito
         shieldOn -> Glyph.Shield
@@ -979,10 +1152,10 @@ private fun AddressIdleContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     BasicText(
-                        text = tab.displayHost,
+                        text = hostLabel,
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(Radius.sm))
                             .clickable(
                                 interactionSource = compactInteraction,
                                 indication = null,
@@ -1024,7 +1197,7 @@ private fun AddressIdleContent(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             BasicText(
-                                text = tab.displayHost,
+                                text = hostLabel,
                                 style = TextStyle(
                                     color = colors.textPrimary,
                                     fontSize = 15.sp,
@@ -1035,7 +1208,7 @@ private fun AddressIdleContent(
                             )
                             // "桌面版"徽标淡入淡出：切到桌面模式时徽标是"化"出来的，
                             // 而不是硬生生地插进标题旁边。
-                            AnimatedVisibility(
+                            Visibility(
                                 visible = tab.desktopMode,
                                 enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
                                     expandHorizontally(animationSpec = MotionSpec.sizeValue()),
@@ -1062,7 +1235,7 @@ private fun AddressIdleContent(
                         }
                         Spacer(Modifier.height(1.dp))
                         BasicText(
-                            text = tab.pageTitle(),
+                            text = subtitle,
                             style = TextStyle(color = colors.textTertiary, fontSize = 10.sp),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -1179,10 +1352,23 @@ private fun AddressEditContent(
                 cursorBrush = SolidColor(colors.accent),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                keyboardActions = KeyboardActions(onGo = { onSubmit() })
+                keyboardActions = KeyboardActions(onGo = { onSubmit() }),
+                // 清空之后输入框是全空的，没有提示就不知道这里能输入什么。
+                decorationBox = { innerTextField ->
+                    Box {
+                        if (value.text.isEmpty()) {
+                            BasicText(
+                                text = "搜索或输入网址",
+                                style = TextStyle(color = colors.textTertiary, fontSize = 15.sp),
+                                maxLines = 1
+                            )
+                        }
+                        innerTextField()
+                    }
+                }
             )
             // 「清空」按钮淡入：有文字才出现，硬切会让输入框看起来在闪。
-            AnimatedVisibility(
+            Visibility(
                 visible = value.text.isNotEmpty(),
                 enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
                     scaleIn(
@@ -1448,15 +1634,15 @@ private fun BrowserDock(
     val colors = LocalLiuliColors.current
     GlassSurface(
         backdrop = backdrop,
-        modifier = modifier.fillMaxWidth().height(62.dp),
-        shape = RoundedCornerShape(31.dp),
+        modifier = modifier.fillMaxWidth().height(Dimens.dockHeight),
+        shape = RoundedCornerShape(Dimens.dockHeight / 2),
         tint = colors.dockTint,
         blurRadius = 24.dp,
         lensHeight = 18.dp,
         lensAmount = 24.dp,
         shadow = true
     ) {
-        Row(Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
+        Row(Modifier.fillMaxSize().padding(horizontal = Space.xs)) {
             // RTL 下前进/后退箭头要跟着翻转，否则方向和实际行为相反。
             val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
             ToolDockButton(if (isLtr) Glyph.Back else Glyph.Forward, "后退", backEnabled, onBack)
@@ -1589,6 +1775,16 @@ private fun BrowserMenu(
     val colors = LocalLiuliColors.current
     val context = androidx.compose.ui.platform.LocalContext.current
     val bookmarked = vm.isActiveBookmarked()
+    // 面板可以往下甩掉：底栏手势是移动端的基本预期，
+    // 只靠点遮罩关闭对单手操作太远了。
+    val scope = rememberCoroutineScope()
+    val dragOffset = remember { Animatable(0f) }
+    val dismissDistance = with(LocalDensity.current) { 96.dp.toPx() }
+    val flingSpeed = with(LocalDensity.current) { 900.dp.toPx() }
+    val glideSpec = MotionSpec.glideSpring()
+    val dragState = rememberDraggableState { delta ->
+        scope.launch { dragOffset.snapTo((dragOffset.value + delta).coerceAtLeast(0f)) }
+    }
     data class MenuEntry(
         val glyph: Glyph,
         val label: String,
@@ -1636,12 +1832,28 @@ private fun BrowserMenu(
         backdrop = backdrop,
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(28.dp))
+            .offset { IntOffset(0, dragOffset.value.roundToInt()) }
+            .graphicsLayer {
+                // 越往下拖越透明：面板"沉下去"的感觉比单纯位移更明确。
+                alpha = 1f - (dragOffset.value / dismissDistance).coerceIn(0f, 1f) * 0.45f
+            }
+            .draggable(
+                state = dragState,
+                orientation = Orientation.Vertical,
+                onDragStopped = { velocity ->
+                    if (dragOffset.value > dismissDistance || velocity > flingSpeed) {
+                        onDismiss()
+                    } else {
+                        dragOffset.animateTo(0f, glideSpec)
+                    }
+                }
+            )
+            .clip(RoundedCornerShape(Radius.xl))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
             ) { },
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(Radius.xl),
         tint = colors.glassTintStrong,
         blurRadius = 26.dp,
         lensHeight = 20.dp,
@@ -1672,9 +1884,10 @@ private fun BrowserMenu(
                         overflow = TextOverflow.Ellipsis
                     )
                     BasicText(
-                        text = tab.displayHost,
+                        text = tab.addressLabel(),
                         style = TextStyle(color = colors.textTertiary, fontSize = 11.sp),
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -1743,5 +1956,24 @@ private fun BrandMini(colors: com.liuli.browser.ui.theme.LiuliColors) {
         contentAlignment = Alignment.Center
     ) {
         GlyphIcon(Glyph.Globe, Color.White, size = 18.dp)
+    }
+}
+
+/**
+ * 地址栏要显示的站点名。
+ *
+ * [BrowserTab.displayHost] 对 data:、about: 这类没有主机名的地址会退回整条原始 URL，
+ * 而 data: 的正文可能几十 KB，直接塞进文本框既撑爆地址栏又拖慢排版。
+ * 这里统一换成可读的名字，正常网址仍然显示主机名。
+ */
+private fun BrowserTab.addressLabel(): String {
+    val url = this.url
+    if (url.isBlank()) return "新标签页"
+    return when {
+        url.startsWith("data:") -> "数据页面"
+        url.startsWith("about:") -> "内部页面"
+        url.startsWith("javascript:") -> "脚本页面"
+        url.startsWith("file:") -> "本地文件"
+        else -> displayHost.take(120)
     }
 }
