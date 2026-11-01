@@ -10,3 +10,6 @@ keystore.properties
 *.aab
 .idea/
 .DS_Store
+
+# 沙箱构建工具缓存（Gradle 分发包与 Android 命令行工具）
+.toolchain/

@@ -39,13 +39,24 @@ object AgentShareCard {
     private const val GAP_SUMMARY_SOURCE = 46f
     private const val GAP_SOURCE_ITEMS = 12f
 
-    // 文本长度上限，超出部分以省略号截断。
-    private const val MAX_TITLE_CHARS = 80
-    private const val MAX_CARD_CHARS = 160
-    private const val MAX_SOURCE_TITLE_CHARS = 60
-    private const val MAX_URL_CHARS = 200
+    /**
+     * 行距倍率。
+     *
+     * 排版与"能放下几行"的估算必须用同一个值：
+     * 估算用 1.45、排版用 1.35 时会少算半行，摘要区凭空空出一截。
+     */
+    private const val LINE_SPACING = 1.35f
+
+    // 文本长度上限。
+    // 这里只是"兜底闸门"：真正决定显示多少的是 StaticLayout 的行数限制，
+    // 闸门设得比实际能排下的行数宽松很多，避免在字与字之间硬切。
+    private const val MAX_TITLE_CHARS = 240
+    private const val MAX_CARD_CHARS = 600
+    private const val MAX_SOURCE_TITLE_CHARS = 160
+    private const val MAX_URL_CHARS = 400
 
     private const val BRAND_TEXT = "琉璃浏览器 · 琉璃 Agent"
+    private const val LOCAL_BADGE = "本机生成"
     private const val TITLE_FALLBACK = "琉璃 Agent 分享卡片"
     private const val SUMMARY_FALLBACK = "本机整理的一段内容摘要"
 
@@ -57,11 +68,16 @@ object AgentShareCard {
     private val COLOR_TITLE = 0xFFFFFFFF.toInt()
     private val COLOR_BRAND = 0xFFD3D7E6.toInt()
     private val COLOR_BODY = 0xFFC7CBDC.toInt()
+    // 来源区是页脚，用比正文更弱的一档颜色：
+    // 此前它用的是纯白，比上方的摘要正文还亮，层级整个倒了过来。
+    private val COLOR_SOURCE_TITLE = 0xFFAEB4C6.toInt()
     private val COLOR_MUTED = 0xFF8A90A0.toInt()
 
     /** 渲染一张竖版分享卡片（默认 1080×1440）。 */
     fun render(creation: AgentCreation, widthPx: Int = 1080): Bitmap {
-        val width = if (widthPx > 0) widthPx else BASE_WIDTH
+        // 宽度上限：调用方传一个离谱的值会直接 OOM，
+        // 卡片本来就是给社交平台用的，1600 宽足够清晰。
+        val width = widthPx.coerceIn(480, 1600)
         val scale = width / BASE_WIDTH.toFloat()
         val height = (BASE_HEIGHT * scale).toInt()
         val margin = BASE_MARGIN * scale
@@ -76,7 +92,7 @@ object AgentShareCard {
         val host = hostOf(url)
         val sourceTitle = creation.sourceTitle.trim()
             .ifBlank { host.ifBlank { "未知来源" } }
-        val sourceTitlePaint = textPaint(30f * scale, COLOR_TITLE)
+        val sourceTitlePaint = textPaint(30f * scale, COLOR_SOURCE_TITLE)
         val hostPaint = textPaint(26f * scale, COLOR_ACCENT_SKY)
         val urlPaint = textPaint(24f * scale, COLOR_MUTED)
         val sourceTitleLayout = layout(
@@ -109,7 +125,7 @@ object AgentShareCard {
 
         // 品牌行
         val brandTop = BASE_TOP * scale
-        drawBrand(canvas, margin, brandTop, scale)
+        drawBrand(canvas, margin, brandTop, scale, width - margin)
 
         // 大标题（最多两行）
         val titlePaint = textPaint(66f * scale, COLOR_TITLE, bold = true)
@@ -129,7 +145,7 @@ object AgentShareCard {
 
         // 一句话摘要（最多三行）
         val summaryPaint = textPaint(34f * scale, COLOR_BODY)
-        val summaryLineHeight = summaryPaint.fontSpacing * 1.45f
+        val summaryLineHeight = summaryPaint.fontSpacing * LINE_SPACING
         val room = (hairlineY - y).coerceAtLeast(summaryLineHeight)
         val summaryLines = (room / summaryLineHeight).toInt().coerceIn(1, 3)
         val summaryLayout = layout(
@@ -210,8 +226,8 @@ object AgentShareCard {
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), glowBottom)
     }
 
-    /** 品牌行：渐变小方块 + 品牌名。 */
-    private fun drawBrand(canvas: Canvas, margin: Float, top: Float, scale: Float) {
+    /** 品牌行：渐变小方块 + 品牌名，右端挂一枚"本机生成"徽标。 */
+    private fun drawBrand(canvas: Canvas, margin: Float, top: Float, scale: Float, right: Float) {
         val mark = BRAND_HEIGHT * scale
         val markPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             shader = LinearGradient(
@@ -239,6 +255,56 @@ object AgentShareCard {
             BRAND_TEXT,
             margin + mark + 14f * scale,
             top - metrics.top,
+            paint
+        )
+        // "本机生成"是这张卡最想说的话：内容没上过云。
+        // 放在右上角，视觉上与品牌行齐平，不抢标题的位置。
+        drawLocalBadge(canvas, right, top, scale)
+    }
+
+    /** 右上角的"本机生成"徽标：半透明描边胶囊。 */
+    private fun drawLocalBadge(canvas: Canvas, right: Float, top: Float, scale: Float) {
+        val paint = textPaint(24f * scale, COLOR_ACCENT_SKY)
+        val textWidth = paint.measureText(LOCAL_BADGE)
+        val metrics = paint.fontMetrics
+        val padH = 16f * scale
+        val padV = 10f * scale
+        val badgeWidth = textWidth + padH * 2
+        val badgeHeight = (metrics.descent - metrics.ascent) + padV * 2
+        val left = right - badgeWidth
+        val bottom = top + metrics.descent + padV
+        val rectTop = bottom - badgeHeight
+
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = withAlpha(COLOR_ACCENT_SKY, 0.12f)
+        }
+        canvas.drawRoundRect(
+            left,
+            rectTop,
+            right,
+            bottom,
+            badgeHeight / 2f,
+            badgeHeight / 2f,
+            fill
+        )
+        val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 1.5f * scale
+            color = withAlpha(COLOR_ACCENT_SKY, 0.45f)
+        }
+        canvas.drawRoundRect(
+            left,
+            rectTop,
+            right,
+            bottom,
+            badgeHeight / 2f,
+            badgeHeight / 2f,
+            stroke
+        )
+        canvas.drawText(
+            LOCAL_BADGE,
+            left + padH,
+            top - metrics.ascent + padV,
             paint
         )
     }
@@ -294,7 +360,7 @@ object AgentShareCard {
     ): StaticLayout = StaticLayout.Builder
         .obtain(text, 0, text.length, paint, width)
         .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-        .setLineSpacing(0f, 1.35f)
+        .setLineSpacing(0f, LINE_SPACING)
         .setIncludePad(false)
         .setMaxLines(maxLines)
         .setEllipsize(TextUtils.TruncateAt.END)
@@ -321,11 +387,16 @@ object AgentShareCard {
             }
         }
 
-    /** 折叠空白并按长度截断，超长时补省略号。 */
+    /**
+ * 折叠空白并按长度截断。
+ *
+ * 这里不再补省略号：StaticLayout 自己会在行尾加一个，
+ * 两边都加会变成"……"。
+ */
     private fun ellipsize(text: String, limit: Int): String {
         val clean = text.replace(Regex("\\s+"), " ").trim()
         if (clean.isEmpty()) return ""
-        return if (clean.length <= limit) clean else clean.take(limit - 1) + "…"
+        return if (clean.length <= limit) clean else clean.take(limit)
     }
 
     /** 取链接的 host；没有协议时退化为手写解析，避免丢掉出处。 */
