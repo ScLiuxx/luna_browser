@@ -149,29 +149,39 @@ object MotionSpec {
     fun glideSpring(reduced: Boolean): FiniteAnimationSpec<Float> =
         if (reduced) tween(Motion.Fast) else Motion.GlideSpring.spring()
 
+    /**
+     * 补间时长。
+     *
+     * "减少动态效果"开启时一律用最短档：补间规格此前完全无视这个开关，
+     * 只有弹簧版本会降级，于是"减少动态效果"对绝大多数转场等于没开。
+     * 时长压到 Fast 之后，位移与缩放仍在，但快到几乎察觉不到。
+     */
+    private fun duration(reduced: Boolean, durationMillis: Int): Int =
+        if (reduced) Motion.Fast else durationMillis
+
     /** 进入动画（用于 fadeIn / scaleIn 等 Float 规格的转场）。 */
     fun enter(reduced: Boolean, durationMillis: Int = Motion.Normal): FiniteAnimationSpec<Float> =
-        tween(durationMillis, easing = Motion.Enter)
+        tween(duration(reduced, durationMillis), easing = Motion.Enter)
 
     /** 退出动画（用于 fadeOut / scaleOut 等 Float 规格的转场）。 */
     fun exit(reduced: Boolean, durationMillis: Int = Motion.Quick): FiniteAnimationSpec<Float> =
-        tween(durationMillis, easing = Motion.Exit)
+        tween(duration(reduced, durationMillis), easing = Motion.Exit)
 
     /** 数值补间动画。 */
     fun value(reduced: Boolean, durationMillis: Int = Motion.Normal): FiniteAnimationSpec<Float> =
-        tween(durationMillis, easing = Motion.Enter)
+        tween(duration(reduced, durationMillis), easing = Motion.Enter)
 
     /** 整数补间动画（用于行数、偏移量等 Int 状态）。 */
     fun intValue(reduced: Boolean, durationMillis: Int = Motion.Normal): FiniteAnimationSpec<Int> =
-        tween(durationMillis, easing = Motion.Enter)
+        tween(duration(reduced, durationMillis), easing = Motion.Enter)
 
     /** 尺寸补间动画（用于 expandVertically 等 IntSize 规格）。 */
     fun sizeValue(reduced: Boolean, durationMillis: Int = Motion.Normal): FiniteAnimationSpec<IntSize> =
-        tween(durationMillis, easing = Motion.Enter)
+        tween(duration(reduced, durationMillis), easing = Motion.Enter)
 
     /** 颜色过渡（用于 animateColorAsState）。 */
     fun color(reduced: Boolean, durationMillis: Int = Motion.Quick): FiniteAnimationSpec<Color> =
-        tween(durationMillis, easing = Motion.Enter)
+        tween(duration(reduced, durationMillis), easing = Motion.Enter)
 
     // ---------------------------------------------------------------------
     // Composable 版本
