@@ -8,6 +8,7 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntAsState
@@ -92,6 +93,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -100,11 +102,14 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
@@ -149,8 +154,11 @@ import com.liuli.browser.web.agent.AgentCreationFormat
 import com.liuli.browser.web.agent.AgentReport
 import com.liuli.browser.web.agent.AgentReportFormat
 import com.liuli.browser.web.agent.AgentResearchPage
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -183,7 +191,14 @@ fun BrowserScreen(
     var menuOpen by rememberSaveable(tab.id) { mutableStateOf(false) }
     var shieldOpen by rememberSaveable(tab.id) { mutableStateOf(false) }
     var agentOpen by rememberSaveable(tab.id) { mutableStateOf(false) }
-    var editValue by remember { mutableStateOf(TextFieldValue(tab.url)) }
+    // 地址栏里的输入内容要能扛住配置变更：
+    // TextFieldValue 不是 Parcelable，不能直接交给 rememberSaveable，
+    // 但 TextFieldValue.Saver 会把文本、选区与输入法组合区一起存下来。
+    // 用 remember 的话，旋转屏幕会丢掉刚输入的网址，
+    // 正在打的拼音也会被硬生生打断。
+    var editValue by rememberSaveable(tab.id, stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(tab.url))
+    }
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
 
@@ -219,7 +234,13 @@ fun BrowserScreen(
     val fontScale = density.fontScale
     val idleBarHeight = if (fontScale > 1.3f) 76.dp else 64.dp
     val canNavigateBack = tab.canGoBack || vm.tabs.size > 1 || !tab.isHome
-    val collapsed = settings.autoHideToolbar && vm.toolbarCollapsed && !editing && !menuOpen && !shieldOpen
+    // 收起状态不看「自动收起」开关：
+    // 那个开关管的是"滚动时要不要自动收"，由 ViewModel 里的滚动监听决定；
+    // 菜单里的「收起工具栏」是用户手动下的指令，
+    // 要是也被这个开关拦下来，自动收起关着时点了这一项就什么都不会发生。
+    // ViewModel 在跳转与切换标签时都会把 toolbarCollapsed 复位，
+    // 手动收起不会一直赖着不走。
+    val collapsed = vm.toolbarCollapsed && !editing && !menuOpen && !shieldOpen
     // sharedBounds 的 boundsTransform 不是 Composable 上下文，规格要在外面先算好。
     val addressBoundsSpec = MotionSpec.sharedSpring(Rect(0f, 0f, 0f, 0f))
     val snapshotBoundsSpec = MotionSpec.pageSpring(Rect(0f, 0f, 0f, 0f))
@@ -255,9 +276,12 @@ fun BrowserScreen(
     // 地址栏在"浏览态 ↔ 编辑态"之间形变：
     // 容器高度用弹簧伸缩，内容同时做方向性滑动，
     // 新内容从下方推入、旧内容向上收起，避免纯淡化的"凭空替换"。
+    // 这条进度与容器高度、内容的交叉淡化共用同一条弹簧：
+    // 三者各走各的曲线时，内容会在容器还在长的时候先停住，
+    // 看上去像文字悬在半空。
     val editProgress by animateFloatAsState(
         targetValue = if (editing) 1f else 0f,
-        animationSpec = MotionSpec.value(Motion.Quick),
+        animationSpec = MotionSpec.pageSpring(),
         label = "address-edit-progress"
     )
 
@@ -281,7 +305,9 @@ fun BrowserScreen(
             .pointerInput(canNavigateBack, tab.canGoForward, tab.isFullscreen, menuOpen, shieldOpen, agentOpen, editing) {
                 val edge = 26.dp.toPx()
                 val trigger = 72.dp.toPx()
-                val fling = 900.dp.toPx()
+                // 甩动的速度阈值：600dp/s 已经是"明确的一划"，
+                // 再高就只剩位移判定起作用，甩一下反而常常不生效。
+                val fling = 600.dp.toPx()
                 // 底部控件所在的区域不接管：横划按钮会误触发点击。
                 val bottomGuard = 140.dp.toPx()
                 awaitEachGesture {
@@ -301,38 +327,47 @@ fun BrowserScreen(
                     val forward = fromRight
                     if (forward && !tab.canGoForward) return@awaitEachGesture
                     if (!forward && !canNavigateBack) return@awaitEachGesture
+                    // 上一次手势的进度要清零：
+                    // 否则这一划刚开始时，提示气泡会先以旧进度缩放一下再回弹。
+                    swipeProgress.floatValue = 0f
                     val tracker = VelocityTracker()
                     tracker.addPosition(down.uptimeMillis, down.position)
                     var travel = 0f
                     var dragging = false
                     val pointer = down.id
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.fastFirstOrNull { it.id == pointer } ?: break
-                        if (!change.pressed) break
-                        travel += change.positionChange().x
-                        tracker.addPosition(change.uptimeMillis, change.position)
-                        if (!dragging && abs(travel) > viewConfiguration.touchSlop) {
-                            // 方向要对上起手的那条边：右边缘往左滑才是前进。
-                            dragging = if (forward) travel < 0f else travel > 0f
+                    // 手势随时可能被取消：页面接管了指针、面板打开、
+                    // 甚至整个协程被键值变化打断。
+                    // 收尾必须放在 finally 里，否则提示气泡会永远停在屏幕上。
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.fastFirstOrNull { it.id == pointer } ?: break
+                            if (!change.pressed) break
+                            travel += change.positionChange().x
+                            tracker.addPosition(change.uptimeMillis, change.position)
+                            if (!dragging && abs(travel) > viewConfiguration.touchSlop) {
+                                // 方向要对上起手的那条边：右边缘往左滑才是前进。
+                                dragging = if (forward) travel < 0f else travel > 0f
+                                if (dragging) {
+                                    swipeDirection.intValue = if (forward) 1 else -1
+                                    swipeActive.value = true
+                                }
+                            }
                             if (dragging) {
-                                swipeDirection.intValue = if (forward) 1 else -1
-                                swipeActive.value = true
+                                // 接管之后才消费事件，之前让网页照常滚动。
+                                change.consume()
+                                swipeProgress.floatValue = (abs(travel) / trigger).coerceIn(0f, 1f)
                             }
                         }
-                        if (dragging) {
-                            // 接管之后才消费事件，之前让网页照常滚动。
-                            change.consume()
-                            swipeProgress.floatValue = (abs(travel) / trigger).coerceIn(0f, 1f)
+                        val velocity = tracker.calculateVelocity().x
+                        val far = if (forward) travel <= -trigger else travel >= trigger
+                        val fast = if (forward) velocity <= -fling else velocity >= fling
+                        val committed = dragging && (far || fast)
+                        if (committed) {
+                            if (forward) vm.goForward() else vm.handleBack()
                         }
-                    }
-                    val velocity = tracker.calculateVelocity().x
-                    val far = if (forward) travel <= -trigger else travel >= trigger
-                    val fast = if (forward) velocity <= -fling else velocity >= fling
-                    val committed = dragging && (far || fast)
-                    swipeActive.value = false
-                    if (committed) {
-                        if (forward) vm.goForward() else vm.handleBack()
+                    } finally {
+                        swipeActive.value = false
                     }
                 }
             }
@@ -404,7 +439,9 @@ fun BrowserScreen(
             ) {
                 Crossfade(
                     targetState = editing,
-                    animationSpec = MotionSpec.value(Motion.Quick),
+                    // 与容器高度同一条弹簧：内容换完的那一刻，
+                    // 地址栏也刚好长到位，两者不会各走各的。
+                    animationSpec = MotionSpec.pageSpring(),
                     label = "address-content"
                 ) { isEditing ->
                     // 交叉淡化的同时给一点方向：编辑态从下方推入，
@@ -775,10 +812,14 @@ fun BrowserScreen(
         // 边缘滑动的提示：告诉用户这一划是"后退"还是"前进"，
         // 力度跟着手指走。没提示的话这条手势几乎不可能被猜到。
         if (swipeHintAlpha > 0.01f) {
+            // RTL 下前进在左、后退在右，箭头也要跟着翻：
+            // 否则提示出现在错误的一侧，箭头还指着反方向。
+            val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
+            val goingForward = swipeDirection.intValue > 0
             Box(
                 Modifier
                     .align(
-                        if (swipeDirection.intValue > 0) Alignment.CenterEnd else Alignment.CenterStart
+                        if (goingForward == isLtr) Alignment.CenterEnd else Alignment.CenterStart
                     )
                     .padding(horizontal = 20.dp)
                     .graphicsLayer {
@@ -804,7 +845,7 @@ fun BrowserScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     GlyphIcon(
-                        glyph = if (swipeDirection.intValue > 0) Glyph.Forward else Glyph.Back,
+                        glyph = if (goingForward == isLtr) Glyph.Forward else Glyph.Back,
                         tint = colors.textPrimary,
                         size = 22.dp
                     )
@@ -1062,8 +1103,12 @@ private fun AddressIdleContent(
         val grew = blockedTrackers > lastTrackerCount
         lastTrackerCount = blockedTrackers
         if (grew && !reduced) {
-            trackerPop.snapTo(1.34f)
-            trackerPop.animateTo(1f, MotionSpec.pageSpring(reduced))
+            // NonCancellable：拦截数连着涨时，后一次会取消前一次协程，
+            // 收尾动画若跟着被取消，角标就会停在放大的状态上不下来。
+            withContext(NonCancellable) {
+                trackerPop.snapTo(1.34f)
+                trackerPop.animateTo(1f, MotionSpec.pageSpring(reduced))
+            }
         }
     }
     // 收起/展开时，护盾徽标、图标、角标与间距都跟着连续变化：
@@ -1337,12 +1382,25 @@ private fun AddressIdleContent(
                             }
                         }
                         Spacer(Modifier.height(1.dp))
-                        BasicText(
-                            text = subtitle,
-                            style = TextStyle(color = colors.textTertiary, fontSize = 10.sp),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        // 加载状态与页面标题之间交叉淡化：
+                        // 直接换字会看到一行字"啪"地换成另一行，
+                        // 页面刚打开那一瞬间最容易撞上。
+                        AnimatedContent(
+                            targetState = subtitle,
+                            modifier = Modifier.fillMaxWidth(),
+                            transitionSpec = {
+                                fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick)) togetherWith
+                                    fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick))
+                            },
+                            label = "address-subtitle"
+                        ) { text ->
+                            BasicText(
+                                text = text,
+                                style = TextStyle(color = colors.textTertiary, fontSize = 10.sp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                     PlainToolButton(
                         glyph = if (tab.isLoading) Glyph.Stop else Glyph.Reload,
@@ -1452,6 +1510,7 @@ private fun AddressEditContent(
 ) {
     val colors = LocalLiuliColors.current
     val interactionSource = remember { MutableInteractionSource() }
+    val haptics = LocalHapticFeedback.current
     // 聚焦时放大镜与占位文字一起转成强调色：
     // 地址栏和首页搜索框是同一块玻璃，焦点表现必须长得一样。
     val focused by interactionSource.collectIsFocusedAsState()
@@ -1516,7 +1575,15 @@ private fun AddressEditContent(
                     // 回车键与「前往」按钮同一把尺：空内容同样不提交，
                     // 否则键盘上能走通、按钮却按不动，用户会以为按键坏了。
                     keyboardActions = KeyboardActions(
-                        onGo = { if (value.text.isNotBlank()) onSubmit() }
+                        onGo = {
+                            if (value.text.isNotBlank()) {
+                                // 键盘的"前往"没有按下这一下，触感得自己给。
+                                // 首页搜索框也是这么做的：两屏是同一块共享元素，
+                                // 走键盘提交时的手感必须一致。
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSubmit()
+                            }
+                        }
                     ),
                     // 清空之后输入框是全空的，没有提示就不知道这里能输入什么。
                     decorationBox = { innerTextField ->
@@ -1676,6 +1743,9 @@ private fun PlainToolButton(
             .semantics {
                 contentDescription = description
                 role = Role.Button
+                // 禁用态要念出来：只靠图标变灰，
+                // 读屏用户根本不知道这一下按不动。
+                if (!enabled) disabled()
             }
             .clickable(
                 interactionSource = interaction,
@@ -1738,8 +1808,13 @@ private fun RowScope.ToolDockButton(
             .weight(1f)
             .fillMaxHeight()
             .semantics {
-                contentDescription = description
+                // 角标数量并进名字里：单独念一个"3"没有意义，
+                // "标签页，3 个标签页"才是完整的一句。
+                contentDescription = if (badge > 0) "$description，$badge 个标签页" else description
                 role = Role.Button
+                // 禁用态要念出来：只靠图标变灰，
+                // 读屏用户根本不知道这一下按不动。
+                if (!enabled) disabled()
             }
             .clickable(
                 interactionSource = interaction,
@@ -1803,12 +1878,15 @@ private fun RowScope.ToolDockButton(
                 ) { count ->
                     if (count > 0) {
                         BasicText(
-                            text = count.coerceAtMost(99).toString(),
+                            // 超过两位写"99+"：写死 99 会让人以为只有 99 个标签页。
+                            text = if (count > 99) "99+" else count.toString(),
                             style = TextStyle(
                                 color = Color.White,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold
-                            )
+                            ),
+                            // 数量已经并进按钮的名字里，这里不要再单独播报一遍。
+                            modifier = Modifier.clearAndSetSemantics {}
                         )
                     }
                 }
@@ -2022,12 +2100,20 @@ private fun BrowserMenu(
     // 面板可以往下甩掉：底栏手势是移动端的基本预期，
     // 只靠点遮罩关闭对单手操作太远了。
     val scope = rememberCoroutineScope()
-    val dragOffset = remember { Animatable(0f) }
+    // 拖拽位移直接写状态，不用 Animatable：
+    // 每个指针事件都起一个协程去 snapTo，事件一密就互相打断，
+    // 面板会明显落后于手指，像是卡了一帧。
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    // 松手后的回弹单独占一个协程句柄：
+    // 新手势开始时必须先把它掐掉，否则回弹会和拖拽抢同一个位移量，面板会抖。
+    var settleJob by remember { mutableStateOf<Job?>(null) }
     val dismissDistance = with(LocalDensity.current) { 96.dp.toPx() }
     val flingSpeed = with(LocalDensity.current) { 900.dp.toPx() }
     val glideSpec = MotionSpec.glideSpring()
     val dragState = rememberDraggableState { delta ->
-        scope.launch { dragOffset.snapTo((dragOffset.value + delta).coerceAtLeast(0f)) }
+        settleJob?.cancel()
+        settleJob = null
+        dragOffset = (dragOffset + delta).coerceAtLeast(0f)
     }
     data class MenuEntry(
         val glyph: Glyph,
@@ -2086,19 +2172,28 @@ private fun BrowserMenu(
         backdrop = backdrop,
         modifier = Modifier
             .fillMaxWidth()
-            .offset { IntOffset(0, dragOffset.value.roundToInt()) }
+            .offset { IntOffset(0, dragOffset.roundToInt()) }
             .graphicsLayer {
                 // 越往下拖越透明：面板"沉下去"的感觉比单纯位移更明确。
-                alpha = 1f - (dragOffset.value / dismissDistance).coerceIn(0f, 1f) * 0.45f
+                alpha = 1f - (dragOffset / dismissDistance).coerceIn(0f, 1f) * 0.45f
             }
             .draggable(
                 state = dragState,
                 orientation = Orientation.Vertical,
                 onDragStopped = { velocity ->
-                    if (dragOffset.value > dismissDistance || velocity > flingSpeed) {
+                    if (dragOffset > dismissDistance || velocity > flingSpeed) {
                         onDismiss()
                     } else {
-                        dragOffset.animateTo(0f, glideSpec)
+                        // 回弹从当前位移起算，起点必须在起协程前取好：
+                        // 协程真正跑起来时 dragOffset 可能已经被改过。
+                        val start = dragOffset
+                        settleJob = scope.launch {
+                            animate(
+                                initialValue = start,
+                                targetValue = 0f,
+                                animationSpec = glideSpec
+                            ) { value, _ -> dragOffset = value }
+                        }
                     }
                 }
             )
@@ -2273,6 +2368,18 @@ private fun BrowserTab.addressLabel(): String {
         url.startsWith("about:") -> "内部页面"
         url.startsWith("javascript:") -> "脚本页面"
         url.startsWith("file:") -> "本地文件"
-        else -> displayHost.take(120)
+        else -> {
+            // 没有主机名的地址（超长的一串单词、被截断的链接）会整条落到这里。
+            // 硬切会把词从中间劈开，读起来像乱码，补一个省略号才像"被截断了"。
+            val host = displayHost
+            if (host.length <= MaxAddressLabelLength) {
+                host
+            } else {
+                host.take(MaxAddressLabelLength - 1) + "…"
+            }
+        }
     }
 }
+
+/** 地址栏里站点名的最大长度：再长就把主机名读不完了。 */
+private const val MaxAddressLabelLength = 120

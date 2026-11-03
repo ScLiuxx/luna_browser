@@ -13,6 +13,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -50,6 +51,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,6 +62,9 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -568,11 +573,15 @@ fun BrowserRoot(
                 initialOffsetY = { it / 2 }
             )
         }
+        // 提示的退场用补间而不是弹簧：
+        // 弹簧的落位时间不确定，"等退场走完再播下一条"就等不准，
+        // 下一条会在上一条还没退干净时顶上来，两条提示叠在一起，
+        // 用户看到的是上条的字被下条的字替换掉。
         val toastExit = if (reduced) {
             fadeOut(MotionSpec.exit(reduced, Motion.Fast))
         } else {
             fadeOut(MotionSpec.exit(reduced)) + slideOutVertically(
-                animationSpec = MotionSpec.pageSpring(reduced, IntOffset.Zero),
+                animationSpec = tween(Motion.Slow, easing = Motion.Exit),
                 targetOffsetY = { it / 3 }
             )
         }
@@ -879,6 +888,10 @@ fun BrowserRoot(
                 var toastText by remember { mutableStateOf<String?>(null) }
                 var toastVisible by remember { mutableStateOf(false) }
                 val haptics = LocalHapticFeedback.current
+                // 触感对象会随 Activity 重建而换：
+                // 播放协程只跑一次，抓着第一次组合到的对象，
+                // 旋转屏幕之后提示就再也震不动了。这里跟着最新值走。
+                val hapticsState = rememberUpdatedState(haptics)
                 // 新提示入队。
                 LaunchedEffect(vm.message) {
                     val message = vm.message ?: return@LaunchedEffect
@@ -893,11 +906,12 @@ fun BrowserRoot(
                         toastVisible = true
                         // 提示弹出时给一次轻触反馈：用户往往没在看屏幕，
                         // 震动是唯一能立刻知道"操作结果"的通道。
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        hapticsState.value.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         delay(2600)
                         toastVisible = false
                         // 等退场动画走完再换下一条，两条提示不会挤在一起。
-                        delay(Motion.Slow.toLong())
+                        // 退场是 Motion.Slow 的补间，等同样长再留一点余量就够了。
+                        delay(Motion.Slow.toLong() + 60L)
                     }
                 }
                 Visibility(
@@ -938,7 +952,13 @@ fun BrowserRoot(
                                 lineHeight = 17.sp
                             ),
                             maxLines = 4,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis,
+                            // 提示说的是"刚刚发生的事"：
+                            // 标成礼貌朗读区，读屏才会把它念出来，
+                            // 否则用户只能自己低头去找那行字。
+                            // 标记必须和文字在同一个节点上：
+                            // 挂在外层容器上，朗读区里没有文字，念出来是空的。
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
                         )
                     }
                 }

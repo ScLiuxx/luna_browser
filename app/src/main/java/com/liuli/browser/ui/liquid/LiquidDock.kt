@@ -615,12 +615,21 @@ private fun RowScope.DockItems(
                     val lastBadgeCount = remember { mutableIntStateOf(tabCount) }
                     LaunchedEffect(tabCount, reduced) {
                         if (reduced || tabCount <= 0 || lastBadgeCount.intValue == tabCount) {
+                            // 归零也要在这里做：上一次脉冲若是在等待中被取消，
+                            // 标志会永远停在 1，角标就一直是被撑大的样子。
+                            badgePulse = 0f
                             return@LaunchedEffect
                         }
                         lastBadgeCount.intValue = tabCount
                         badgePulse = 1f
-                        delay(110)
-                        badgePulse = 0f
+                        try {
+                            delay(110)
+                        } finally {
+                            // 清理必须放在 finally：
+                            // 等待期间标签数再变，协程会被取消，
+                            // 没有 finally 这一次脉冲就再也回不去了。
+                            badgePulse = 0f
+                        }
                     }
                     val pulse by animateFloatAsState(
                         targetValue = badgePulse,

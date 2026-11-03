@@ -39,15 +39,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -67,8 +74,32 @@ import kotlin.math.sin
 
 data class NavItem(
     val glyph: Glyph,
-    val label: String
+    val label: String,
+    /**
+     * 这一项是否可用。
+     *
+     * 不可用的项要同时做两件事：退成灰的，并且点不动。
+     * 只退色不拦点击，用户会反复去点一个毫无反应的按钮；
+     * 只拦点击不退色，用户根本看不出它为什么点不动。
+     */
+    val enabled: Boolean = true
 )
+
+/**
+ * 侧栏宽度（常规档）。
+ *
+ * 系统字号放大时改用 [Dimens.railWidth] 的宽档：
+ * 标签会跟着变大，固定宽度会把"标签页"挤成省略号，导航项就认不出来了。
+ */
+private val RailWidth = 74.dp
+
+/**
+ * 图标与文字之间的间距。
+ *
+ * 与底栏保持同一档：两处导航在同一个 App 里，
+ * 间距差一像素也会让切换页面时觉得"哪里不一样"。
+ */
+private val RailIconLabelGap = 3.dp
 
 /**
  * 品牌球的光源方向：固定在屏幕左上方。
@@ -82,8 +113,14 @@ private val BrandLightAngle = (-135.0 * PI / 180.0).toFloat()
 /** 环绕高光绕行一圈的时长（毫秒）。慢到几乎察觉不到，只在余光里发亮。 */
 private const val GlintPeriodMillis = 7_200f
 
-/** 环绕高光的推进节拍（毫秒）。 */
-private const val GlintFrameMillis = 33L
+/**
+ * 环绕高光的推进节拍（毫秒）。
+ *
+ * 高光绕一圈要七秒多，一步只挪零点几个像素：
+ * 三十帧与十五帧看起来没有区别，重绘次数却差一倍，
+ * 而这颗球在侧栏与首页都是常驻的。
+ */
+private const val GlintFrameMillis = 66L
 
 /** 朝白色提亮：受光面用，保留色相才不会在浅色背景上变成一块白斑。 */
 private fun Color.towardWhite(fraction: Float): Color = Color(
@@ -329,6 +366,13 @@ fun GlassNavigationRail(
     val colors = LocalLiuliColors.current
     val density = LocalDensity.current
     val reduced = reduceMotion
+    val haptics = LocalHapticFeedback.current
+    // 侧栏宽度跟着系统字号走：大字号下标签会变宽，
+    // 固定宽度会把"标签页"挤成省略号，导航项就认不出来了。
+    val railWidth = if (density.fontScale > 1.3f) Dimens.railWidth else RailWidth
+    // 导航项与选中指示器共用一个宽度：
+    // 指示器比项目宽一点或窄一点，滑动时就对不齐。
+    val itemWidth = railWidth - 16.dp
     val itemBounds = remember { mutableStateMapOf<Int, Rect>() }
     val selectedBounds = itemBounds[selectedIndex]
     // 指示器位置与高度共用同一套页面级弹性，上下两端因此完全对称
@@ -355,7 +399,7 @@ fun GlassNavigationRail(
     GlassSurface(
         backdrop = backdrop,
         modifier = modifier
-            .width(74.dp)
+            .width(railWidth)
             .fillMaxHeight(),
         shape = RoundedCornerShape(Radius.xl),
         tint = colors.dockTint,
@@ -389,7 +433,7 @@ fun GlassNavigationRail(
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
                                 .offset(y = indicatorTop)
-                                .width(58.dp)
+                                .width(itemWidth)
                                 .height(indicatorHeight)
                                 .graphicsLayer { alpha = indicatorAlpha },
                             shape = RoundedCornerShape(Radius.md),
@@ -406,7 +450,8 @@ fun GlassNavigationRail(
                         verticalArrangement = Arrangement.spacedBy(if (compact) 2.dp else 6.dp)
                     ) {
                         items.forEachIndexed { index, item ->
-                            val selected = index == selectedIndex
+                            val isSelected = index == selectedIndex
+                            val enabled = item.enabled
                             val itemInteraction = remember(item) { MutableInteractionSource() }
                             // 导航项较小，按压回缩得更明显一些
                             val itemPress = Modifier.pressScale(
@@ -415,25 +460,48 @@ fun GlassNavigationRail(
                             )
                             // 选中与未选中之间平滑过渡，而不是瞬时换色
                             val iconTint by animateColorAsState(
-                                targetValue = if (selected) colors.accent else colors.textSecondary,
+                                targetValue = when {
+                                    !enabled -> colors.textTertiary.copy(alpha = 0.5f)
+                                    isSelected -> colors.accent
+                                    else -> colors.textSecondary
+                                },
                                 animationSpec = MotionSpec.color(Motion.Quick),
                                 label = "rail-icon-tint"
                             )
                             val labelTint by animateColorAsState(
-                                targetValue = if (selected) colors.accent else colors.textTertiary,
+                                targetValue = when {
+                                    !enabled -> colors.textTertiary.copy(alpha = 0.5f)
+                                    isSelected -> colors.accent
+                                    else -> colors.textTertiary
+                                },
                                 animationSpec = MotionSpec.color(Motion.Quick),
                                 label = "rail-label-tint"
                             )
                             Column(
                                 modifier = Modifier
-                                    .width(58.dp)
+                                    .width(itemWidth)
                                     .clip(RoundedCornerShape(Radius.md))
                                     .onGloballyPositioned { coordinates ->
                                         itemBounds[index] = coordinates.boundsInParent()
                                     }
                                     .semantics {
-                                        contentDescription = item.label
+                                        // 角标数字并进名字里：单独念一个"3"没有意义，
+                                        // "标签，3 个标签页"才是完整的一句。
+                                        contentDescription = if (item.glyph == Glyph.Tabs && tabCount > 0) {
+                                            "${item.label}，$tabCount 个标签页"
+                                        } else {
+                                            item.label
+                                        }
                                         role = Role.Button
+                                        if (isSelected) {
+                                            // 当前项要能被读屏直接听出来，
+                                            // 光靠图标变个颜色是不够的。
+                                            selected = true
+                                            stateDescription = "已选中"
+                                        }
+                                        if (!enabled) {
+                                            disabled()
+                                        }
                                     }
                                     .then(itemPress)
                                     // 不用系统水波纹：液态玻璃语言下，指下高光由玻璃层自己给。
@@ -441,8 +509,13 @@ fun GlassNavigationRail(
                                         interactionSource = itemInteraction,
                                         indication = null,
                                         role = Role.Button,
+                                        enabled = enabled,
                                         onClickLabel = item.label
                                     ) {
+                                        if (!isSelected) {
+                                            // 与底栏同一套触感：切换主导航要有一记轻震。
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        }
                                         onSelect(index)
                                     }
                                     .padding(vertical = if (compact) Space.xs else Space.sm),
@@ -464,10 +537,21 @@ fun GlassNavigationRail(
                                         // 数量变了要有个动静：新增标签不该只是数字悄悄跳一下。
                                         var badgePulse by remember { mutableFloatStateOf(0f) }
                                         LaunchedEffect(tabCount, reduced) {
-                                            if (reduced || tabCount <= 0) return@LaunchedEffect
+                                            if (reduced || tabCount <= 0) {
+                                                // 归零也要在这里做：上一次脉冲若是在等待中被取消，
+                                                // 标志会永远停在 1，角标就一直是被撑大的样子。
+                                                badgePulse = 0f
+                                                return@LaunchedEffect
+                                            }
                                             badgePulse = 1f
-                                            delay(100)
-                                            badgePulse = 0f
+                                            try {
+                                                delay(100)
+                                            } finally {
+                                                // 清理必须放在 finally：
+                                                // 等待期间标签数再变，协程会被取消，
+                                                // 没有 finally 这一次脉冲就再也回不去了。
+                                                badgePulse = 0f
+                                            }
                                         }
                                         val pulse by animateFloatAsState(
                                             targetValue = badgePulse,
@@ -505,20 +589,30 @@ fun GlassNavigationRail(
                                                         color = Color.White,
                                                         fontSize = if (tabCount > 9) 7.sp else 8.sp,
                                                         fontWeight = FontWeight.Bold
-                                                    )
+                                                    ),
+                                                    // 数字已并进外层的内容描述，
+                                                    // 这里不要再重复播报一遍。
+                                                    modifier = Modifier.clearAndSetSemantics {}
                                                 )
                                             }
                                         }
                                     }
                                 }
-                                Spacer(Modifier.height(4.dp))
+                                Spacer(Modifier.height(RailIconLabelGap))
                                 BasicText(
                                     text = item.label,
                                     style = TextStyle(
                                         color = labelTint,
                                         fontSize = 10.sp,
-                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                                    )
+                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                                    ),
+                                    maxLines = 1,
+                                    // 大字号下宁可省略也不能换行：
+                                    // 换行会把轨道撑高，底部的"新建标签"会被挤出可视区。
+                                    overflow = TextOverflow.Ellipsis,
+                                    // 名字已经并进外层的内容描述，
+                                    // 这里清掉，避免读屏念两遍。
+                                    modifier = Modifier.clearAndSetSemantics {}
                                 )
                             }
                         }
@@ -546,7 +640,12 @@ fun GlassNavigationRail(
                     lensHeight = 10.dp,
                     lensAmount = 14.dp,
                     contentAlignment = Alignment.Center,
-                    onClick = onNewTab
+                    onClick = {
+                        // 触感只能跟着点击走：玻璃件没有把按下的状态暴露出来，
+                        // 在按下那一刻给震动得另接一套手势监听，不值当。
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onNewTab()
+                    }
                 ) {
                     GlyphIcon(Glyph.Plus, colors.accent, size = if (compact) 18.dp else 22.dp)
                 }

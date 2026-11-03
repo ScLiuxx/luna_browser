@@ -117,8 +117,24 @@ private class AuroraBrushCache {
 }
 
 /**
+ * 背景的推进节拍（毫秒）。
+ *
+ * 十个帧足够：色团一帧只挪动一个像素左右，
+ * 帧率再高只是白白多烧整屏重绘的 GPU。
+ */
+private const val AuroraFrameMillis = 100L
+
+/**
+ * 每帧推进的角度。
+ *
+ * 与节拍相乘决定色团摆动的快慢：
+ * 一整圈约三十二秒，慢到几乎察觉不到，只在余光里流动。
+ */
+private const val AuroraAngleStep = 0.02f
+
+/**
  * The "liquid" backdrop that gives the glass something to refract.
- * Animation is intentionally quantised to ~12 fps: the blobs move slowly, and
+ * Animation is intentionally quantised to ~10 fps: the blobs move slowly, and
  * this keeps the blur pipeline cheap enough for the alliance's power budget.
  */
 @Composable
@@ -137,11 +153,13 @@ fun AuroraBackground(
         // "减少动态效果"开启时连循环都不启动：背景一直在缓慢流动，
         // 对动效敏感的人这是持续的干扰。
         if (!dynamic || reduced) return@LaunchedEffect
-        var current = 0.7f
+        // 从当前角度接着走，而不是每次都从头数：
+        // 用户把动态背景关掉再打开，背景会整个"跳"一下。
+        var current = angle
         val cycle = 2f * Math.PI.toFloat() * 8f
         while (true) {
-            delay(82)
-            current += 0.016f
+            delay(AuroraFrameMillis)
+            current += AuroraAngleStep
             if (current > cycle) {
                 current -= cycle
             }
