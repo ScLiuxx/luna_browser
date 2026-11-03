@@ -114,6 +114,7 @@ fun LibraryScreen(
     onDismiss: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    val haptics = LocalHapticFeedback.current
     var section by rememberSaveable { mutableIntStateOf(0) }
     // 清空历史要问一句：这是一键抹掉全部记录的操作，
     // 按错了就没有回头路。
@@ -184,7 +185,12 @@ fun LibraryScreen(
                         GlassIconButton(
                             glyph = Glyph.Trash,
                             contentDescription = "清空历史",
-                            onClick = { confirmClear = true },
+                            onClick = {
+                                // 一键抹掉全部记录：点下去时给一次轻触反馈，
+                                // 手指会知道这一步不轻。
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                confirmClear = true
+                            },
                             backdrop = backdrop,
                             size = 44.dp,
                             glyphSize = 18.dp,
@@ -428,7 +434,11 @@ private fun SegmentTab(
             style = Type.sectionTitle.copy(
                 color = labelColor,
                 fontWeight = FontWeight(weight.toInt())
-            )
+            ),
+            // 字体放大到 1.3 以上时"收藏 128"会顶出控件：
+            // 限一行并省略，段位仍然是均分的。
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -491,7 +501,11 @@ private fun LibrarySection(
                 // 数据等动画播完再删，行不会凭空消失。
                 val removing = pendingRemovals.any { it.key == rowKey }
                 Visibility(
-                    visible = !removing,
+                    // revealed 为真才挂上：入场动画只在条目第一次出现时播一次，
+                    // 滚走再回来的条目直接就位，不重播一遍淡入。
+                    // 此前这里写的是 !removing，revealed 只写不读，
+                    // 整套逐项浮现的机制等于没生效。
+                    visible = revealed && !removing,
                     enter = fadeIn(
                         animationSpec = fadeInSpec
                     ) + slideInVertically(
@@ -547,12 +561,20 @@ private fun LibraryRow(
         animationSpec = MotionSpec.color(),
         label = "library-delete-tint"
     )
+    // 整行按下时玻璃底色亮起一档：玻璃件没有水波纹，
+    // 只靠 0.97 的缩放几乎看不出手指究竟按在了哪一行上。
+    val rowPressed by rowInteraction.collectIsPressedAsState()
+    val rowBackground by animateColorAsState(
+        targetValue = if (rowPressed) colors.glassTintStrong else colors.glassTint,
+        animationSpec = MotionSpec.color(),
+        label = "library-row-background"
+    )
     val host = hostOf(entry.url)
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(Radius.sm))
-            .background(colors.glassTint)
+            .background(rowBackground)
             // 行要有一圈细边：深色下玻璃底色几乎融进背景，
             // 没有轮廓时整列看着像贴上去的一摊色块。
             .border(
@@ -614,13 +636,18 @@ private fun LibraryRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 BasicText(
                     text = host,
-                    style = Type.caption.copy(color = colors.textSecondary),
+                    // 域名是认出站点的依据，给到 bodySmall：
+                    // 10sp 的 caption 在 2x 屏上几乎要眯眼看，
+                    // 一整列站点名都读不清就等于没给。
+                    style = Type.bodySmall.copy(color = colors.textSecondary),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
                 )
                 BasicText(
                     text = " · ${formatTime(entry.timestamp)}",
+                    // 时间只是顺带的信息，压到 caption 一档，
+                    // 不与域名抢同一级的重量。
                     style = Type.caption.copy(color = colors.textTertiary),
                     maxLines = 1
                 )

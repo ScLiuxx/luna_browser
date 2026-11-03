@@ -60,10 +60,12 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -109,6 +111,7 @@ import com.liuli.browser.ui.theme.MotionSpec
 import com.liuli.browser.ui.theme.Radius
 import com.liuli.browser.ui.theme.Space
 import com.liuli.browser.ui.theme.Type
+import com.liuli.browser.ui.theme.reduceMotion
 import com.liuli.browser.web.BrowserViewModel
 import com.liuli.browser.web.agent.AgentAuditEntry
 import com.liuli.browser.web.agent.AgentController
@@ -130,6 +133,9 @@ fun SettingsScreen(
     onRevokePrivacy: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    // 破坏性操作点下去时给一次轻触反馈：
+    // 玻璃按钮按下时只有形变，"这一步会抹掉东西"这句话听不见也摸不着。
+    val haptics = LocalHapticFeedback.current
     // 标签页上限的数字是补间上去的：拖动滑块时能看清自己走了几格。
     val maxTabs by animateIntAsState(
         targetValue = settings.maxTabs,
@@ -345,7 +351,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(Modifier.height(Space.md))
+            Spacer(Modifier.height(Space.lg))
 
             SettingsSection(title = "搜索", backdrop = backdrop, index = 1) {
                 SettingsLabel("默认搜索引擎", "地址栏输入非网址内容时使用")
@@ -453,7 +459,7 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(Modifier.height(Space.md))
+            Spacer(Modifier.height(Space.lg))
 
             SettingsSection(title = "浏览", backdrop = backdrop, index = 2) {
                 SettingsLabel("标签页上限", "达到上限后自动回收最久未使用的标签，可选 4–12 个")
@@ -486,7 +492,8 @@ fun SettingsScreen(
                         maxLines = 1,
                         // 读数宽度固定：数字从 8 变成 12 时滑块不能跟着变窄，
                         // 否则拖到一半轨道会缩，拇指会在眼前自己往前挪一点。
-                        modifier = Modifier.width(52.dp)
+                        // 但字号放大后"12 个"要放得下：给它下限而不是死宽度。
+                        modifier = Modifier.widthIn(min = 52.dp)
                     )
                 }
                 Divider()
@@ -533,7 +540,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(Modifier.height(Space.md))
+            Spacer(Modifier.height(Space.lg))
 
             SettingsSection(title = "AI 页面助手", backdrop = backdrop, index = 3) {
                 ToggleRow(
@@ -580,7 +587,7 @@ fun SettingsScreen(
                     } else {
                         activePolicy.mode.hint
                     },
-                    style = Type.micro.copy(color = colors.textTertiary, lineHeight = 14.sp)
+                    style = Type.caption.copy(color = colors.textTertiary)
                 )
                 // 低风险免确认只在"允许"站点出现，出现与收起都有过渡。
                 Visibility(
@@ -614,7 +621,10 @@ fun SettingsScreen(
                         Spacer(Modifier.height(Space.sm))
                         GlassPillButton(
                             label = "清除全部站点策略",
-                            onClick = { confirmClearPolicies = true },
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                confirmClearPolicies = true
+                            },
                             backdrop = backdrop,
                             glyph = Glyph.Trash,
                             // 破坏性操作：文字与图标染上危险色，
@@ -688,7 +698,7 @@ fun SettingsScreen(
                             append(it)
                         }
                     },
-                    style = Type.micro.copy(color = colors.textTertiary, lineHeight = 14.sp)
+                    style = Type.caption.copy(color = colors.textTertiary)
                 )
                 Spacer(Modifier.height(Space.md))
                 BasicText(
@@ -724,7 +734,7 @@ fun SettingsScreen(
                         agent.audit.takeLast(6).reversed().forEach { entry ->
                             BasicText(
                                 text = entry.displayLine(),
-                                style = Type.micro.copy(color = colors.textTertiary, lineHeight = 14.sp),
+                                style = Type.caption.copy(color = colors.textTertiary),
                                 // 审计行由主机名、动作、结果拼成，长度不受控。
                                 // 限一行并省略，一行审计不该把设置页撑开。
                                 maxLines = 1,
@@ -736,7 +746,10 @@ fun SettingsScreen(
                 Spacer(Modifier.height(Space.md))
                 GlassPillButton(
                     label = "清除对话与审计",
-                    onClick = { confirmClearAgent = true },
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        confirmClearAgent = true
+                    },
                     backdrop = backdrop,
                     glyph = Glyph.Trash,
                     // 破坏性操作：文字与图标染上危险色，
@@ -745,7 +758,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(Modifier.height(Space.md))
+            Spacer(Modifier.height(Space.lg))
 
             SettingsSection(title = "隐私护盾", backdrop = backdrop, index = 4) {
                 ToggleRow(
@@ -800,7 +813,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(Modifier.height(Space.md))
+            Spacer(Modifier.height(Space.lg))
 
             SettingsSection(title = "金标联盟 · 隐私与合规", backdrop = backdrop, index = 5) {
                 // 十条条目平铺在一起会像一堵墙：拆成三组，
@@ -828,7 +841,10 @@ fun SettingsScreen(
                     )
                     GlassPillButton(
                         label = "清除浏览数据",
-                        onClick = { confirmClear = true },
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            confirmClear = true
+                        },
                         backdrop = backdrop,
                         glyph = Glyph.Trash,
                         // 破坏性操作：文字与图标染上危险色。
@@ -837,7 +853,7 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(Modifier.height(Space.md))
+            Spacer(Modifier.height(Space.lg))
 
             SettingsSection(title = "关于", backdrop = backdrop, index = 6) {
                 GroupLabel("版本")
@@ -851,17 +867,23 @@ fun SettingsScreen(
                 Spacer(Modifier.height(Space.md))
                 BasicText(
                     text = "琉璃浏览器使用系统 Chromium WebView 作为内核，内核随系统或 WebView 应用更新，应用本身不内置 Chromium 运行时，因此 APK 约 2 MB。",
-                    style = Type.label.copy(color = colors.textTertiary, lineHeight = 17.sp)
+                    // 说明段落用 caption：与 AI 分区里的长说明同一档，
+                    // 此前这一段用的是 label（半粗），两段正文看起来不是一套东西。
+                    style = Type.caption.copy(color = colors.textTertiary, lineHeight = 16.sp)
                 )
                 Spacer(Modifier.height(Space.xs))
                 BasicText(
                     text = "琉璃浏览器不提供云同步。所有浏览数据均保存在本机，可在上方一键清除。",
-                    style = Type.label.copy(color = colors.textTertiary)
+                    style = Type.caption.copy(color = colors.textTertiary, lineHeight = 16.sp)
                 )
                 Spacer(Modifier.height(Space.md))
                 GlassPillButton(
                     label = "撤回隐私同意",
-                    onClick = { confirmRevoke = true },
+                    onClick = {
+                        // 撤回同意会清掉本地全部数据，同样是破坏性操作。
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        confirmRevoke = true
+                    },
                     backdrop = backdrop,
                     glyph = Glyph.Info
                 )
@@ -933,6 +955,9 @@ private fun SettingsSection(
     val colors = LocalLiuliColors.current
     // 整屏七段设置分区逐段浮现：一次全亮会让人找不到起点。
     val stagger = MotionSpec.staggerDelay(index, stepMillis = 26)
+    // "减少动态效果"下位移动画要整个去掉：
+    // 淡入可以留，位移正是这套设定里被要求省掉的那部分。
+    val reduced = reduceMotion
     var appeared by remember(title) { mutableStateOf(false) }
     LaunchedEffect(title) {
         if (stagger > 0) kotlinx.coroutines.delay(stagger.toLong())
@@ -948,7 +973,7 @@ private fun SettingsSection(
             .fillMaxWidth()
             .graphicsLayer {
                 this.alpha = alpha
-                translationY = (1f - alpha) * 16.dp.toPx()
+                translationY = if (reduced) 0f else (1f - alpha) * 16.dp.toPx()
             }
     ) {
         BasicText(
@@ -990,6 +1015,7 @@ private fun DarkModeSegmented(
 ) {
     val colors = LocalLiuliColors.current
     val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
     // 每个分段的真实位置：指示器按实际尺寸滑过去，不能靠估算。
     val segmentBounds = remember { mutableStateMapOf<Int, Rect>() }
     val selectedBounds = segmentBounds[selected]
@@ -1016,7 +1042,11 @@ private fun DarkModeSegmented(
     Box(
         Modifier
             .clip(RoundedCornerShape(Radius.pill))
-            .background(colors.textPrimary.copy(alpha = 0.06f))
+            // 深色下 6% 的白几乎看不见轨道：与书签页的分段控件取同一档，
+            // 浅色主题仍保持轻一点的分量。
+            .background(
+                colors.textPrimary.copy(alpha = if (colors.isDark) 0.10f else 0.06f)
+            )
     ) {
         // 指示器画在文字下面，切换时底色滑过去，文字始终压在最上层。
         if (selectedBounds != null) {
@@ -1030,7 +1060,9 @@ private fun DarkModeSegmented(
             )
         }
         Row(
-            Modifier.padding(Space.xs),
+            // 三段平分整条宽度：内容宽度的分段在字体放大后会顶出卡片，
+            // 均分之后每段各自省略，控件始终是满宽的一条。
+            Modifier.fillMaxWidth().padding(Space.xs),
             horizontalArrangement = Arrangement.spacedBy(Space.xs)
         ) {
             DarkModeOption.entries.forEachIndexed { index, option ->
@@ -1049,6 +1081,9 @@ private fun DarkModeSegmented(
                 )
                 Box(
                     Modifier
+                        // 三段各占一份：均分之后字体放大也不会把
+                        // 控件从卡片里挤出去。
+                        .weight(1f)
                         .onGloballyPositioned {
                             val origin = it.positionInParent()
                             segmentBounds[index] = Rect(
@@ -1060,7 +1095,11 @@ private fun DarkModeSegmented(
                             interactionSource = interaction,
                             indication = null,
                             role = Role.RadioButton
-                        ) { onSelect(index) }
+                        ) {
+                            // 换主题会立刻重染整屏，给一次轻触反馈确认改动生效了。
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelect(index)
+                        }
                         // 读屏要能听出当前选中的是哪一项：
                         // 光有 Role.RadioButton 不够，选中状态也得报上去。
                         .semantics(mergeDescendants = true) {
@@ -1073,7 +1112,7 @@ private fun DarkModeSegmented(
                         .pressScale(pressedScale = 0.92f, interactionSource = interaction)
                         // 胶囊本身只有一行字高，补足最小触控高度。
                         .heightIn(min = Dimens.minTouch)
-                        .padding(horizontal = Space.md, vertical = Space.sm),
+                        .padding(horizontal = Space.sm, vertical = Space.sm),
                     contentAlignment = Alignment.Center
                 ) {
                     BasicText(
@@ -1081,7 +1120,11 @@ private fun DarkModeSegmented(
                         style = Type.bodySmall.copy(
                             color = labelColor,
                             fontWeight = FontWeight(weight.toInt())
-                        )
+                        ),
+                        // 字体放大到 1.3 以上时"跟随系统"会顶出一段：
+                        // 限一行并省略，不让文字压到邻段上。
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -1106,7 +1149,9 @@ private fun SettingsLabel(title: String, subtitle: String?) {
             Spacer(Modifier.height(Space.xxs))
             BasicText(
                 text = subtitle,
-                style = Type.caption.copy(color = colors.textTertiary)
+                // 与开关行的说明同一档：卡片里的说明文字层级要统一，
+                // 一半 caption 一半 bodySmall，看不出哪条更重要。
+                style = Type.bodySmall.copy(color = colors.textSecondary)
             )
         }
     }
@@ -1123,7 +1168,12 @@ private fun GroupLabel(text: String) {
     val colors = LocalLiuliColors.current
     BasicText(
         text = text,
-        style = Type.label.copy(color = colors.textSecondary),
+        // 小节标题要压得住下面那几行说明：
+        // 11sp 的 label 在高密度屏上太小，看不出这是一组标题。
+        style = Type.bodySmall.copy(
+            color = colors.textSecondary,
+            fontWeight = FontWeight.SemiBold
+        ),
         modifier = Modifier.padding(top = Space.sm, bottom = Space.xxs)
     )
 }
@@ -1138,6 +1188,7 @@ private fun ToggleRow(
 ) {
     val colors = LocalLiuliColors.current
     val interaction = remember { MutableInteractionSource() }
+    val haptics = LocalHapticFeedback.current
     // 按下时给一行浅色高亮：玻璃件没有水波纹，
     // 手指按下去时没有这层提示就完全没反应。
     val pressed by interaction.collectIsPressedAsState()
@@ -1166,17 +1217,22 @@ private fun ToggleRow(
                 .heightIn(min = Dimens.minTouch)
                 .clip(RoundedCornerShape(Radius.sm))
                 .background(highlight)
-                // 标题整块都是开关的点击区：既要点得中，也要报得出开/关。
-                .semantics {
+                // 标题与说明并成一个语义节点：读屏不会把同一行念两遍，
+                // 开关的开合状态与它的说明一起报出来。
+                .semantics(mergeDescendants = true) {
                     role = Role.Switch
                     toggleableState = ToggleableState(checked)
-                    contentDescription = title
                 }
                 .clickable(
                     interactionSource = interaction,
                     indication = null,
                     role = Role.Switch
-                ) { onCheckedChange(!checked) }
+                ) {
+                    // 点标题等于拨开关：这里也给一次轻触反馈，
+                    // 否则点标题没震动、点开关有震动，同一行两种手感。
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onCheckedChange(!checked)
+                }
                 .pressScale(pressedScale = 0.97f, interactionSource = interaction)
                 // 横向不再自带留白：卡片里各行的文字都落在同一条竖线上。
                 .padding(end = Space.md, top = Space.sm, bottom = Space.sm)
@@ -1189,7 +1245,9 @@ private fun ToggleRow(
             Spacer(Modifier.height(Space.xxs))
             BasicText(
                 text = subtitle,
-                style = Type.caption.copy(color = colors.textTertiary, lineHeight = 14.sp)
+                // 说明文字给到 bodySmall：10sp 的 caption 在高密度屏上
+                // 几乎读不出来，而这行字正是"这个开关现在是什么状态"的唯一说明。
+                style = Type.bodySmall.copy(color = colors.textSecondary)
             )
         }
         // 开关与标题行中心对齐：标题行 20dp、开关 28dp，
@@ -1198,12 +1256,16 @@ private fun ToggleRow(
             Modifier.offset(y = Space.sm - 4.dp),
             contentAlignment = Alignment.CenterStart
         ) {
-            LiquidToggle(
-                selected = { checked },
-                onSelect = onCheckedChange,
-                backdrop = backdrop,
-                contentDescription = title
-            )
+            // 开关自身的语义被上面那一行接管：两处都报"开关"，
+            // 读屏会把这一行念两遍。这里只留下图形与手势。
+            Box(Modifier.clearAndSetSemantics { }) {
+                LiquidToggle(
+                    selected = { checked },
+                    onSelect = onCheckedChange,
+                    backdrop = backdrop,
+                    contentDescription = title
+                )
+            }
         }
     }
 }
@@ -1237,7 +1299,9 @@ private fun ComplianceRow(title: String, detail: String) {
             Spacer(Modifier.height(Space.xxs))
             BasicText(
                 text = detail,
-                style = Type.caption.copy(color = colors.textTertiary)
+                // 合规条目是给人读的解释，不是脚注：
+                // 给到 bodySmall，浅色主题下才不至于糊成一片。
+                style = Type.bodySmall.copy(color = colors.textSecondary)
             )
         }
     }
@@ -1280,7 +1344,10 @@ private fun Divider() {
             .fillMaxWidth()
             .padding(vertical = Space.sm)
             .height(1.dp)
-            .background(colors.textPrimary.copy(alpha = 0.07f))
+            // 深色下 7% 的白几乎看不见分隔线：与书签页的行描边取同一档。
+            .background(
+                colors.textPrimary.copy(alpha = if (colors.isDark) 0.10f else 0.07f)
+            )
     )
 }
 
@@ -1320,7 +1387,9 @@ private fun SettingsField(
     Column {
         BasicText(
             text = label,
-            style = Type.label.copy(color = colors.textSecondary)
+            // 框名与卡片里的其它说明同一档：标签与输入内容的层级
+            // 不能反着来（框名比框里的字还小）。
+            style = Type.bodySmall.copy(color = colors.textSecondary)
         )
         Spacer(Modifier.height(Space.xs))
         // 选区底色与手柄跟随强调色，和地址栏、首页搜索框一致。
@@ -1342,8 +1411,8 @@ private fun SettingsField(
                     .clip(RoundedCornerShape(Radius.sm))
                     .background(fieldBackground)
                     .border(1.dp, fieldBorder, RoundedCornerShape(Radius.sm))
-                    .padding(horizontal = Space.md, vertical = Space.md),
-                textStyle = Type.sectionTitle.copy(color = colors.textPrimary, fontWeight = FontWeight.Normal),
+                    .padding(horizontal = Space.md, vertical = Space.sm),
+                textStyle = Type.body.copy(color = colors.textPrimary),
                 cursorBrush = SolidColor(colors.accent),
                 singleLine = true,
                 visualTransformation = if (password) {
@@ -1368,7 +1437,7 @@ private fun SettingsField(
                             if (value.isEmpty()) {
                                 BasicText(
                                     text = placeholder,
-                                    style = Type.sectionTitle.copy(color = hintTint, fontWeight = FontWeight.Normal)
+                                    style = Type.body.copy(color = hintTint)
                                 )
                             }
                             innerTextField()
@@ -1383,7 +1452,10 @@ private fun SettingsField(
                             val clearInteraction = remember { MutableInteractionSource() }
                             Box(
                                 Modifier
-                                    .size(26.dp)
+                                    // 清除键原先只有 26dp：在输入框里戳不准，
+                                    // 手指一偏就变成选中文本。放大到 36dp，
+                                    // 图形本身仍保持 13dp，不喧宾夺主。
+                                    .size(36.dp)
                                     .clip(CircleShape)
                                     .semantics {
                                         contentDescription = "清除$label"

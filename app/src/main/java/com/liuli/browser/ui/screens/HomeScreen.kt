@@ -5,6 +5,7 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
@@ -16,6 +17,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -66,7 +68,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -126,6 +130,60 @@ private val QuickLinks = listOf(
     QuickLink("网易云音乐", "https://music.163.com/", Color(0xFFA8232B))
 )
 
+/**
+ * 首屏入场的节拍。
+ *
+ * 所有入场元素共用同一条时间线，一拍 24ms。
+ * 顺序按阅读顺序排：品牌行 → 搜索框 → 常用网站 → 继续浏览 → 隐私卡片。
+ * 此前是整屏统一淡入，元素各自的错峰全被这层淡入盖住，
+ * 用户只看到"整页亮了一下"，看不到摆放的过程；
+ * 而搜索框还没落位、常用网站已经先亮起来时，页面读起来是乱的。
+ */
+private const val EntranceBeatMillis = 24
+
+/**
+ * 区块入场：淡入 + 轻微上移。
+ *
+ * 延迟由整屏节拍算出，所有区块共用一条时间线；
+ * "减少动态效果"时既不淡入也不上移，直接落位。
+ */
+@Composable
+private fun Modifier.entranceReveal(
+    beat: Int,
+    reduceMotion: Boolean,
+    /** 落位时带一点缩放：瓦片这类"摆上去"的元素需要它，整块内容不需要。 */
+    fromScale: Float = 1f
+): Modifier {
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(beat) {
+        val delayMillis = if (reduceMotion) 0 else beat * EntranceBeatMillis
+        if (delayMillis > 0) delay(delayMillis.toLong())
+        shown = true
+    }
+    val alpha by animateFloatAsState(
+        targetValue = if (shown || reduceMotion) 1f else 0f,
+        animationSpec = MotionSpec.value(reduceMotion, Motion.Normal),
+        label = "entrance-alpha"
+    )
+    val rise by animateFloatAsState(
+        targetValue = if (shown || reduceMotion) 0f else 1f,
+        animationSpec = MotionSpec.value(reduceMotion, Motion.Normal),
+        label = "entrance-rise"
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (shown || reduceMotion) 1f else fromScale,
+        animationSpec = MotionSpec.value(reduceMotion, Motion.Normal),
+        label = "entrance-scale"
+    )
+    return graphicsLayer {
+        this.alpha = alpha
+        // 减少动态效果时不上移：位移本身就是要被去掉的动效。
+        translationY = if (reduceMotion) 0f else rise * 12.dp.toPx()
+        scaleX = scale
+        scaleY = scale
+    }
+}
+
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun HomeScreen(
@@ -155,20 +213,30 @@ fun HomeScreen(
         )
     }
     var query by rememberSaveable { mutableStateOf("") }
-    var entered by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { entered = true }
-    // 整屏入场：淡入 + 上移。规格统一取自 MotionSpec；
-    // "减少动态效果"时直接落位，不做补间。
-    val entranceSpec: FiniteAnimationSpec<Float> = if (reduceMotion) {
-        tween(durationMillis = 0)
-    } else {
-        MotionSpec.value(Motion.Slow)
-    }
-    val entrance by animateFloatAsState(
-        targetValue = if (entered) 1f else 0f,
-        animationSpec = entranceSpec,
-        label = "home-entrance"
-    )
+    val haptics = LocalHapticFeedback.current
+
+    val recentTabs = tabs.filter { !it.isPrivate && it.url.isNotBlank() }
+        .sortedByDescending { it.lastUsedAt }
+        .take(6)
+    val quickLinks = QuickLinks.take(if (isTablet) 10 else 8)
+
+    // 入场节拍：所有区块按阅读顺序依次落位。
+    // 搜索框不在其中：它是地址栏共享元素的落点，
+    // 从网页返回时地址栏要飞回来，搜索框必须已经在最终位置上等着。
+    val headerBeat = 0
+    val linksTitleBeat = 2
+    val linksFirstBeat = linksTitleBeat + 2
+    val recentTitleBeat = linksFirstBeat + quickLinks.size
+    val recentFirstBeat = recentTitleBeat + 2
+    val privacyBeat = recentFirstBeat + recentTabs.size + 1
+
+    // 页面左右留白走间距阶梯，与其它页面一致。
+    val horizontal = if (isTablet) Space.xl else Space.lg
+    // 区块间距只有一档，手机 24 / 平板 32：
+    // 之前是 26、24、22、28 混着用，页面看着总有一处没对齐。
+    val sectionGap = if (isTablet) Space.xxl else Space.xl
+    val columns = if (isTablet) 5 else 4
+
     // 最近标签逐张浮现：淡入用补间，缩放用弹簧；
     // 规格先在组合作用域算好，动画参数位不能直接调用组合版 MotionSpec。
     val cardFadeSpec: FiniteAnimationSpec<Float> = if (reduceMotion) {
@@ -180,16 +248,6 @@ fun HomeScreen(
     // 已经演过入场动画的最近标签：横向滚出去再回来不重播。
     val revealedTabIds = remember { mutableStateListOf<Long>() }
 
-    val recentTabs = tabs.filter { !it.isPrivate && it.url.isNotBlank() }
-        .sortedByDescending { it.lastUsedAt }
-        .take(6)
-    // 页面左右留白走间距阶梯，与其它页面一致。
-    val horizontal = if (isTablet) Space.xl else Space.lg
-    // 区块间距只有一档，手机 24 / 平板 32：
-    // 之前是 26、24、22、28 混着用，页面看着总有一处没对齐。
-    val sectionGap = if (isTablet) Space.xxl else Space.xl
-    val columns = if (isTablet) 5 else 4
-
     Box(
         Modifier
             .fillMaxSize()
@@ -200,10 +258,6 @@ fun HomeScreen(
                 .fillMaxSize()
                 .statusBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .graphicsLayer {
-                    alpha = entrance
-                    translationY = (1f - entrance) * 22.dp.toPx()
-                }
                 .padding(horizontal = horizontal),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -213,7 +267,9 @@ fun HomeScreen(
                     .fillMaxWidth()
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .entranceReveal(headerBeat, reduceMotion),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     BrandOrb(size = if (isTablet) 42.dp else 36.dp)
@@ -240,6 +296,18 @@ fun HomeScreen(
                         )
                     }
                     if (!isTablet) {
+                        // 书签与设置并排放在右上角：
+                        // 此前只有设置一个按钮，书签要翻到导航栏才够得着，
+                        // 而书签恰恰是起始页上最高频的去处。
+                        GlassIconButton(
+                            glyph = Glyph.Bookmark,
+                            contentDescription = "书签",
+                            onClick = onOpenLibrary,
+                            backdrop = backdrop,
+                            size = 46.dp,
+                            glyphSize = 20.dp
+                        )
+                        Spacer(Modifier.width(Space.sm))
                         GlassIconButton(
                             glyph = Glyph.Settings,
                             contentDescription = "设置",
@@ -259,6 +327,8 @@ fun HomeScreen(
                     onQueryChange = { query = it },
                     onSubmit = {
                         if (query.isNotBlank()) {
+                            // 搜索是这一屏的主操作，给一次明确的触感确认。
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onSearchSubmit(query)
                             query = ""
                         }
@@ -268,12 +338,17 @@ fun HomeScreen(
 
                 Spacer(Modifier.height(sectionGap))
 
-                SectionTitle("常用网站", "轻触即可打开")
+                SectionTitle(
+                    title = "常用网站",
+                    hint = "轻触即可打开",
+                    modifier = Modifier.entranceReveal(linksTitleBeat, reduceMotion)
+                )
                 Spacer(Modifier.height(Space.md))
                 QuickLinkGrid(
                     backdrop = backdrop,
-                    links = QuickLinks.take(if (isTablet) 10 else 8),
+                    links = quickLinks,
                     columns = columns,
+                    firstBeat = linksFirstBeat,
                     isTablet = isTablet,
                     reduceMotion = reduceMotion,
                     onOpenUrl = onOpenUrl
@@ -281,7 +356,11 @@ fun HomeScreen(
 
                 Spacer(Modifier.height(sectionGap))
                 if (recentTabs.isNotEmpty()) {
-                    SectionTitle("继续浏览", "轻触切回标签页")
+                    SectionTitle(
+                        title = "继续浏览",
+                        hint = "轻触切回标签页",
+                        modifier = Modifier.entranceReveal(recentTitleBeat, reduceMotion)
+                    )
                     Spacer(Modifier.height(Space.md))
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(Space.md),
@@ -291,13 +370,13 @@ fun HomeScreen(
                     ) {
                         itemsIndexed(recentTabs, key = { _, tab -> tab.id }) { index, tab ->
                             // 逐张浮现：横向滚动条里的卡片错峰落位。
-                            val stagger = MotionSpec.staggerDelay(index, stepMillis = 24)
+                            val beat = recentFirstBeat + index
                             var revealed by remember(tab.id) {
                                 mutableStateOf(tab.id in revealedTabIds)
                             }
                             LaunchedEffect(tab.id) {
                                 if (!revealed) {
-                                    delay(stagger.toLong())
+                                    if (!reduceMotion) delay((beat * EntranceBeatMillis).toLong())
                                     revealed = true
                                     if (tab.id !in revealedTabIds) revealedTabIds.add(tab.id)
                                 }
@@ -323,7 +402,11 @@ fun HomeScreen(
                                     tab = tab,
                                     backdrop = backdrop,
                                     isTablet = isTablet,
-                                    onClick = { onOpenTab(tab.id) }
+                                    onClick = {
+                                        // 切回标签页是一次明确的跳转，给一次轻触感。
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onOpenTab(tab.id)
+                                    }
                                 )
                             }
                         }
@@ -331,14 +414,22 @@ fun HomeScreen(
                 } else {
                     // 没有可继续的标签页时给一句话说明，
                     // 空白的一段会让用户以为这个功能坏了。
-                    SectionTitle("继续浏览", null)
+                    SectionTitle(
+                        title = "继续浏览",
+                        hint = null,
+                        modifier = Modifier.entranceReveal(recentTitleBeat, reduceMotion)
+                    )
                     Spacer(Modifier.height(Space.md))
-                    EmptyRecentHint(onOpenLibrary = onOpenLibrary)
+                    Box(Modifier.entranceReveal(recentTitleBeat + 1, reduceMotion)) {
+                        EmptyRecentHint(onOpenLibrary = onOpenLibrary)
+                    }
                 }
 
                 Spacer(Modifier.height(sectionGap))
 
-                PrivacyCard(backdrop = backdrop)
+                Box(Modifier.entranceReveal(privacyBeat, reduceMotion)) {
+                    PrivacyCard(backdrop = backdrop)
+                }
 
                 Spacer(Modifier.height(bottomSpace + Space.lg))
             }
@@ -347,10 +438,14 @@ fun HomeScreen(
 }
 
 @Composable
-private fun SectionTitle(title: String, hint: String?) {
+private fun SectionTitle(
+    title: String,
+    hint: String?,
+    modifier: Modifier = Modifier
+) {
     val colors = LocalLiuliColors.current
     Row(
-        Modifier.fillMaxWidth(),
+        modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
         BasicText(
@@ -364,7 +459,11 @@ private fun SectionTitle(title: String, hint: String?) {
         if (hint != null) {
             BasicText(
                 text = hint,
-                style = Type.label.copy(color = colors.textTertiary)
+                style = Type.label.copy(color = colors.textTertiary),
+                // 大字号下提示会挤到标题身上：给它单行省略，
+                // 标题与提示谁都不该被压掉半截。
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -400,6 +499,19 @@ private fun HomeSearchBar(
         animationSpec = MotionSpec.color(Motion.Quick),
         label = "search-hint-tint"
     )
+    // 聚焦光晕：一圈随焦点亮起的强调色描边。
+    // 画在玻璃的内容层里，它才会跟着共享元素一起飞到地址栏；
+    // 画在外层的话，搜索框飞走了、光晕却留在原地。
+    val ringColor by animateColorAsState(
+        targetValue = if (focused) colors.accent.copy(alpha = 0.55f) else Color.Transparent,
+        animationSpec = MotionSpec.color(Motion.Quick),
+        label = "search-ring-color"
+    )
+    val ringWidth by animateDpAsState(
+        targetValue = if (focused) 1.5.dp else 0.dp,
+        animationSpec = MotionSpec.pageSpring(0.01.dp),
+        label = "search-ring-width"
+    )
     GlassSurface(
         backdrop = backdrop,
         modifier = modifier
@@ -414,136 +526,157 @@ private fun HomeSearchBar(
         blurRadius = 22.dp,
         lensHeight = 20.dp,
         lensAmount = 28.dp,
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+        // 内边距交给内容自己处理：光晕要贴着玻璃的外沿画，
+        // 若由 GlassSurface 统一内缩，光晕就缩在玻璃里面一圈，对不齐边缘。
+        contentPadding = PaddingValues(0.dp)
     ) {
-        Row(
+        // 不能用 fillMaxSize：玻璃只有 heightIn(min) 没有固定高度，
+        // 一旦撑满就会把搜索框拉到整屏高。
+        // 用 wrapContentSize + align 让内容居中，光晕再按玻璃高度对齐。
+        Box(
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = 52.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .heightIn(min = 64.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Box(
+            Row(
                 Modifier
-                    .size(44.dp)
-                    .clip(CircleShape),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                GlyphIcon(Glyph.Search, focusTint, size = 21.dp)
-            }
-            // 选区底色与拖拽手柄改用强调色：
-            // 平台默认的蓝色落在这套配色上很跳，选中的字会像贴错了色。
-            // 整个输入框都要裹进去：手柄是画在装饰框之外的兄弟节点，
-            // 只包 decorationBox 的话手柄仍是默认蓝。
-            CompositionLocalProvider(
-                LocalTextSelectionColors provides TextSelectionColors(
-                    handleColor = colors.accent,
-                    backgroundColor = colors.accent.copy(alpha = 0.28f)
-                )
-            ) {
-                BasicTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = Space.xxs)
-                        .focusRequester(focusRequester)
-                        .semantics { contentDescription = "搜索或输入网址" },
-                    interactionSource = interactionSource,
-                    textStyle = Type.title.copy(
-                        color = colors.textPrimary,
-                        fontWeight = FontWeight.Medium
-                    ),
-                    cursorBrush = SolidColor(colors.accent),
-                    singleLine = true,
-                    // 与地址栏共用同一套键盘规格：首页搜索框和地址栏本就是同一个
-                    // 共享元素，输入法行为必须一致，否则两屏之间会突然换手感。
-                    keyboardOptions = KeyboardOptions(
-                        capitalization = KeyboardCapitalization.None,
-                        autoCorrectEnabled = false,
-                        keyboardType = KeyboardType.Uri,
-                        imeAction = ImeAction.Go
-                    ),
-                    keyboardActions = KeyboardActions(onGo = { onSubmit() }),
-                    decorationBox = { innerTextField ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.weight(1f)) {
-                                if (query.isEmpty()) {
-                                    BasicText(
-                                        text = "搜索或输入网址",
-                                        style = Type.title.copy(color = hintTint)
-                                    )
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    GlyphIcon(Glyph.Search, focusTint, size = 21.dp)
+                }
+                // 选区底色与拖拽手柄改用强调色：
+                // 平台默认的蓝色落在这套配色上很跳，选中的字会像贴错了色。
+                // 整个输入框都要裹进去：手柄是画在装饰框之外的兄弟节点，
+                // 只包 decorationBox 的话手柄仍是默认蓝。
+                CompositionLocalProvider(
+                    LocalTextSelectionColors provides TextSelectionColors(
+                        handleColor = colors.accent,
+                        backgroundColor = colors.accent.copy(alpha = 0.28f)
+                    )
+                ) {
+                    BasicTextField(
+                        value = query,
+                        onValueChange = onQueryChange,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = Space.xxs)
+                            .focusRequester(focusRequester)
+                            .semantics { contentDescription = "搜索或输入网址" },
+                        interactionSource = interactionSource,
+                        textStyle = Type.title.copy(
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        cursorBrush = SolidColor(colors.accent),
+                        singleLine = true,
+                        // 与地址栏共用同一套键盘规格：首页搜索框和地址栏本就是同一个
+                        // 共享元素，输入法行为必须一致，否则两屏之间会突然换手感。
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            autoCorrectEnabled = false,
+                            keyboardType = KeyboardType.Uri,
+                            imeAction = ImeAction.Go
+                        ),
+                        keyboardActions = KeyboardActions(onGo = { onSubmit() }),
+                        decorationBox = { innerTextField ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.weight(1f)) {
+                                    if (query.isEmpty()) {
+                                        BasicText(
+                                            text = "搜索或输入网址",
+                                            style = Type.title.copy(color = hintTint)
+                                        )
+                                    }
+                                    innerTextField()
                                 }
-                                innerTextField()
-                            }
-                            // 清空入口：全选删除太慢，长按也不够直觉，
-                            // 给一个一键擦掉的按钮。
-                            Visibility(
-                                visible = query.isNotEmpty(),
-                                enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
-                                    scaleIn(
-                                        animationSpec = MotionSpec.pageSpring(),
-                                        initialScale = 0.7f
-                                    ),
-                                exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
-                                    scaleOut(
-                                        animationSpec = MotionSpec.pageSpring(),
-                                        targetScale = 0.7f
-                                    )
-                            ) {
-                                val clearInteraction = remember { MutableInteractionSource() }
-                                Box(
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(CircleShape)
-                                        .semantics {
-                                            contentDescription = "清空搜索内容"
-                                            role = Role.Button
-                                        }
-                                        .clickable(
-                                            interactionSource = clearInteraction,
-                                            indication = null,
-                                            role = Role.Button,
-                                            onClickLabel = "清空"
-                                        ) { onQueryChange("") }
-                                        .pressScale(
-                                            pressedScale = 0.82f,
-                                            interactionSource = clearInteraction
+                                // 清空入口：全选删除太慢，长按也不够直觉，
+                                // 给一个一键擦掉的按钮。
+                                Visibility(
+                                    visible = query.isNotEmpty(),
+                                    enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
+                                        scaleIn(
+                                            animationSpec = MotionSpec.pageSpring(),
+                                            initialScale = 0.7f
                                         ),
-                                    contentAlignment = Alignment.Center
+                                    exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
+                                        scaleOut(
+                                            animationSpec = MotionSpec.pageSpring(),
+                                            targetScale = 0.7f
+                                        )
                                 ) {
-                                    GlyphIcon(Glyph.Close, colors.textTertiary, size = 13.dp)
+                                    val clearInteraction = remember { MutableInteractionSource() }
+                                    Box(
+                                        modifier = Modifier
+                                            // 触摸区给到 48dp：28dp 的小叉在手指下根本点不准，
+                                            // 视觉上仍是那颗小叉，只是手指不必精确命中。
+                                            .size(Dimens.minTouch)
+                                            .clip(CircleShape)
+                                            .semantics {
+                                                contentDescription = "清空搜索内容"
+                                                role = Role.Button
+                                            }
+                                            .clickable(
+                                                interactionSource = clearInteraction,
+                                                indication = null,
+                                                role = Role.Button,
+                                                onClickLabel = "清空"
+                                            ) { onQueryChange("") }
+                                            .pressScale(
+                                                pressedScale = 0.82f,
+                                                interactionSource = clearInteraction
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        GlyphIcon(Glyph.Close, colors.textTertiary, size = 13.dp)
+                                    }
                                 }
                             }
                         }
-                    }
-                )
+                    )
+                }
+                // 「前往」按钮淡入并轻微右移：
+                // 输入框里一有字它就弹出来，硬切会让键盘显得很急躁。
+                // 用项目自己的 Visibility：这一行在 Row 作用域里，
+                // 直接调 AnimatedVisibility 会解析到 RowScope 的同名扩展。
+                Visibility(
+                    visible = query.isNotBlank(),
+                    enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
+                        expandHorizontally(animationSpec = MotionSpec.sizeValue()) +
+                        slideInHorizontally(
+                            animationSpec = MotionSpec.pageSpring(androidx.compose.ui.unit.IntOffset.Zero),
+                            initialOffsetX = { -it / 3 }
+                        ),
+                    exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
+                        shrinkHorizontally(animationSpec = MotionSpec.sizeValue())
+                ) {
+                    // 「前往」按钮与地址栏编辑态里的那颗同款：
+                    // 两边是同一块共享元素，首页用淡强调色底、地址栏用实底，
+                    // 来回切换时按钮会整个变一次样。
+                    GlassPillButton(
+                        label = "前往",
+                        onClick = onSubmit,
+                        backdrop = emptyBackdrop(),
+                        accent = true,
+                        contentPadding = PaddingValues(horizontal = Space.lg)
+                    )
+                }
             }
-            // 「前往」按钮淡入并轻微右移：
-            // 输入框里一有字它就弹出来，硬切会让键盘显得很急躁。
-            // 用项目自己的 Visibility：这一行在 Row 作用域里，
-            // 直接调 AnimatedVisibility 会解析到 RowScope 的同名扩展。
-            Visibility(
-                visible = query.isNotBlank(),
-                enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
-                    expandHorizontally(animationSpec = MotionSpec.sizeValue()) +
-                    slideInHorizontally(
-                        animationSpec = MotionSpec.pageSpring(androidx.compose.ui.unit.IntOffset.Zero),
-                        initialOffsetX = { -it / 3 }
-                    ),
-                exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
-                    shrinkHorizontally(animationSpec = MotionSpec.sizeValue())
-            ) {
-                // 「前往」按钮与地址栏编辑态里的那颗同款：
-                // 两边是同一块共享元素，首页用淡强调色底、地址栏用实底，
-                // 来回切换时按钮会整个变一次样。
-                GlassPillButton(
-                    label = "前往",
-                    onClick = onSubmit,
-                    backdrop = emptyBackdrop(),
-                    accent = true,
-                    contentPadding = PaddingValues(horizontal = Space.lg)
-                )
-            }
+            // 光晕画在最后：压在内容之上，边缘才不会被行内元素切出缺口。
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .border(ringWidth, ringColor, RoundedCornerShape(Radius.xl))
+            )
         }
     }
 }
@@ -553,6 +686,7 @@ private fun QuickLinkGrid(
     backdrop: LayerBackdrop,
     links: List<QuickLink>,
     columns: Int,
+    firstBeat: Int,
     isTablet: Boolean,
     reduceMotion: Boolean,
     onOpenUrl: (String) -> Unit
@@ -569,9 +703,10 @@ private fun QuickLinkGrid(
                     Box(
                         Modifier
                             .weight(1f)
-                            .gridReveal(
-                                index = rowIndex * columns + columnIndex,
-                                reduceMotion = reduceMotion
+                            .entranceReveal(
+                                beat = firstBeat + rowIndex * columns + columnIndex,
+                                reduceMotion = reduceMotion,
+                                fromScale = 0.94f
                             )
                     ) {
                         QuickLinkTile(
@@ -588,37 +723,6 @@ private fun QuickLinkGrid(
                 }
             }
         }
-    }
-}
-
-/**
- * 常用网站逐块浮现。
- *
- * 延迟值必须在组合作用域里取好再进 LaunchedEffect，
- * 因为 [MotionSpec.staggerDelay] 是 @Composable，不能在协程里调用。
- */
-@Composable
-private fun Modifier.gridReveal(index: Int, reduceMotion: Boolean): Modifier {
-    val stagger = MotionSpec.staggerDelay(index, stepMillis = 22)
-    var revealed by remember { mutableStateOf(false) }
-    LaunchedEffect(index) {
-        if (stagger > 0) delay(stagger.toLong())
-        revealed = true
-    }
-    val alpha by animateFloatAsState(
-        targetValue = if (revealed) 1f else 0f,
-        animationSpec = if (reduceMotion) tween(durationMillis = 0) else MotionSpec.value(Motion.Slow),
-        label = "grid-alpha"
-    )
-    val scale by animateFloatAsState(
-        targetValue = if (revealed) 1f else 0.94f,
-        animationSpec = MotionSpec.pageSpring(reduceMotion),
-        label = "grid-scale"
-    )
-    return graphicsLayer {
-        this.alpha = alpha
-        scaleX = scale
-        scaleY = scale
     }
 }
 
@@ -675,11 +779,12 @@ private fun QuickLinkTile(
             Spacer(Modifier.height(Space.sm))
             BasicText(
                 text = link.label,
-                style = (if (isTablet) {
-                    Type.bodySmall.copy(fontWeight = FontWeight.Medium)
-                } else {
-                    Type.label
-                }).copy(color = colors.textPrimary),
+                // 手机与平板用同一档字号：站点名是这里唯一能读的字，
+                // 11sp 在高密度屏上偏小，12sp 才不至于眯眼看。
+                style = Type.bodySmall.copy(
+                    color = colors.textPrimary,
+                    fontWeight = FontWeight.Medium
+                ),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -824,7 +929,7 @@ private fun EmptyRecentHint(onOpenLibrary: () -> Unit) {
         val libraryInteraction = remember { MutableInteractionSource() }
         Box(
             Modifier
-                .heightIn(min = 36.dp)
+                .heightIn(min = Dimens.minTouch)
                 .clip(RoundedCornerShape(Radius.pill))
                 .background(colors.accent.copy(alpha = 0.12f))
                 .clickable(

@@ -64,13 +64,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -293,30 +291,29 @@ fun AgentPanel(
         (if (currentCreation != null) 1 else 0)
     // 滚动落点：忙碌时停在思考行，否则停在最后一条内容上。
     // 思考行常驻列表末尾，收起后紧跟最后一条内容。
+    // 不忙时不能拿思考行当落点：它此时高度为 0，滚过去等于滚到列表末尾，
+    // 看着像"跳过去"而不是"停住"。
     val scrollIndex = if (agent.busy) contentItems else (contentItems - 1).coerceAtLeast(0)
     // 卡片收起时先播出场动画，动画播完才真正移除：
     // 直接置空会让卡片瞬间消失，少一个收尾。
     val cardExitMillis = if (reduced) Motion.Fast + 60 else Motion.Normal + 60
-    // 内容条数会变，派生状态里必须读到最新值：
-    // remember 里的派生状态捕获的是第一次组合时的条数，之后一直是旧值。
-    val contentCount = rememberUpdatedState(contentItems)
     // 用户往上翻阅旧回答时，新内容不该把他拽回底部。
     // 只在滚动位置变化时重算：新消息到达会让列表重排，
     // 那不是"翻阅旧消息"，不该把自动跟随关掉。
     var scrolledAway by remember { mutableStateOf(false) }
     LaunchedEffect(listState) {
+        // 触发源是滚动位置：只有用户真的动了列表才重算。
+        // 若改成观察内容条数，新消息到达会让列表重排，
+        // 那不是"翻阅旧消息"，不该把自动跟随关掉。
         snapshotFlow {
             listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
         }
             .distinctUntilChanged()
             .collect {
-                val info = listState.layoutInfo
-                // 末尾恒有一行思考位，最后一条内容排在它前面。
-                val lastContent = info.totalItemsCount - 2
-                val visibleContent = info.visibleItemsInfo.lastOrNull { it.index <= lastContent }
-                // 还没排版时什么都判断不了，按"仍在底部"处理，
-                // 否则面板打开时第一次自动滚动会被自己挡掉。
-                scrolledAway = visibleContent != null && visibleContent.index < lastContent
+                // 判据是"还能不能继续往下滚"：底部不在眼前就是在翻旧内容。
+                // 比"最后一条是否可见"准——长回答占满屏幕时，
+                // 最后一条一直可见，可用户明明正在往回翻。
+                scrolledAway = listState.canScrollForward
             }
     }
 
@@ -751,13 +748,9 @@ fun AgentPanel(
                     }
                     // 往上翻阅旧回答时，右下角浮出"回到最新"：
                     // 没有它，用户只能一直往下拖才知道有新消息来了。
-                    // 条数取最新值：末尾的思考行不算内容，它不忙时是收着的。
-                    val showJumpToLatest by remember {
-                        derivedStateOf {
-                            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()
-                            last != null && last.index < contentCount.value - 1
-                        }
-                    }
+                    // 与自动跟随用同一个判据：底部不在眼前就该给按钮，
+                    // 两者若用两套标准，按钮会和自动跟随打架。
+                    val showJumpToLatest = scrolledAway
                     Visibility(
                         visible = showJumpToLatest && !emptyPanel,
                         enter = fadeIn(MotionSpec.enter(Motion.Quick)) + scaleIn(

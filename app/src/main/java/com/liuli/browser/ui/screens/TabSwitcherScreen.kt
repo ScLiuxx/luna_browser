@@ -22,6 +22,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -73,10 +74,10 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.liuli.browser.ui.components.EmptyState
 import com.liuli.browser.ui.components.GlassIconButton
@@ -320,7 +321,10 @@ fun TabSwitcherScreen(
                         targetScale = 0.96f
                     )
                 ) {
-                    EmptyTabState()
+                    EmptyTabState(
+                        backdrop = backdrop,
+                        onNewTab = { onNewTab(false) }
+                    )
                 }
             }
 
@@ -401,11 +405,16 @@ fun TabSwitcherScreen(
                     GlassPillButton(
                         label = "关闭",
                         onClick = {
+                            // 确认关闭是破坏性操作，给一次明确的触感确认。
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             pendingCloseId?.let(onCloseTab)
                             pendingCloseId = null
                         },
                         backdrop = backdrop,
-                        accent = true
+                        // 收尾的标签页点掉就没有了，确认键用危险色：
+                        // 与对话框里的确认键同一套，用户按之前就知道这一步不可逆。
+                        accent = true,
+                        danger = true
                     )
                 }
             }
@@ -490,6 +499,23 @@ private fun TabCard(
     val closeInteraction = remember { MutableInteractionSource() }
     val haptics = LocalHapticFeedback.current
 
+    // 关闭意图只有一条路径：右上角的小叉与长按卡片都走这里，
+    // 否则两处的退场动画、确认逻辑与触感反馈会各走各的。
+    val requestClose = { haptic: HapticFeedbackType? ->
+        if (!closing) {
+            // 长按关闭时框架已经给过一次长按触感，这里不再补一次：
+            // 两次震动叠在一起只会变成一顿乱响。
+            if (haptic != null) haptics.performHapticFeedback(haptic)
+            // 先问父级：最后一个标签页要等用户点头才能关，
+            // 确认之前卡片不能开始退场，也不能变成"点不动"。
+            if (onCloseRequest()) {
+                // 先记一笔：这次点击属于"关闭"，不能再触发卡片的打开。
+                closeTriggered = true
+                closing = true
+            }
+        }
+    }
+
     Box(
         modifier
             .fillMaxWidth()
@@ -519,10 +545,15 @@ private fun TabCard(
                 color = borderColor,
                 shape = RoundedCornerShape(Radius.lg)
             )
-            .clickable(
+            // 长按直接关掉这张卡：标签页一多，逐个去够右上角的小叉很费事，
+            // 长按是浏览器里最通用的"关掉这张卡"手势。
+            .combinedClickable(
                 interactionSource = cardInteraction,
                 indication = null,
                 role = Role.Button,
+                onClickLabel = "切换到 ${tab.pageTitle()}",
+                onLongClickLabel = "关闭 ${tab.pageTitle()}",
+                onLongClick = { requestClose(null) },
                 onClick = {
                     // 关闭按钮按过就不该再打开这张卡片。
                     if (!closeTriggered) onOpen()
@@ -654,25 +685,17 @@ private fun TabCard(
                     role = Role.Button,
                     onClickLabel = "关闭标签页"
                 ) {
-                    if (!closing) {
-                        // 关闭标签页是破坏性操作，给一次明确的触感确认。
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        // 先问父级：最后一个标签页要等用户点头才能关，
-                        // 确认之前卡片不能开始退场，也不能变成"点不动"。
-                        if (onCloseRequest()) {
-                            // 先记一笔：这次点击属于"关闭"，不能再触发卡片的打开。
-                            closeTriggered = true
-                            closing = true
-                        }
-                    }
+                    requestClose(HapticFeedbackType.TextHandleMove)
                 },
             contentAlignment = Alignment.Center
         ) {
             Box(
                 Modifier
-                    .size(30.dp)
+                    // 视觉底座比热区小一圈：48dp 的深色圆会压住卡片右上角的画面，
+                    // 32dp 的圆点既看得清，又不挡住网页内容。
+                    .size(32.dp)
                     .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.34f)),
+                    .background(Color.Black.copy(alpha = 0.38f)),
                 contentAlignment = Alignment.Center
             ) {
                 GlyphIcon(Glyph.Close, Color.White, size = 15.dp)
@@ -687,9 +710,11 @@ private fun TabCard(
         ) {
             BasicText(
                 text = tab.pageTitle(),
-                style = Type.title.copy(
+                // 用正文档号加半粗：卡片标题比页面标题小一档，
+                // 但仍要比域名重，两行的层级才分得开。
+                style = Type.body.copy(
                     color = Color.White,
-                    fontSize = 14.sp
+                    fontWeight = FontWeight.SemiBold
                 ),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -739,10 +764,23 @@ private fun TabBadge(
  * 网格空白一片会让人以为界面卡住了，这里给出明确的下一步。
  */
 @Composable
-private fun EmptyTabState() {
+private fun EmptyTabState(
+    backdrop: LayerBackdrop,
+    onNewTab: () -> Unit
+) {
     EmptyState(
         glyph = Glyph.Tabs,
         title = "还没有打开的标签页",
-        message = "点右上角的加号开一个新标签页"
+        message = "开一个新标签页开始浏览",
+        // 空状态里给一个能点的按钮：只写一句提示，用户还得自己去找右上角的加号。
+        footer = {
+            GlassPillButton(
+                label = "新建标签页",
+                onClick = onNewTab,
+                backdrop = backdrop,
+                glyph = Glyph.Plus,
+                accent = true
+            )
+        }
     )
 }
