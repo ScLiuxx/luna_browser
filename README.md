@@ -16,8 +16,9 @@
 - 统一动效规格层：弹簧曲线、时长档位与缓动收敛到一份契约（`ui/theme/Motion.kt`），所有页面共用；「减少动态效果」开关全局生效，任何动效都能降级。
 - 设计 token 体系：圆角、间距、字号各自收敛为固定档位（`ui/theme/LiuliTheme.kt` 的 `Radius` / `Space` / `Type`），全 App 视觉语言一致。
 - 按压反馈全覆盖：玻璃卡片、列表行、按钮、标签页都获得液态按压回弹，拖动类控件（开关、滑块、底部 Dock）1:1 跟手并带液态过冲。
-- 触感反馈：开关、滑块跨档、标签切换、关闭标签页与结果提示都有震动确认。
+- 触感反馈：按下的那一刻就有震动确认（与按压形变同步），开关、滑块跨档、标签切换、关闭标签页与结果提示都有反馈。
 - 手势：地址栏收起为一行、左右边缘滑动前进/后退（带速度判定），底部菜单可下拉甩掉。
+- 共享组件：空状态、破坏性确认框、页头、玻璃表面各有唯一实现，三个页面不会再各写一套长得不一样的东西。
 - 多标签浏览：新建/关闭/切换标签、标签缩略图、书签与历史、下载、桌面版网站、全屏视频。
 - 平板与折叠屏：响应式侧栏、多列标签、可调整窗口、横竖屏。
 - 隐私护盾：本机拦截追踪器、去除跟踪参数、阻止第三方 Cookie、通用 User-Agent、拒绝敏感网页权限、退出即清除数据。
@@ -66,13 +67,21 @@ keyPassword=******
 app/src/main/java/com/liuli/browser
 ├── data/          SettingsStore、LibraryStore
 ├── ui/
-│   ├── BrowserRoot.kt       响应式根布局、共享元素转场
-│   ├── liquid/              LiquidButton/Toggle/Slider/Dock、InteractiveHighlight、pressScale
-│   ├── components/          玻璃表面、图标、Aurora 背景、隐私说明、通用对话框
+│   ├── BrowserRoot.kt       响应式根布局、共享元素转场、Toast 队列
+│   ├── agent/               AgentPanel（AI 助手面板）、AgentShareCard（分享卡渲染）
+│   ├── liquid/              LiquidButton/Toggle/Slider/Dock、InteractiveHighlight、
+│   │                        DampedDragAnimation、pressScale、Visibility
+│   ├── components/          Glass（玻璃表面）、Glyph（图标）、Navigation（侧栏）、
+│   │                        EmptyState、DangerConfirmDialog、PageHeader、
+│   │                        AuroraBackground、PrivacyPolicy、LiquidDialog
 │   ├── screens/             Home/Browser/TabSwitcher/Library/Settings/PrivacyGate
 │   └── theme/               配色、字体、尺寸、Motion 动效规格层、Radius/Space/Type token
 └── web/                     BrowserViewModel、WebView 配置、隐私护盾、快照
+    └── agent/               AgentController、AgentResearch、AgentCreation、
+                             AgentAutomation、AgentPageBridge、AgentPolicyStore
 ```
+
+`tools/sandbox-build.sh` 是沙箱环境的构建入口：它负责装好 Gradle 发行包与 Android SDK、写入代理与镜像配置，再以适配沙箱内存上限的参数调用 Gradle（项目 `gradle.properties` 里的 `-Xmx4096m` 会超过沙箱的 cgroup 上限，daemon 会被 OOM killer 干掉）。
 
 ## 隐私说明
 
