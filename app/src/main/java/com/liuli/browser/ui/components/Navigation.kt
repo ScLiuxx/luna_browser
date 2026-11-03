@@ -11,16 +11,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -38,6 +37,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -48,7 +48,6 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -62,10 +61,44 @@ import com.liuli.browser.ui.theme.Radius
 import com.liuli.browser.ui.theme.Space
 import com.liuli.browser.ui.theme.reduceMotion
 import kotlinx.coroutines.delay
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 data class NavItem(
     val glyph: Glyph,
     val label: String
+)
+
+/**
+ * 品牌球的光源方向：固定在屏幕左上方。
+ *
+ * 屏幕 y 轴向下，所以是负角。球面的高光、暗面、焦散、边缘光
+ * 全部由这一个方向推出来，光源一旦统一，球才立得住；
+ * 各层各画各的，球就塌成一张平贴的渐变贴纸。
+ */
+private val BrandLightAngle = (-135.0 * PI / 180.0).toFloat()
+
+/** 环绕高光绕行一圈的时长（毫秒）。慢到几乎察觉不到，只在余光里发亮。 */
+private const val GlintPeriodMillis = 7_200f
+
+/** 环绕高光的推进节拍（毫秒）。 */
+private const val GlintFrameMillis = 33L
+
+/** 朝白色提亮：受光面用，保留色相才不会在浅色背景上变成一块白斑。 */
+private fun Color.towardWhite(fraction: Float): Color = Color(
+    red = this.red + (1f - this.red) * fraction,
+    green = this.green + (1f - this.green) * fraction,
+    blue = this.blue + (1f - this.blue) * fraction,
+    alpha = this.alpha
+)
+
+/** 朝黑色压暗：背光面收边用。 */
+private fun Color.towardBlack(factor: Float): Color = Color(
+    red = this.red * factor,
+    green = this.green * factor,
+    blue = this.blue * factor,
+    alpha = this.alpha
 )
 
 @Composable
@@ -94,6 +127,27 @@ fun BrandOrb(
         animationSpec = MotionSpec.value(Motion.Slow),
         label = "brand-orb-breath"
     )
+    // 环绕高光：一粒极小的镜面反光绕着球面慢慢游走。
+    // 固定的主高光说明"这是一颗玻璃球"，游走的这一点说明"它还活着"；
+    // 它转到背光面时几乎熄灭，所以始终被读作同一盏灯的反光，
+    // 而不是凭空多出来的一盏。
+    var glintPhase by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(reduced) {
+        if (reduced) {
+            glintPhase = 0f
+            return@LaunchedEffect
+        }
+        // 按固定节拍推进而不是逐帧推进：反光走得极慢，
+        // 三十帧足够，省下的却是整屏 60 次重绘。
+        var phase = 0f
+        val step = GlintFrameMillis / GlintPeriodMillis
+        while (true) {
+            delay(GlintFrameMillis)
+            phase += step
+            if (phase >= 1f) phase -= 1f
+            glintPhase = phase
+        }
+    }
     // 呼吸只做极小的涨缩：品牌标记在导航栏里是常驻元素，
     // 动得太明显会抢走内容的注意力。
     val swell = 1f + 0.02f * breath
@@ -108,14 +162,29 @@ fun BrandOrb(
     ) {
         val radius = this.size.minDimension / 2f
         val center = Offset(this.size.width / 2f, this.size.height / 2f)
-        // 高光位置用「圆心左上方 40%/35%」定义，而不是写死的像素偏移：
-        // 尺寸变化时高光仍落在球体的左上肩部，符合球面受光直觉。
-        // 呼吸时高光跟着轻轻游走，球面不会像一张静止的贴纸。
-        val drift = breath * radius * 0.06f
-        val highlightCenter = Offset(
-            center.x - radius * 0.40f + drift,
-            center.y - radius * 0.35f - drift * 0.6f
+        // 光源方向固定在左上，球面所有明暗都从它推出来。
+        val lightDir = Offset(cos(BrandLightAngle), sin(BrandLightAngle))
+        val lightCenter = Offset(
+            center.x + lightDir.x * radius * 0.56f,
+            center.y + lightDir.y * radius * 0.56f
         )
+        // 背光面落在右下。
+        val shadeCenter = Offset(
+            center.x - lightDir.x * radius * 0.52f,
+            center.y - lightDir.y * radius * 0.52f
+        )
+        // 玻璃球把穿过它的光聚到背面，形成一小块焦散亮斑。
+        // 这一笔是"琉璃"与普通渐变圆点的分界。
+        val causticCenter = Offset(
+            center.x - lightDir.x * radius * 0.44f,
+            center.y - lightDir.y * radius * 0.44f
+        )
+        // 主高光停在受光的肩部。
+        val specularCenter = Offset(
+            center.x + lightDir.x * radius * 0.40f,
+            center.y + lightDir.y * radius * 0.40f
+        )
+
         // 外发光：球体从背景里"浮"起来，而不是直接贴在背景上。
         drawCircle(
             brush = Brush.radialGradient(
@@ -123,66 +192,127 @@ fun BrandOrb(
                 0.5f to colors.accent.copy(alpha = if (colors.isDark) 0.10f else 0.05f),
                 1f to Color.Transparent,
                 center = center,
-                radius = radius * 1.5f
+                radius = radius * 1.55f
             ),
-            radius = radius * 1.5f,
+            radius = radius * 1.55f,
             center = center
         )
+        // 球面本体：以光源为圆心的球面渐变。
+        // 渐变半径必须盖住整颗球，色标才落在可见范围里。
+        // 早先深色那一档放在渐变末端，球外永远看不到，
+        // 背光面只剩一片平涂的强调色，球就塌成了一个圆片。
+        // 三档色相依次排开，正好把调色板里的主色、次色、三色串成一条彩石般的带子。
         drawCircle(
             brush = Brush.radialGradient(
-                0f to Color.White.copy(alpha = 0.88f),
-                0.22f to colors.accentTertiary,
-                0.62f to colors.accent,
-                1f to colors.accentSecondary,
-                center = highlightCenter,
-                radius = radius * 1.7f
+                0f to colors.accentTertiary.towardWhite(0.88f),
+                0.28f to colors.accentTertiary.towardWhite(0.72f),
+                0.44f to colors.accentTertiary.towardWhite(0.28f),
+                0.58f to colors.accentTertiary,
+                0.76f to colors.accent,
+                0.90f to colors.accentSecondary,
+                1f to colors.accentSecondary.towardBlack(0.70f),
+                center = lightCenter,
+                radius = radius * 1.58f
             ),
             radius = radius,
             center = center
         )
-        // 明暗交界：右下侧压暗。没有这一层，球体只剩一团平贴的渐变，
-        // 看上去像贴纸而不是一个立体的球。
+        // 明暗交界：背光侧压出一片柔和的暗面。
+        // 少了这一层，球面只剩一条从亮到暗的直带，看不出球。
         drawCircle(
             brush = Brush.radialGradient(
-                0f to Color.Black.copy(alpha = if (colors.isDark) 0.30f else 0.16f),
-                0.5f to Color.Black.copy(alpha = if (colors.isDark) 0.14f else 0.07f),
+                0f to Color.Black.copy(alpha = if (colors.isDark) 0.30f else 0.18f),
+                0.45f to Color.Black.copy(alpha = if (colors.isDark) 0.11f else 0.07f),
                 1f to Color.Transparent,
-                center = Offset(center.x + radius * 0.45f, center.y + radius * 0.55f),
-                radius = radius * 1.35f
+                center = shadeCenter,
+                radius = radius * 1.2f
             ),
             radius = radius,
             center = center
         )
-        // 边缘反光：内侧描一圈亮边，球体才有厚度而不是一张贴纸。
+        // 地面反光：球体下缘接住一点来自下方的环境光，
+        // 下沿才不会和背景一样平。
         drawCircle(
             brush = Brush.radialGradient(
-                0f to Color.Transparent,
-                0.82f to Color.Transparent,
-                1f to Color.White.copy(alpha = 0.30f),
-                center = highlightCenter,
-                radius = radius
+                0f to Color.White.copy(alpha = if (colors.isDark) 0.16f else 0.20f),
+                0.5f to Color.White.copy(alpha = 0.05f),
+                1f to Color.Transparent,
+                center = Offset(center.x, center.y + radius * 0.66f),
+                radius = radius * 0.6f
             ),
             radius = radius,
             center = center
         )
+        // 焦散：穿过来的光在球体背面聚成一小块亮斑，
+        // 球读起来才是透光的玻璃，而不是实心弹珠。
         drawCircle(
-            color = Color.White.copy(alpha = 0.42f),
-            radius = radius * 0.93f,
+            brush = Brush.radialGradient(
+                0f to Color.White.copy(alpha = 0.55f),
+                0.45f to colors.accentTertiary.copy(alpha = 0.42f),
+                1f to Color.Transparent,
+                center = causticCenter,
+                radius = radius * 0.3f
+            ),
+            radius = radius * 0.3f,
+            center = causticCenter
+        )
+        // 边缘光：受光的那一侧边缘最亮，背光侧自然熄灭。
+        // 早先这一圈不论方向都是白的，看着像贴纸的描边。
+        drawCircle(
+            brush = Brush.linearGradient(
+                0f to Color.White.copy(alpha = 0.55f),
+                0.45f to Color.White.copy(alpha = 0.16f),
+                1f to Color.Transparent,
+                start = Offset(center.x + lightDir.x * radius, center.y + lightDir.y * radius),
+                end = Offset(center.x - lightDir.x * radius, center.y - lightDir.y * radius)
+            ),
+            radius = radius * 0.94f,
             center = center,
-            style = Stroke(width = 1.2.dp.toPx())
+            style = Stroke(width = 1.1.dp.toPx())
         )
-        // 高光椭圆：跟着同一个高光中心走，不再是固定偏移。
-        drawOval(
-            color = Color.White.copy(alpha = 0.34f),
-            topLeft = Offset(highlightCenter.x - radius * 0.48f, highlightCenter.y - radius * 0.30f),
-            size = androidx.compose.ui.geometry.Size(radius * 0.96f, radius * 0.46f),
-            style = Stroke(width = 1.dp.toPx())
-        )
+        // 主高光：受光肩部一块柔亮的椭圆，外加一个小硬芯。
+        // 早先用"描边椭圆"当高光，那是一圈铁丝，不是光。
+        // 椭圆压扁得厉害，宽窄比接近球面受光时的拉伸比，才像一层釉光。
+        scale(scaleX = 0.34f, scaleY = 0.18f, pivot = specularCenter) {
+            drawCircle(
+                brush = Brush.radialGradient(
+                    0f to Color.White.copy(alpha = 0.55f),
+                    0.55f to Color.White.copy(alpha = 0.16f),
+                    1f to Color.Transparent,
+                    center = specularCenter,
+                    radius = radius * 0.8f
+                ),
+                radius = radius * 0.8f,
+                center = specularCenter
+            )
+        }
         drawCircle(
-            color = Color.White.copy(alpha = 0.65f),
-            radius = radius * 0.16f,
-            center = Offset(highlightCenter.x, highlightCenter.y)
+            color = Color.White.copy(alpha = 0.8f),
+            radius = radius * 0.11f,
+            center = specularCenter
         )
+        // 环绕高光：一粒会走的小反光。转到背光面就几乎熄灭，
+        // 因此它永远被读作同一盏灯的反光，而不是第二盏灯。
+        if (!reduced) {
+            val glintAngle = glintPhase * 2f * PI.toFloat() - PI.toFloat() / 2f
+            val glintCenter = Offset(
+                center.x + cos(glintAngle) * radius * 0.55f,
+                center.y + sin(glintAngle) * radius * 0.55f
+            )
+            val facing = 0.5f + 0.5f * cos(glintAngle - BrandLightAngle)
+            val glintAlpha = 0.05f + 0.42f * facing * facing
+            drawCircle(
+                brush = Brush.radialGradient(
+                    0f to Color.White.copy(alpha = glintAlpha),
+                    0.5f to Color.White.copy(alpha = glintAlpha * 0.3f),
+                    1f to Color.Transparent,
+                    center = glintCenter,
+                    radius = radius * 0.17f
+                ),
+                radius = radius * 0.17f,
+                center = glintCenter
+            )
+        }
     }
 }
 
@@ -198,6 +328,7 @@ fun GlassNavigationRail(
 ) {
     val colors = LocalLiuliColors.current
     val density = LocalDensity.current
+    val reduced = reduceMotion
     val itemBounds = remember { mutableStateMapOf<Int, Rect>() }
     val selectedBounds = itemBounds[selectedIndex]
     // 指示器位置与高度共用同一套页面级弹性，上下两端因此完全对称
@@ -233,158 +364,192 @@ fun GlassNavigationRail(
         lensAmount = 26.dp,
         shadow = true
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxHeight()
-                .padding(vertical = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            BrandOrb(size = 38.dp)
-            Spacer(Modifier.height(10.dp))
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            // 横屏或小屏时轨道高度吃紧：这时收紧图标、间距与留白，
+            // 否则底部的"新建标签"会被挤出可视区，够不着。
+            // 高屏则维持原样：导航项紧跟在品牌球下面，轨道读起来才是一段整体。
+            // 阈值按常规布局的实际高度留了余量，大字号把标签撑高也不至于挤爆。
+            val compact = maxHeight < 460.dp
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .padding(vertical = if (compact) 10.dp else 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (indicatorHeight > 0.dp || indicatorAlpha > 0f) {
-                    GlassSurface(
-                        backdrop = backdrop,
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .offset(y = indicatorTop)
-                            .width(58.dp)
-                            .height(indicatorHeight)
-                            .graphicsLayer { alpha = indicatorAlpha },
-                        shape = RoundedCornerShape(Radius.md),
-                        tint = colors.accent.copy(alpha = if (colors.isDark) 0.22f else 0.13f),
-                        blurRadius = 14.dp,
-                        lensHeight = 12.dp,
-                        lensAmount = 16.dp,
-                        shadow = false
-                    ) {}
-                }
-                Column(
-                    Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                BrandOrb(size = if (compact) 30.dp else 38.dp)
+                Spacer(Modifier.height(if (compact) 6.dp else 10.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
                 ) {
-                    items.forEachIndexed { index, item ->
-                        val selected = index == selectedIndex
-                        val itemInteraction = remember(item) { MutableInteractionSource() }
-                        // 导航项较小，按压回缩得更明显一些
-                        val itemPress = Modifier.pressScale(
-                            pressedScale = 0.92f,
-                            interactionSource = itemInteraction
-                        )
-                        // 选中与未选中之间平滑过渡，而不是瞬时换色
-                        val iconTint by animateColorAsState(
-                            targetValue = if (selected) colors.accent else colors.textSecondary,
-                            animationSpec = MotionSpec.color(Motion.Quick),
-                            label = "rail-icon-tint"
-                        )
-                        val labelTint by animateColorAsState(
-                            targetValue = if (selected) colors.accent else colors.textTertiary,
-                            animationSpec = MotionSpec.color(Motion.Quick),
-                            label = "rail-label-tint"
-                        )
-                        Column(
+                    if (indicatorHeight > 0.dp || indicatorAlpha > 0f) {
+                        GlassSurface(
+                            backdrop = backdrop,
                             modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .offset(y = indicatorTop)
                                 .width(58.dp)
-                                .clip(RoundedCornerShape(Radius.md))
-                                .onGloballyPositioned { coordinates ->
-                                    itemBounds[index] = coordinates.boundsInParent()
-                                }
-                                .semantics {
-                                    contentDescription = item.label
-                                    role = Role.Button
-                                }
-                                .then(itemPress)
-                                // 不用系统水波纹：液态玻璃语言下，指下高光由玻璃层自己给。
-                                .clickable(
-                                    interactionSource = itemInteraction,
-                                    indication = null,
-                                    role = Role.Button,
-                                    onClickLabel = item.label
-                                ) {
-                                    onSelect(index)
-                                }
-                                .padding(vertical = Space.sm),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                GlyphIcon(
-                                    glyph = item.glyph,
-                                    tint = iconTint,
-                                    size = 22.dp
-                                )
-                                if (item.glyph == Glyph.Tabs) {
-                                    // 角标常驻组合，靠缩放控制显隐，新增标签时弹入。
-                                    val badgeScale by animateFloatAsState(
-                                        targetValue = if (tabCount > 0) 1f else 0f,
-                                        animationSpec = MotionSpec.pageSpring(),
-                                        label = "rail-badge-scale"
-                                    )
-                                    Box(
-                                        Modifier
-                                            .offset(x = 11.dp, y = (-8).dp)
-                                            .graphicsLayer {
-                                                scaleX = badgeScale
-                                                scaleY = badgeScale
-                                            }
-                                            .size(15.dp)
-                                            .clip(CircleShape)
-                                            .background(colors.accent),
-                                        contentAlignment = Alignment.Center
+                                .height(indicatorHeight)
+                                .graphicsLayer { alpha = indicatorAlpha },
+                            shape = RoundedCornerShape(Radius.md),
+                            tint = colors.accent.copy(alpha = if (colors.isDark) 0.22f else 0.13f),
+                            blurRadius = 14.dp,
+                            lensHeight = 12.dp,
+                            lensAmount = 16.dp,
+                            shadow = false
+                        ) {}
+                    }
+                    Column(
+                        Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(if (compact) 2.dp else 6.dp)
+                    ) {
+                        items.forEachIndexed { index, item ->
+                            val selected = index == selectedIndex
+                            val itemInteraction = remember(item) { MutableInteractionSource() }
+                            // 导航项较小，按压回缩得更明显一些
+                            val itemPress = Modifier.pressScale(
+                                pressedScale = 0.92f,
+                                interactionSource = itemInteraction
+                            )
+                            // 选中与未选中之间平滑过渡，而不是瞬时换色
+                            val iconTint by animateColorAsState(
+                                targetValue = if (selected) colors.accent else colors.textSecondary,
+                                animationSpec = MotionSpec.color(Motion.Quick),
+                                label = "rail-icon-tint"
+                            )
+                            val labelTint by animateColorAsState(
+                                targetValue = if (selected) colors.accent else colors.textTertiary,
+                                animationSpec = MotionSpec.color(Motion.Quick),
+                                label = "rail-label-tint"
+                            )
+                            Column(
+                                modifier = Modifier
+                                    .width(58.dp)
+                                    .clip(RoundedCornerShape(Radius.md))
+                                    .onGloballyPositioned { coordinates ->
+                                        itemBounds[index] = coordinates.boundsInParent()
+                                    }
+                                    .semantics {
+                                        contentDescription = item.label
+                                        role = Role.Button
+                                    }
+                                    .then(itemPress)
+                                    // 不用系统水波纹：液态玻璃语言下，指下高光由玻璃层自己给。
+                                    .clickable(
+                                        interactionSource = itemInteraction,
+                                        indication = null,
+                                        role = Role.Button,
+                                        onClickLabel = item.label
                                     ) {
-                                        if (tabCount > 0) {
-                                            BasicText(
-                                                text = tabCount.coerceAtMost(99).toString(),
-                                                style = TextStyle(
-                                                    color = Color.White,
-                                                    fontSize = 8.sp,
-                                                    fontWeight = FontWeight.Bold
+                                        onSelect(index)
+                                    }
+                                    .padding(vertical = if (compact) Space.xs else Space.sm),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    GlyphIcon(
+                                        glyph = item.glyph,
+                                        tint = iconTint,
+                                        size = 22.dp
+                                    )
+                                    if (item.glyph == Glyph.Tabs) {
+                                        // 角标常驻组合，靠缩放控制显隐，新增标签时弹入。
+                                        val badgeScale by animateFloatAsState(
+                                            targetValue = if (tabCount > 0) 1f else 0f,
+                                            animationSpec = MotionSpec.pageSpring(),
+                                            label = "rail-badge-scale"
+                                        )
+                                        // 数量变了要有个动静：新增标签不该只是数字悄悄跳一下。
+                                        var badgePulse by remember { mutableFloatStateOf(0f) }
+                                        LaunchedEffect(tabCount, reduced) {
+                                            if (reduced || tabCount <= 0) return@LaunchedEffect
+                                            badgePulse = 1f
+                                            delay(100)
+                                            badgePulse = 0f
+                                        }
+                                        val pulse by animateFloatAsState(
+                                            targetValue = badgePulse,
+                                            animationSpec = MotionSpec.value(Motion.Quick),
+                                            label = "rail-badge-pulse"
+                                        )
+                                        // 两位数以上角标要加宽，否则数字会被裁掉；
+                                        // 早先一律显示 99，真实数量反而看不见了。
+                                        val badgeText = if (tabCount > 99) "99+" else tabCount.toString()
+                                        val badgeWidth = when {
+                                            tabCount > 99 -> 22.dp
+                                            tabCount > 9 -> 17.dp
+                                            else -> 15.dp
+                                        }
+                                        Box(
+                                            Modifier
+                                                // 贴着图标的右上角，而不是靠固定偏移硬凑
+                                                .align(Alignment.TopEnd)
+                                                .offset(x = 6.dp, y = (-6).dp)
+                                                .graphicsLayer {
+                                                    val pulseScale = badgeScale * (1f + 0.24f * pulse)
+                                                    scaleX = pulseScale
+                                                    scaleY = pulseScale
+                                                }
+                                                .width(badgeWidth)
+                                                .height(15.dp)
+                                                .clip(RoundedCornerShape(50))
+                                                .background(colors.accent),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (tabCount > 0) {
+                                                BasicText(
+                                                    text = badgeText,
+                                                    style = TextStyle(
+                                                        color = Color.White,
+                                                        fontSize = if (tabCount > 9) 7.sp else 8.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
                                                 )
-                                            )
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            BasicText(
-                                text = item.label,
-                                style = TextStyle(
-                                    color = labelTint,
-                                    fontSize = 10.sp,
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                Spacer(Modifier.height(4.dp))
+                                BasicText(
+                                    text = item.label,
+                                    style = TextStyle(
+                                        color = labelTint,
+                                        fontSize = 10.sp,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
                 }
-            }
-            Spacer(Modifier.height(6.dp))
-            // 新建标签页此前是一块半透明的纯色圆片：没有模糊、没有折射，
-            // 在一整列液态玻璃里显得是另一个世界的零件。改成玻璃件之后，
-            // 它和导航栏终于用上了同一套材质。
-            GlassSurface(
-                backdrop = backdrop,
-                modifier = Modifier
-                    .size(48.dp)
-                    .semantics {
-                        contentDescription = "新建标签页"
-                        role = Role.Button
-                    },
-                // 50 表示短边的一半，圆形玻璃件；用圆角形状而不是 CircleShape，
-                // 折射着色器只认圆角形状。
-                shape = RoundedCornerShape(50),
-                tint = colors.accent.copy(alpha = if (colors.isDark) 0.24f else 0.14f),
-                blurRadius = 12.dp,
-                lensHeight = 10.dp,
-                lensAmount = 14.dp,
-                contentAlignment = Alignment.Center,
-                onClick = onNewTab
-            ) {
-                GlyphIcon(Glyph.Plus, colors.accent, size = 22.dp)
+                Spacer(Modifier.height(if (compact) 2.dp else 6.dp))
+                // 新建标签页此前是一块半透明的纯色圆片：没有模糊、没有折射，
+                // 在一整列液态玻璃里显得是另一个世界的零件。改成玻璃件之后，
+                // 它和导航栏终于用上了同一套材质。
+                GlassSurface(
+                    backdrop = backdrop,
+                    modifier = Modifier
+                        // 不跟着紧凑模式缩小：可点区域低于 48dp 就该重新评估，
+                        // 竖向省下的那几像素不值得拿触控目标去换。
+                        .size(Dimens.minTouch)
+                        .semantics {
+                            contentDescription = "新建标签页"
+                            role = Role.Button
+                        },
+                    // 50 表示短边的一半，圆形玻璃件；用圆角形状而不是 CircleShape，
+                    // 折射着色器只认圆角形状。
+                    shape = RoundedCornerShape(50),
+                    tint = colors.accent.copy(alpha = if (colors.isDark) 0.24f else 0.14f),
+                    blurRadius = 12.dp,
+                    lensHeight = 10.dp,
+                    lensAmount = 14.dp,
+                    contentAlignment = Alignment.Center,
+                    onClick = onNewTab
+                ) {
+                    GlyphIcon(Glyph.Plus, colors.accent, size = if (compact) 18.dp else 22.dp)
+                }
             }
         }
     }

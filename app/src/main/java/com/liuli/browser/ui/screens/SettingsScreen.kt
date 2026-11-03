@@ -333,6 +333,15 @@ fun SettingsScreen(
                                     indication = null,
                                     role = Role.RadioButton
                                 ) { settings.updateSearchEngine(engine) }
+                                // 读屏要能听出当前用的是哪个引擎：
+                                // 光有 Role.RadioButton 不够，选中状态也得报上去。
+                                .semantics(mergeDescendants = true) {
+                                    contentDescription = if (selected) {
+                                        "${engine.label}，已选中"
+                                    } else {
+                                        engine.label
+                                    }
+                                }
                                 .pressScale(pressedScale = 0.98f, interactionSource = interaction)
                                 .padding(horizontal = Space.xs, vertical = Space.sm),
                             verticalAlignment = Alignment.CenterVertically
@@ -495,14 +504,25 @@ fun SettingsScreen(
                         backdrop = backdrop
                     )
                 }
-                if (agentPolicies.policies.isNotEmpty()) {
-                    Spacer(Modifier.height(Space.sm))
-                    GlassPillButton(
-                        label = "清除全部站点策略",
-                        onClick = { agentPolicies.clear() },
-                        backdrop = backdrop,
-                        glyph = Glyph.Trash
-                    )
+                // 站点策略存在时才出现这个按钮：
+                // 硬切会让按钮在内容中间突然冒出来，
+                // 淡入淡出接住它，过渡才不生硬。
+                Visibility(
+                    visible = agentPolicies.policies.isNotEmpty(),
+                    enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
+                        expandVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick)),
+                    exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
+                        shrinkVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick))
+                ) {
+                    Column {
+                        Spacer(Modifier.height(Space.sm))
+                        GlassPillButton(
+                            label = "清除全部站点策略",
+                            onClick = { agentPolicies.clear() },
+                            backdrop = backdrop,
+                            glyph = Glyph.Trash
+                        )
+                    }
                 }
                 Divider()
                 ToggleRow(
@@ -579,19 +599,34 @@ fun SettingsScreen(
                         "隐私标签始终只在本机处理。",
                     style = Type.caption.copy(color = colors.textTertiary, lineHeight = 16.sp)
                 )
-                if (agent.audit.isNotEmpty()) {
-                    Spacer(Modifier.height(Space.md))
-                    Divider()
-                    SettingsLabel(
-                        title = "审计记录",
-                        subtitle = "仅保存在本机内存，退出或清除对话时删除"
-                    )
-                    Spacer(Modifier.height(Space.xs))
-                    agent.audit.takeLast(6).reversed().forEach { entry ->
-                        BasicText(
-                            text = entry.displayLine(),
-                            style = Type.micro.copy(color = colors.textTertiary, lineHeight = 14.sp)
+                // 审计记录整块淡入淡出：
+                // 硬切会让分隔线与几行文字突然冒出来，
+                // 而它是随 Agent 动作不断变化的，出现得并不频繁。
+                Visibility(
+                    visible = agent.audit.isNotEmpty(),
+                    enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
+                        expandVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick)),
+                    exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
+                        shrinkVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick))
+                ) {
+                    Column {
+                        Spacer(Modifier.height(Space.md))
+                        Divider()
+                        SettingsLabel(
+                            title = "审计记录",
+                            subtitle = "仅保存在本机内存，退出或清除对话时删除"
                         )
+                        Spacer(Modifier.height(Space.xs))
+                        agent.audit.takeLast(6).reversed().forEach { entry ->
+                            BasicText(
+                                text = entry.displayLine(),
+                                style = Type.micro.copy(color = colors.textTertiary, lineHeight = 14.sp),
+                                // 审计行由主机名、动作、结果拼成，长度不受控。
+                                // 限一行并省略，一行审计不该把设置页撑开。
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.height(Space.md))
@@ -871,6 +906,15 @@ private fun DarkModeSegmented(
                             indication = null,
                             role = Role.RadioButton
                         ) { onSelect(index) }
+                        // 读屏要能听出当前选中的是哪一项：
+                        // 光有 Role.RadioButton 不够，选中状态也得报上去。
+                        .semantics(mergeDescendants = true) {
+                            contentDescription = if (isSelected) {
+                                "${option.label}，已选中"
+                            } else {
+                                option.label
+                            }
+                        }
                         .pressScale(pressedScale = 0.92f, interactionSource = interaction)
                         // 胶囊本身只有一行字高，补足最小触控高度。
                         .heightIn(min = Dimens.minTouch)
@@ -947,6 +991,7 @@ private fun ToggleRow(
                 .heightIn(min = Dimens.minTouch)
                 .clip(RoundedCornerShape(Radius.sm))
                 .background(highlight)
+                // 标题整块都是开关的点击区：既要点得中，也要报得出开/关。
                 .semantics {
                     role = Role.Switch
                     toggleableState = ToggleableState(checked)

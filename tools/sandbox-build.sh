@@ -23,15 +23,34 @@ SDK_ROOT="${ANDROID_SDK_ROOT:-/root/android-sdk}"
 
 # ------------------------------------------------------------ 工具链下载
 mkdir -p "${CACHE}"
-if [ ! -f "${CACHE}/gradle.zip" ]; then
-  echo "==> 下载 Gradle ${GRADLE_VERSION}"
-  curl -sSL --max-time 900 -o "${CACHE}/gradle.zip" \
-    "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+
+# 下载后必须校验是不是完整的 zip：沙箱重置会把 /tmp 里的文件截断，
+# 残留的半个文件会被当成有效缓存，下一次解压才报错。
+download() {
+  local url="$1" out="$2"
+  echo "==> 下载 ${out##*/}"
+  rm -f "${out}.part"
+  curl -sSL --max-time 900 -o "${out}.part" "${url}"
+  unzip -tqq "${out}.part" > /dev/null 2>&1 || {
+    echo "下载不完整，重试一次"
+    rm -f "${out}.part"
+    curl -sSL --max-time 900 -o "${out}.part" "${url}"
+    unzip -tqq "${out}.part" > /dev/null 2>&1 || {
+      echo "下载仍然损坏：${url}" >&2
+      rm -f "${out}.part"
+      exit 1
+    }
+  }
+  mv "${out}.part" "${out}"
+}
+
+if [ ! -f "${CACHE}/gradle.zip" ] || ! unzip -tqq "${CACHE}/gradle.zip" > /dev/null 2>&1; then
+  download "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+    "${CACHE}/gradle.zip"
 fi
-if [ ! -f "${CACHE}/cmdline-tools.zip" ]; then
-  echo "==> 下载 Android 命令行工具"
-  curl -sSL --max-time 900 -o "${CACHE}/cmdline-tools.zip" \
-    "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+if [ ! -f "${CACHE}/cmdline-tools.zip" ] || ! unzip -tqq "${CACHE}/cmdline-tools.zip" > /dev/null 2>&1; then
+  download "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" \
+    "${CACHE}/cmdline-tools.zip"
 fi
 
 # ---------------------------------------------------------------- Gradle

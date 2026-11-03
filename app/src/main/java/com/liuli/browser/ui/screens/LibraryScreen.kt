@@ -369,6 +369,13 @@ private fun SegmentTab(
                 role = Role.Tab,
                 onClick = onClick
             )
+            // 读屏要能听出当前选中的是哪一段：
+            // 光有 Role.Tab 不够，选中状态也得报上去。
+            // mergeDescendants 让里面的文字并进来，
+            // contentDescription 覆盖它，不会被念两遍。
+            .semantics(mergeDescendants = true) {
+                contentDescription = if (selected) "$label，已选中" else label
+            }
             .pressScale(pressedScale = 0.9f, interactionSource = interactionSource)
             // 分段控件本身很矮，补足最小触控高度，
             // 否则"收藏/历史"这两个小胶囊很难点中。

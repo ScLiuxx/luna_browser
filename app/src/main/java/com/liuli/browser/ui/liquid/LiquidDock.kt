@@ -175,7 +175,9 @@ fun LiquidDock(
         }
 
         val offsetAnimation = remember { Animatable(0f) }
-        val panelOffset by remember(density) {
+        // constraints.maxWidth 参与 key：旋转屏幕或折叠屏展开后宽度会变，
+        // 派生状态若还抓着旧宽度，底栏的偏移量就按旧尺寸算了。
+        val panelOffset by remember(density, constraints.maxWidth) {
             derivedStateOf {
                 val fraction = (offsetAnimation.value / constraints.maxWidth).fastCoerceIn(-1f, 1f)
                 with(density) {
@@ -199,9 +201,10 @@ fun LiquidDock(
         // 跨过分界才震一下，同一个标签内来回蹭不会连着震。
         val hapticIndexState = remember { mutableIntStateOf(selectedIndex) }
 
-        // reduced 参与 key：系统"减少动态效果"开关变了要重建，
-        // 否则液滴还会用旧的弹簧曲线。
-        val dampedDragAnimation = remember(animationScope, reduced) {
+        // reduced 与 tabWidth 参与 key：系统"减少动态效果"开关变了要重建，
+        // 否则液滴还会用旧的弹簧曲线；tabWidth 变了（旋转或折叠屏展开）
+        // 也要重建，否则甩动换算还按旧宽度算位移，落点会偏。
+        val dampedDragAnimation = remember(animationScope, reduced, tabWidth) {
             DampedDragAnimation(
                 animationScope = animationScope,
                 initialValue = selectedIndex.toFloat(),
@@ -280,7 +283,10 @@ fun LiquidDock(
             }
         }
 
-        val interactiveHighlight = remember(animationScope) {
+        // 以 dampedDragAnimation 为 key：position 回调读的是闭包里的
+        // dampedDragAnimation 与 tabWidth，动画对象换了（改宽度或改减弱动效）
+        // 而高光还抓着旧对象，它就会停在旧位置不动。
+        val interactiveHighlight = remember(dampedDragAnimation) {
             InteractiveHighlight(
                 animationScope = animationScope,
                 position = { size, _ ->

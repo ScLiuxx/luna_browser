@@ -1,7 +1,6 @@
 package com.liuli.browser.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
@@ -9,10 +8,12 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -431,7 +432,15 @@ private fun TabCard(
             horizontalArrangement = Arrangement.spacedBy(Space.sm),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (tab.isPrivate) {
+            // 隐私标记也要淡入淡出：它和右边的"当前"标记是同一排，
+            // 一个会滑进来、另一个硬切出现，两者的节奏对不上。
+            Visibility(
+                visible = tab.isPrivate,
+                enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
+                    expandHorizontally(animationSpec = MotionSpec.sizeValue(Motion.Quick)),
+                exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
+                    shrinkHorizontally(animationSpec = MotionSpec.sizeValue(Motion.Quick))
+            ) {
                 TabBadge(
                     glyph = Glyph.Incognito,
                     text = "隐私",
@@ -440,7 +449,9 @@ private fun TabCard(
             }
             // "当前"标记用进场动画切换：活动标签变化时标记是"长"进去的，
             // 而不是啪地一下出现，旁边的隐私标记也会顺势让位。
-            AnimatedVisibility(
+            // 用项目自己的 Visibility：这一行在 Row 作用域里，
+            // 直接调 AnimatedVisibility 会解析到 RowScope 的同名扩展。
+            Visibility(
                 visible = isActive,
                 enter = fadeIn(MotionSpec.enter()) + scaleIn(
                     MotionSpec.pageSpring(),

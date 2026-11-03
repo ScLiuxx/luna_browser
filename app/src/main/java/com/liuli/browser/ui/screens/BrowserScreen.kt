@@ -33,6 +33,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -573,7 +574,9 @@ fun BrowserScreen(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.18f * menuScrim))
+                    // 遮罩取调色板里的 scrim，与 LiquidDialog 保持一致：
+                    // 写死的纯黑在浅色主题下会糊成一片脏灰。
+                    .background(colors.scrim.copy(alpha = 0.18f * menuScrim))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
@@ -805,10 +808,11 @@ private fun PrivacyShieldPanel(
         animationSpec = MotionSpec.pageSpring(),
         label = "shield-card-scale"
     )
-    Box(
+    BoxWithConstraints(
         Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.28f))
+            // 遮罩取调色板里的 scrim：写死的纯黑在浅色主题下会糊成一片脏灰。
+            .background(colors.scrim.copy(alpha = if (colors.isDark) 0.46f else 0.26f))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
@@ -820,6 +824,9 @@ private fun PrivacyShieldPanel(
             modifier = Modifier
                 .padding(22.dp)
                 .widthIn(max = 380.dp)
+                // 十条说明加一段正文，屏幕矮一点就装不下。
+                // 给卡片封顶并让内容滚动，否则底部那几条直接看不见。
+                .heightIn(max = (maxHeight - 88.dp).coerceAtLeast(0.dp))
                 .graphicsLayer {
                     scaleX = cardScale
                     scaleY = cardScale
@@ -834,7 +841,11 @@ private fun PrivacyShieldPanel(
             lensHeight = 0.dp,
             shadow = true
         ) {
-            Column(Modifier.padding(22.dp)) {
+            Column(
+                Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(22.dp)
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         Modifier
@@ -1112,15 +1123,38 @@ private fun AddressIdleContent(
                     .background(colors.accent),
                 contentAlignment = Alignment.Center
             ) {
-                if (blockedTrackers > 0) {
-                    BasicText(
-                        text = blockedTrackers.coerceAtMost(99).toString(),
-                        style = TextStyle(
-                            color = Color.White,
-                            fontSize = shieldBadgeFont.sp,
-                            fontWeight = FontWeight.Bold
+                // 数字变化时交叉淡入：拦截数从 9 跳到 10，
+                // 直接换字会"闪"一下。
+                AnimatedContent(
+                    targetState = blockedTrackers.coerceAtMost(99),
+                    // 尺寸固定：AnimatedContent 默认会补间尺寸变化，
+                    // 角标是固定大小，让它自己补间会抖。
+                    modifier = Modifier.size(shieldBadgeSize),
+                    contentAlignment = Alignment.Center,
+                    transitionSpec = {
+                        ((fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick)) +
+                            scaleIn(
+                                animationSpec = MotionSpec.enter(reduced, Motion.Quick),
+                                initialScale = 0.6f
+                            )) togetherWith
+                            (fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)) +
+                                scaleOut(
+                                    animationSpec = MotionSpec.exit(reduced, Motion.Quick),
+                                    targetScale = 0.6f
+                                ))).using(null)
+                    },
+                    label = "shield-badge-count"
+                ) { count ->
+                    if (count > 0) {
+                        BasicText(
+                            text = count.toString(),
+                            style = TextStyle(
+                                color = Color.White,
+                                fontSize = shieldBadgeFont.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
@@ -1268,26 +1302,45 @@ private fun CollapsedToolbarHandle(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalLiuliColors.current
-    GlassSurface(
-        backdrop = backdrop,
+    val interaction = remember { MutableInteractionSource() }
+    // 外层撑到 48dp 当点击区，内层才是那颗 24dp 的小把手：
+    // 把手只有 24dp 高，按不中。
+    Box(
         modifier = modifier
-            .width(64.dp)
-            .height(24.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .heightIn(min = Dimens.minTouch)
             .semantics {
                 contentDescription = "显示工具栏"
                 role = Role.Button
             }
-            .clickable(role = Role.Button, onClickLabel = "显示工具栏", onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        tint = colors.glassTintStrong,
-        blurRadius = 16.dp,
-        lensHeight = 8.dp,
-        lensAmount = 12.dp,
-        contentPadding = PaddingValues(0.dp),
-        contentAlignment = Alignment.Center
+            // 不用系统水波纹：这块是玻璃面，按压反馈由 pressScale 给，
+            // 系统水波纹会直接画在折射层上面，很脏。
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onClickLabel = "显示工具栏",
+                onClick = onClick
+            ),
+        // 把手贴着底边：点击区往上长，视觉位置不动。
+        contentAlignment = Alignment.BottomCenter
     ) {
-        GlyphIcon(Glyph.ChevronUp, colors.textSecondary, size = 14.dp)
+        GlassSurface(
+            backdrop = backdrop,
+            modifier = Modifier
+                .width(64.dp)
+                .height(24.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .pressScale(pressedScale = 0.9f, interactionSource = interaction),
+            shape = RoundedCornerShape(12.dp),
+            tint = colors.glassTintStrong,
+            blurRadius = 16.dp,
+            lensHeight = 8.dp,
+            lensAmount = 12.dp,
+            contentPadding = PaddingValues(0.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            GlyphIcon(Glyph.ChevronUp, colors.textSecondary, size = 14.dp)
+        }
     }
 }
 
@@ -1297,6 +1350,8 @@ private fun CompactExpandButton(onExpand: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     Box(
         Modifier
+            // 收起态的地址栏只有 42dp 高，48dp 的点击区撑不下；
+            // 好在同一行的站点名整块都可点，这里只保证按下去有反馈。
             .size(32.dp)
             .pressScale(pressedScale = 0.86f, interactionSource = interaction)
             .clip(CircleShape)
@@ -1423,24 +1478,52 @@ private fun AddressEditContent(
             ) {
                 SearchEngine.entries.forEach { engine ->
                     val selected = settings.searchEngine == engine
+                    val interaction = remember { MutableInteractionSource() }
+                    // 选中与未选中之间用补间过渡：
+                    // 此前是硬切底色与字色，整排引擎像被人换掉了一批。
+                    val chipBackground by animateColorAsState(
+                        targetValue = if (selected) {
+                            colors.accent.copy(alpha = if (colors.isDark) 0.26f else 0.13f)
+                        } else {
+                            colors.textPrimary.copy(alpha = 0.06f)
+                        },
+                        animationSpec = MotionSpec.color(Motion.Quick),
+                        label = "engine-chip-background"
+                    )
+                    val chipLabel by animateColorAsState(
+                        targetValue = if (selected) colors.accent else colors.textSecondary,
+                        animationSpec = MotionSpec.color(Motion.Quick),
+                        label = "engine-chip-label"
+                    )
+                    // 外层撑到 48dp 当点击区，内层才是那颗小胶囊：
+                    // 胶囊本身只有文字那么高，按不中。
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(
-                                if (selected) colors.accent.copy(alpha = if (colors.isDark) 0.26f else 0.13f)
-                                else colors.textPrimary.copy(alpha = 0.06f)
+                            .heightIn(min = Dimens.minTouch)
+                            .clickable(
+                                interactionSource = interaction,
+                                indication = null,
+                                role = Role.Button,
+                                onClick = { settings.updateSearchEngine(engine) }
                             )
-                            .clickable(role = Role.Button) { settings.updateSearchEngine(engine) }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .pressScale(pressedScale = 0.94f, interactionSource = interaction),
+                        contentAlignment = Alignment.Center
                     ) {
-                        BasicText(
-                            text = engine.label,
-                            style = TextStyle(
-                                color = if (selected) colors.accent else colors.textSecondary,
-                                fontSize = 11.sp,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(chipBackground)
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            BasicText(
+                                text = engine.label,
+                                style = TextStyle(
+                                    color = chipLabel,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
@@ -1706,7 +1789,11 @@ private fun PageErrorCard(
                 style = TextStyle(
                     color = colors.textSecondary,
                     fontSize = 13.sp
-                )
+                ),
+                // 错误文案来自 WebView，长度不受控：
+                // 限三行并省略，否则超长报错会把整张卡片顶出屏幕。
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(16.dp))
             Row(

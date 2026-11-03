@@ -73,6 +73,15 @@ fun LiquidToggle(
     // "减弱动态效果"时不再用弹簧回弹，拇指直接落位。
     // 用 rememberUpdatedState 包裹：开关本身可以热切换，回调里要读到最新值。
     val reduced = rememberUpdatedState(reduceMotion)
+    // 记的是布尔值而不是回调本身：结构相等让"值没变"不产生写入，
+    // 下面的收集器也就不会被无谓地重启。
+    // 之前这里直接闭包捕获 selected，而 DampedDragAnimation 是长期存活的
+    // remember 对象，捕获到的是第一次组合时的旧值：
+    // 开关点开之后就再也关不上了。
+    val isOn = rememberUpdatedState(selected())
+    // 同理，回调本身也可能是每次重组都新建的 lambda：
+    // 长期存活的动画对象必须拿到最新的那一个。
+    val onSelectState = rememberUpdatedState(onSelect)
     // 状态切换时给一次轻触反馈：液态形变看得见，震动摸得着。
     val haptics = LocalHapticFeedback.current
     var didDrag by remember { mutableStateOf(false) }
@@ -98,11 +107,11 @@ fun LiquidToggle(
             onDragStopped = {
                 if (didDrag) {
                     fraction = if (targetValue >= 0.5f) 1f else 0f
-                    onSelect(fraction == 1f)
+                    onSelectState.value(fraction == 1f)
                     didDrag = false
                 } else {
-                    fraction = if (selected()) 0f else 1f
-                    onSelect(fraction == 1f)
+                    fraction = if (isOn.value) 0f else 1f
+                    onSelectState.value(fraction == 1f)
                     // fraction 变化会被下面的 snapshotFlow 捕获，
                     // 由 updateValue 用液态弹簧把拇指送到位，这里不再重复驱动。
                 }
@@ -139,8 +148,12 @@ fun LiquidToggle(
             }
         }
     }
-    LaunchedEffect(selected) {
-        snapshotFlow { selected() }.collectLatest { isSelected ->
+    // 外部开关状态变化时把拇指送到位。
+    // 之前用 selected 这个 lambda 当 key：它每次重组都是新实例，
+    // 收集器因此不停重启，状态刚变就被下一个实例顶掉。
+    // 改成监听 isOn 这个布尔值，只有开关真的翻转时才动。
+    LaunchedEffect(dampedDragAnimation) {
+        snapshotFlow { isOn.value }.collectLatest { isSelected ->
             val target = if (isSelected) 1f else 0f
             if (target != fraction) {
                 fraction = target

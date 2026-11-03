@@ -1,6 +1,5 @@
 package com.liuli.browser.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
@@ -79,6 +78,7 @@ import com.liuli.browser.ui.components.GlassIconButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
@@ -428,7 +428,9 @@ private fun HomeSearchBar(
             )
             // 「前往」按钮淡入并轻微右移：
             // 输入框里一有字它就弹出来，硬切会让键盘显得很急躁。
-            AnimatedVisibility(
+            // 用项目自己的 Visibility：这一行在 Row 作用域里，
+            // 直接调 AnimatedVisibility 会解析到 RowScope 的同名扩展。
+            Visibility(
                 visible = query.isNotBlank(),
                 enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
                     expandHorizontally(animationSpec = MotionSpec.sizeValue()) +

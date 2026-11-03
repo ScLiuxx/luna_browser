@@ -10,7 +10,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
@@ -583,7 +582,9 @@ fun BrowserRoot(
             // 而不是"啪"地跳出来把网页挤走。
             // 展开用的是尺寸补间，属于布局变化，即便开了"减少动态效果"也保留，
             // 只是时长缩短、不再额外淡入淡出。
-            AnimatedVisibility(
+            // 用项目自己的 Visibility：这一行在 Row 作用域里，
+            // 直接调 AnimatedVisibility 会解析到 RowScope 的同名扩展。
+            Visibility(
                 visible = isTablet,
                 enter = fadeIn(MotionSpec.enter(reduced, Motion.Fast)) +
                     expandHorizontally(animationSpec = railSizeSpec),
