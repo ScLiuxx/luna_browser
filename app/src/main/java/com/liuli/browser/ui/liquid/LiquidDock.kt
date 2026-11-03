@@ -18,8 +18,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -30,6 +31,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -46,6 +48,10 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
@@ -74,6 +80,7 @@ import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
 import com.liuli.browser.ui.theme.reduceMotion
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.sign
@@ -102,6 +109,9 @@ fun RowScope.LiquidBottomTab(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     interactive: Boolean = true,
+    isSelected: Boolean = false,
+    /** 读屏时念出来的名字：底栏是手机上唯一的主导航，必须说得出这是哪一项。 */
+    a11yLabel: String = "",
     content: @Composable ColumnScope.() -> Unit
 ) {
     val scale = LocalLiquidBottomTabScale.current
@@ -109,6 +119,14 @@ fun RowScope.LiquidBottomTab(
     val interaction = remember { MutableInteractionSource() }
     val base = modifier
         .clip(Capsule())
+        .semantics {
+            if (a11yLabel.isNotEmpty()) contentDescription = a11yLabel
+            if (isSelected) {
+                // 当前项要能被读屏直接听出来，光靠图标变个颜色是不够的。
+                selected = true
+                stateDescription = "已选中"
+            }
+        }
         .then(
             if (interactive) {
                 Modifier
@@ -164,8 +182,10 @@ fun LiquidDock(
         contentAlignment = Alignment.CenterStart
     ) {
         val density = LocalDensity.current
+        // 项数下限兜底：液滴宽度按项数均分，除数为 0 会让布局直接崩掉。
+        val itemCount = items.size.coerceAtLeast(1)
         val tabWidth = with(density) {
-            (constraints.maxWidth.toFloat() - 8.dp.toPx()) / items.size.coerceAtLeast(1)
+            (constraints.maxWidth.toFloat() - 8.dp.toPx()) / itemCount
         }
         val lastIndex = (items.size - 1).coerceAtLeast(0)
         val maxValue = lastIndex.toFloat()
@@ -427,7 +447,7 @@ fun LiquidDock(
                     }
                 )
                 .height(Dimens.dockHeight - 8.dp)
-                .fillMaxWidth(1f / items.size)
+                .fillMaxWidth(1f / itemCount)
         )
     }
 }
@@ -441,6 +461,7 @@ private fun RowScope.DockItems(
     onSelected: (Int) -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    val reduced = reduceMotion
     items.forEachIndexed { index, item ->
         val selected = index == selectedIndex
         // 图标与文字的选中态用颜色插值过渡，而不是瞬时换色。
@@ -459,9 +480,18 @@ private fun RowScope.DockItems(
             animationSpec = MotionSpec.value(Motion.Quick),
             label = "dock-label-weight"
         )
+        val isTabItem = item.glyph == Glyph.Tabs
         LiquidBottomTab(
             onClick = { onSelected(index) },
-            interactive = interactive
+            interactive = interactive,
+            isSelected = selected,
+            // 角标数字并进标签里：单独念一个"3"没有意义，
+            // "标签，3 个标签页"才是完整的一句。
+            a11yLabel = if (isTabItem && tabCount > 0) {
+                "${item.label}，$tabCount 个标签页"
+            } else {
+                item.label
+            }
         ) {
             Box(contentAlignment = Alignment.Center) {
                 GlyphIcon(
@@ -469,7 +499,7 @@ private fun RowScope.DockItems(
                     tint = iconTint,
                     size = 22.dp
                 )
-                if (item.glyph == Glyph.Tabs) {
+                if (isTabItem) {
                     // 角标常驻在组合里，靠缩放控制显隐：
                     // 新增标签时从 0 弹到 1，给一个轻微的弹性提示。
                     val badgeScale by animateFloatAsState(
@@ -477,26 +507,58 @@ private fun RowScope.DockItems(
                         animationSpec = MotionSpec.pageSpring(),
                         label = "dock-badge-scale"
                     )
+                    // 数量变了要有个动静：新增标签不该只是数字悄悄跳一下。
+                    // 首次进入不弹：那时数字并没有"变"过。
+                    var badgePulse by remember { mutableFloatStateOf(0f) }
+                    val lastBadgeCount = remember { mutableIntStateOf(tabCount) }
+                    LaunchedEffect(tabCount, reduced) {
+                        if (reduced || tabCount <= 0 || lastBadgeCount.intValue == tabCount) {
+                            return@LaunchedEffect
+                        }
+                        lastBadgeCount.intValue = tabCount
+                        badgePulse = 1f
+                        delay(110)
+                        badgePulse = 0f
+                    }
+                    val pulse by animateFloatAsState(
+                        targetValue = badgePulse,
+                        animationSpec = MotionSpec.value(Motion.Quick),
+                        label = "dock-badge-pulse"
+                    )
+                    // 两位数以上角标要加宽，否则数字会被裁掉；
+                    // 早先一律显示 99，真实数量反而看不见了。
+                    val badgeText = if (tabCount > 99) "99+" else tabCount.toString()
+                    val badgeWidth = when {
+                        tabCount > 99 -> 22.dp
+                        tabCount > 9 -> 17.dp
+                        else -> 15.dp
+                    }
                     Box(
                         Modifier
+                            // 贴着图标的右上角，而不是靠固定偏移硬凑
+                            .align(Alignment.TopEnd)
+                            .offset(x = 6.dp, y = (-6).dp)
                             .graphicsLayer {
-                                translationX = 10.dp.toPx()
-                                translationY = (-7).dp.toPx()
-                                scaleX = badgeScale
-                                scaleY = badgeScale
+                                // 出现时的弹性缩放与数量变化时的脉冲叠在一起。
+                                val pulseScale = badgeScale * (1f + 0.24f * pulse)
+                                scaleX = pulseScale
+                                scaleY = pulseScale
                             }
-                            .size(12.dp)
+                            .width(badgeWidth)
+                            .height(15.dp)
                             .clip(Capsule())
-                            .background(colors.accent),
+                            .background(colors.accent)
+                            // 数字已并进 a11yLabel，这里不要再重复播报一遍。
+                            .clearAndSetSemantics {},
                         contentAlignment = Alignment.Center
                     ) {
                         // 数字常驻：清零时容器缩到 0，文字跟着消失，
                         // 不用硬切，角标不会"啪"地闪一下。
                         BasicText(
-                            text = tabCount.coerceAtMost(99).toString(),
+                            text = badgeText,
                             style = TextStyle(
                                 color = Color.White,
-                                fontSize = 7.sp,
+                                fontSize = if (tabCount > 9) 7.sp else 8.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         )
@@ -508,10 +570,13 @@ private fun RowScope.DockItems(
                 text = item.label,
                 style = TextStyle(
                     color = labelTint,
-                    fontSize = 9.sp,
+                    // 与侧栏导航同字号：底栏是手机上唯一的导航，字太小读不清。
+                    fontSize = 10.sp,
                     fontWeight = if (labelWeight > 0.5f) FontWeight.SemiBold else FontWeight.Normal
                 ),
-                maxLines = 1
+                maxLines = 1,
+                // 标签文字已由 a11yLabel 播报，这里清掉避免读成两遍。
+                modifier = Modifier.clearAndSetSemantics {}
             )
         }
     }
