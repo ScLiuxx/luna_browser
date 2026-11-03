@@ -228,6 +228,10 @@ fun GlassSurface(
  * 禁用态由底层的 Liquid 组件统一表达（图标转灰、底座退淡、不铺主色），
  * 这里不再额外压一层透明度：两处各管一半，
  * 同一屏里的图标键与胶囊键会灰得不一样。
+ *
+ * 触感反馈也由底层的 Liquid 组件给出：按钮被点本来就该有触感，
+ * 不必每个调用处手动补一遍。调用处若已经自己补过（破坏性操作想给更重的一下），
+ * 把 [haptic] 关掉，否则同一次点击会震两下。
  */
 @Composable
 fun GlassIconButton(
@@ -241,7 +245,9 @@ fun GlassIconButton(
     accent: Boolean = false,
     /** 破坏性操作：图标染上危险色。 */
     danger: Boolean = false,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    /** 是否由组件自己给一次轻触反馈。 */
+    haptic: Boolean = true
 ) {
     LiquidIconButton(
         glyph = glyph,
@@ -253,7 +259,8 @@ fun GlassIconButton(
         glyphSize = glyphSize,
         selected = accent,
         danger = danger,
-        enabled = enabled
+        enabled = enabled,
+        haptic = haptic
     )
 }
 
@@ -268,6 +275,8 @@ fun GlassPillButton(
     /** 破坏性操作：文字与图标都染上危险色。 */
     danger: Boolean = false,
     enabled: Boolean = true,
+    /** 是否由组件自己给一次轻触反馈。 */
+    haptic: Boolean = true,
     contentPadding: PaddingValues = PaddingValues(horizontal = 18.dp)
 ) {
     LiquidTextAction(
@@ -279,6 +288,7 @@ fun GlassPillButton(
         danger = danger,
         glyph = glyph,
         enabled = enabled,
+        haptic = haptic,
         contentPadding = contentPadding
     )
 }

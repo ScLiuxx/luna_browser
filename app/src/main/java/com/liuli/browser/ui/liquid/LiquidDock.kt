@@ -1,8 +1,9 @@
 package com.liuli.browser.ui.liquid
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.EaseOut
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -32,7 +33,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -80,6 +80,7 @@ import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
 import com.liuli.browser.ui.theme.reduceMotion
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -103,6 +104,34 @@ private const val MAX_FLING_VELOCITY = 4f
  * 按比例算会甩出去一大截。
  */
 private const val OVERSCROLL_DP = 12f
+
+/**
+ * 底栏的交互状态。
+ *
+ * 落位动画这些要活过重组，而 DampedDragAnimation 是长期存活的 remember 对象，
+ * 它回调里读到的必须是最新值。收进一个稳定的持有者就不用每次重组都重建它。
+ */
+private class DockSettleState {
+    /** 落位动画句柄：新的手势开始前要先把它掐掉。 */
+    var job: Job? = null
+
+    /**
+     * 当前落位的目标标签。
+     *
+     * 用来分辨"这次落位是自己发起的"还是"外面改了选中项"：
+     * 甩动时液滴正带着惯性飞向新标签，此刻它还没到，
+     * 拿位置当判据会把这次落位重做一遍，惯性就没了。
+     */
+    var target: Float = Float.NaN
+
+    /**
+     * 落位用的弹簧规格，每次重组刷新。
+     *
+     * 放在这里而不是直接捕获：动画对象换新时（改宽度或改减弱动效），
+     * 若还抓着第一次组合的规格，液滴会用旧的曲线落位。
+     */
+    var spec: AnimationSpec<Float> = MotionSpec.glideSpring(false)
+}
 
 @Composable
 fun RowScope.LiquidBottomTab(
@@ -144,7 +173,9 @@ fun RowScope.LiquidBottomTab(
         .fillMaxHeight()
         .weight(1f)
         .graphicsLayer {
-            val scale = scale()
+            // 只放大选中的那一项：整排一起放大，图标会挤成一团，
+            // 用户也看不出自己到底盯着哪个。
+            val scale = if (isSelected) scale() else 1f
             scaleX = scale
             scaleY = scale
         }
@@ -176,6 +207,13 @@ fun LiquidDock(
     // 减少动态效果：液滴不再过冲，回位更快。
     val reduced = reduceMotion
     val glideSpec = MotionSpec.glideSpring()
+    // 液滴落位用带过冲的弹簧：甩到位时液滴会轻轻冲过头再稳下来，
+    // 这一下过冲就是液态的回弹。"减少动态效果"时换成快而稳的补间。
+    val settleSpec = MotionSpec.rememberSpring(
+        dampingRatio = 0.62f,
+        stiffness = 700f,
+        visibilityThreshold = 0.001f
+    )
 
     BoxWithConstraints(
         modifier,
@@ -194,12 +232,15 @@ fun LiquidDock(
             if (tabWidth > 0f) OVERSCROLL_DP.dp.toPx() / tabWidth else 0f
         }
 
-        val offsetAnimation = remember { Animatable(0f) }
+        // 底栏整体被拖动时的横向位移。
+        // 用普通状态而不是 Animatable：拖拽期间每个指针事件都要写一次，
+        // 起协程去同步动画对象会让底栏慢半拍，液滴与底栏会错位。
+        var panelDrag by remember { mutableFloatStateOf(0f) }
         // constraints.maxWidth 参与 key：旋转屏幕或折叠屏展开后宽度会变，
         // 派生状态若还抓着旧宽度，底栏的偏移量就按旧尺寸算了。
         val panelOffset by remember(density, constraints.maxWidth) {
             derivedStateOf {
-                val fraction = (offsetAnimation.value / constraints.maxWidth).fastCoerceIn(-1f, 1f)
+                val fraction = (panelDrag / constraints.maxWidth).fastCoerceIn(-1f, 1f)
                 with(density) {
                     4.dp.toPx() * fraction.sign * EaseOut.transform(abs(fraction))
                 }
@@ -217,9 +258,47 @@ fun LiquidDock(
         // 手指真正走过的位置（标签单位）。
         // 必须自己累加：边界处 value 会被夹住，靠它累加液滴到头就"卡死"了。
         val dragPositionState = remember { mutableFloatStateOf(selectedIndex.toFloat()) }
+        // 液滴的可见位置（标签单位）。
+        // 拖拽期间手指写到哪就是哪：1:1 跟手，液滴不会落后半拍。
+        // 之前靠 DampedDragAnimation 的 Animatable 承载位置，
+        // 每个指针事件都要起一个协程去同步，事件一密就明显拖后腿。
+        val dropletPos = remember { mutableFloatStateOf(selectedIndex.toFloat()) }
+        // 液滴自身的速度（标签/秒），用来做甩动时的拉伸形变。
+        // 必须单独记：液滴位置已经不再由 DampedDragAnimation 承载，
+        // 它的 velocity 字段从此不再被驱动，读它只会拿到 0，
+        // 形变就整个消失了。
+        val dropletVelocity = remember { mutableFloatStateOf(0f) }
+        // 落位动画的持有者：只在手势回调里读写，不参与组合，
+        // 拖动时不会因为写它而触发重组。
+        val settle = remember { DockSettleState() }
+        settle.spec = settleSpec
         // 最近一次给过轻触反馈的标签序号：
         // 跨过分界才震一下，同一个标签内来回蹭不会连着震。
         val hapticIndexState = remember { mutableIntStateOf(selectedIndex) }
+
+        // 液滴落位：带着甩动的惯性走到目标，途中允许轻微过冲。
+        // 甩动的方向感来自这里：初速度是手指给的，不是凭空加的。
+        fun settleDroplet(target: Float, velocity: Float = 0f) {
+            settle.job?.cancel()
+            settle.target = target
+            if (reduced) {
+                dropletPos.floatValue = target
+                dropletVelocity.floatValue = 0f
+                return
+            }
+            val from = dropletPos.floatValue
+            settle.job = animationScope.launch {
+                animate(
+                    initialValue = from,
+                    targetValue = target,
+                    initialVelocity = velocity,
+                    animationSpec = settle.spec
+                ) { value, currentVelocity ->
+                    dropletPos.floatValue = value
+                    dropletVelocity.floatValue = currentVelocity
+                }
+            }
+        }
 
         // reduced 与 tabWidth 参与 key：系统"减少动态效果"开关变了要重建，
         // 否则液滴还会用旧的弹簧曲线；tabWidth 变了（旋转或折叠屏展开）
@@ -240,7 +319,11 @@ fun LiquidDock(
                 reducedMotion = reduced,
                 onDragStarted = {
                     // 抓住液滴时从它当前所在的位置接着走，避免跳一下。
-                    dragPositionState.floatValue = value
+                    dragPositionState.floatValue = dropletPos.floatValue
+                    // 抓住的瞬间，之前的落位动画必须让位：
+                    // 否则液滴还会继续往旧目标上飞，手指与液滴会打架。
+                    settle.job?.cancel()
+                    settle.job = null
                 },
                 onDragStopped = {
                     // 甩动速度换算成"标签/秒"，用它预测落点：
@@ -255,9 +338,18 @@ fun LiquidDock(
                     dragPositionState.floatValue = targetIndex.toFloat()
                     // 带着甩动的惯性落位：弹簧从当前速度继续走，
                     // 到位时自然过冲一下再稳住。
-                    animateToValue(targetIndex.toFloat(), flingVelocity)
+                    settleDroplet(targetIndex.toFloat(), flingVelocity)
+                    // 底栏的横向偏移弹回中位：松手后它该自己回正，
+                    // 否则底栏会一直歪在一边。
+                    // 起点必须在启动协程前取好：协程真正跑起来时
+                    // panelDrag 可能已经被改过，取到的起点就不对了。
+                    val panelStart = panelDrag
                     animationScope.launch {
-                        offsetAnimation.animateTo(0f, glideSpec)
+                        animate(
+                            initialValue = panelStart,
+                            targetValue = 0f,
+                            animationSpec = glideSpec
+                        ) { value, _ -> panelDrag = value }
                     }
                     // 落回原来的标签就不必通知外部，避免无谓的跳转。
                     if (changed) {
@@ -265,8 +357,7 @@ fun LiquidDock(
                     }
                 },
                 onDrag = { _, dragAmount ->
-                    // 液滴必须 1:1 跟手：弹簧会让它落后于手指半拍，
-                    // 拖起来"粘滞"，液态感全无。这里直接落位，
+                    // 液滴必须 1:1 跟手：这里直接写状态，
                     // 松手后再由 onDragStopped 的过冲弹簧接管。
                     val raw =
                         dragPositionState.floatValue + dragAmount.x / tabWidth * if (isLtr) 1f else -1f
@@ -278,41 +369,48 @@ fun LiquidDock(
                         raw > maxValue -> maxValue + (raw - maxValue) * 0.35f
                         else -> raw
                     }.fastCoerceIn(-overscrollValue, maxValue + overscrollValue)
-                    snapValue(next)
+                    dropletPos.floatValue = next
                     // 甩动速度：液滴沿运动方向的拉伸要用它。
-                    reportDragVelocity(pointerVelocity / tabWidth * if (isLtr) 1f else -1f)
+                    // 拖拽期间用手指速度，松手后由弹簧自己的速度接手，
+                    // 两段连起来，液滴从头到尾都是"活的"。
+                    val fingerVelocity = pointerVelocity / tabWidth * if (isLtr) 1f else -1f
+                    dropletVelocity.floatValue = fingerVelocity
+                    reportDragVelocity(fingerVelocity)
                     // 跨过标签分界时给一次轻触：拖动过程中能感知到自己滑过了几个。
                     val crossed = raw.fastRoundToInt().fastCoerceIn(0, lastIndex)
                     if (crossed != hapticIndexState.value) {
                         hapticIndexState.value = crossed
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     }
-                    animationScope.launch {
-                        offsetAnimation.snapTo(offsetAnimation.value + dragAmount.x)
-                    }
+                    // 底栏的横向偏移直接写状态：1:1 跟手。
+                    // 之前每个指针事件都起一个协程去 snapTo，
+                    // 上百个协程互相打断，底栏会明显落后于液滴。
+                    panelDrag += dragAmount.x
                 }
             )
         }
-        LaunchedEffect(selectedIndex, dampedDragAnimation) {
+        LaunchedEffect(selectedIndex, settleSpec) {
             currentIndexState.value = selectedIndex
             dragPositionState.floatValue = selectedIndex.toFloat()
             hapticIndexState.value = selectedIndex
-            // 已经在位就不必再弹一次，否则每次重组液滴都会"闪"一下。
-            if (dampedDragAnimation.targetValue != selectedIndex.toFloat()) {
-                dampedDragAnimation.animateToValue(selectedIndex.toFloat())
+            // 判据是"这次落位是不是我们自己发起的"，而不是"液滴到没到目标"：
+            // 甩动时液滴带着惯性飞向新标签，中途它当然还没到，
+            // 若拿位置当判据，这里就会再落一次位，
+            // 而且是不带初速度的那一次——甩动的惯性被抹掉了。
+            if (settle.target != selectedIndex.toFloat()) {
+                settleDroplet(selectedIndex.toFloat())
             }
         }
 
-        // 以 dampedDragAnimation 为 key：position 回调读的是闭包里的
-        // dampedDragAnimation 与 tabWidth，动画对象换了（改宽度或改减弱动效）
-        // 而高光还抓着旧对象，它就会停在旧位置不动。
-        val interactiveHighlight = remember(dampedDragAnimation) {
+        // 高光跟着液滴走：按下的那点高光要落在液滴上，
+        // 否则高光与液滴会分家，看着像两块各动各的玻璃。
+        val interactiveHighlight = remember(animationScope) {
             InteractiveHighlight(
                 animationScope = animationScope,
                 position = { size, _ ->
                     Offset(
-                        if (isLtr) (dampedDragAnimation.value + 0.5f) * tabWidth + panelOffset
-                        else size.width - (dampedDragAnimation.value + 0.5f) * tabWidth + panelOffset,
+                        if (isLtr) (dropletPos.floatValue + 0.5f) * tabWidth + panelOffset
+                        else size.width - (dropletPos.floatValue + 0.5f) * tabWidth + panelOffset,
                         size.height / 2f
                     )
                 }
@@ -351,7 +449,9 @@ fun LiquidDock(
                 currentIndexState.value = index
                 dragPositionState.floatValue = index.toFloat()
                 hapticIndexState.value = index
-                dampedDragAnimation.animateToValue(index.toFloat())
+                // 切标签时液滴从当前位置滑过去：
+                // 方向感来自它真的在"走"这一段路，而不是瞬移。
+                settleDroplet(index.toFloat())
                 onSelected(index)
             })
         }
@@ -398,9 +498,11 @@ fun LiquidDock(
             Modifier
                 .padding(horizontal = 4.dp)
                 .graphicsLayer {
+                    // 液滴位置读的是直接写的状态：拖拽时 1:1 跟手，
+                    // 落位时由弹簧带过去。
                     translationX =
-                        if (isLtr) dampedDragAnimation.value * tabWidth + panelOffset
-                        else size.width - (dampedDragAnimation.value + 1f) * tabWidth + panelOffset
+                        if (isLtr) dropletPos.floatValue * tabWidth + panelOffset
+                        else size.width - (dropletPos.floatValue + 1f) * tabWidth + panelOffset
                 }
                 .then(interactiveHighlight.gestureModifier)
                 .then(dampedDragAnimation.modifier)
@@ -432,7 +534,7 @@ fun LiquidDock(
                         scaleY = dampedDragAnimation.scaleY
                         // 甩动时沿运动方向把液滴"抻长"：被拖着走时形变，
                         // 停手后弹回原状。取绝对值，左右两个方向的手感才对称。
-                        val stretch = (abs(dampedDragAnimation.velocity) / 10f * 0.75f)
+                        val stretch = (abs(dropletVelocity.floatValue) / 10f * 0.75f)
                             .fastCoerceIn(0f, 0.2f)
                         scaleX *= 1f + stretch
                         scaleY *= 1f - stretch * 0.34f

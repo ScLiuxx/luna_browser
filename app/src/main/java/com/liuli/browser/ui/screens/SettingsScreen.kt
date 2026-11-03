@@ -629,7 +629,10 @@ fun SettingsScreen(
                             glyph = Glyph.Trash,
                             // 破坏性操作：文字与图标染上危险色，
                             // 并先问一句再删。
-                            danger = true
+                            danger = true,
+                            // 组件按下时已经给过一次触感，
+                            // 这里补的是"破坏性确认"，两次含义不同，不算重复。
+                            haptic = false
                         )
                     }
                 }
@@ -754,7 +757,10 @@ fun SettingsScreen(
                     glyph = Glyph.Trash,
                     // 破坏性操作：文字与图标染上危险色，
                     // 并先问一句再删。
-                    danger = true
+                    danger = true,
+                    // 组件按下时已经给过一次触感，
+                    // 这里补的是"破坏性确认"，两次含义不同，不算重复。
+                    haptic = false
                 )
             }
 
@@ -848,7 +854,10 @@ fun SettingsScreen(
                         backdrop = backdrop,
                         glyph = Glyph.Trash,
                         // 破坏性操作：文字与图标染上危险色。
-                        danger = true
+                        danger = true,
+                        // 组件按下时已经给过一次触感，
+                        // 这里补的是"破坏性确认"，两次含义不同，不算重复。
+                        haptic = false
                     )
                 }
             }
@@ -885,7 +894,10 @@ fun SettingsScreen(
                         confirmRevoke = true
                     },
                     backdrop = backdrop,
-                    glyph = Glyph.Info
+                    glyph = Glyph.Info,
+                    // 组件按下时已经给过一次触感，
+                    // 这里补的是"破坏性确认"，两次含义不同，不算重复。
+                    haptic = false
                 )
             }
 

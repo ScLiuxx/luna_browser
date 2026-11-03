@@ -196,7 +196,10 @@ fun LibraryScreen(
                             glyphSize = 18.dp,
                             // 破坏性操作：图标染上危险色，
                             // 和旁边的关闭键一眼分得开。
-                            danger = true
+                            danger = true,
+                            // 组件按下时已经给过一次触感，
+                            // 这里补的是"破坏性确认"，两次含义不同，不算重复。
+                            haptic = false
                         )
                     }
                 }

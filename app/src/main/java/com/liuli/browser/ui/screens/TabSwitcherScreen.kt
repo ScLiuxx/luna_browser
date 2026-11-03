@@ -414,7 +414,10 @@ fun TabSwitcherScreen(
                         // 收尾的标签页点掉就没有了，确认键用危险色：
                         // 与对话框里的确认键同一套，用户按之前就知道这一步不可逆。
                         accent = true,
-                        danger = true
+                        danger = true,
+                        // 组件按下时已经给过一次触感，
+                        // 这里补的是"破坏性确认"，两次含义不同，不算重复。
+                        haptic = false
                     )
                 }
             }

@@ -327,8 +327,6 @@ fun HomeScreen(
                     onQueryChange = { query = it },
                     onSubmit = {
                         if (query.isNotBlank()) {
-                            // 搜索是这一屏的主操作，给一次明确的触感确认。
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onSearchSubmit(query)
                             query = ""
                         }
@@ -480,6 +478,7 @@ private fun HomeSearchBar(
     val colors = LocalLiuliColors.current
     val interactionSource = remember { MutableInteractionSource() }
     val focusRequester = remember { FocusRequester() }
+    val haptics = LocalHapticFeedback.current
     // 搜索框获得焦点时轻微放大，输入时玻璃件也跟着"醒"过来。
     val focused by interactionSource.collectIsFocusedAsState()
     val focusScale by animateFloatAsState(
@@ -587,7 +586,16 @@ private fun HomeSearchBar(
                             keyboardType = KeyboardType.Uri,
                             imeAction = ImeAction.Go
                         ),
-                        keyboardActions = KeyboardActions(onGo = { onSubmit() }),
+                        keyboardActions = KeyboardActions(
+                            onGo = {
+                                // 键盘的"前往"没有按下这一下，
+                                // 触感得在这里自己给，否则走键盘提交时完全没有反馈。
+                                if (query.isNotBlank()) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
+                                onSubmit()
+                            }
+                        ),
                         decorationBox = { innerTextField ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.weight(1f)) {
