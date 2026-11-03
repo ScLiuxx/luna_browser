@@ -239,6 +239,8 @@ fun GlassIconButton(
     size: Dp = Dimens.minTouch,
     glyphSize: Dp = 22.dp,
     accent: Boolean = false,
+    /** 破坏性操作：图标染上危险色。 */
+    danger: Boolean = false,
     enabled: Boolean = true
 ) {
     LiquidIconButton(
@@ -250,6 +252,7 @@ fun GlassIconButton(
         size = maxOf(size, Dimens.minTouch),
         glyphSize = glyphSize,
         selected = accent,
+        danger = danger,
         enabled = enabled
     )
 }
@@ -262,6 +265,8 @@ fun GlassPillButton(
     modifier: Modifier = Modifier,
     glyph: Glyph? = null,
     accent: Boolean = false,
+    /** 破坏性操作：文字与图标都染上危险色。 */
+    danger: Boolean = false,
     enabled: Boolean = true,
     contentPadding: PaddingValues = PaddingValues(horizontal = 18.dp)
 ) {
@@ -271,6 +276,7 @@ fun GlassPillButton(
         backdrop = backdrop,
         modifier = modifier,
         accent = accent,
+        danger = danger,
         glyph = glyph,
         enabled = enabled,
         contentPadding = contentPadding

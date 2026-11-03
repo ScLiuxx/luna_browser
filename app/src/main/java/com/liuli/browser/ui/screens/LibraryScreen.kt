@@ -38,7 +38,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -56,8 +55,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
@@ -73,18 +70,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.emptyBackdrop
 import com.liuli.browser.data.LibraryEntry
 import com.liuli.browser.data.LibraryStore
+import com.liuli.browser.ui.components.DangerConfirmDialog
+import com.liuli.browser.ui.components.EmptyState
 import com.liuli.browser.ui.components.GlassIconButton
-import com.liuli.browser.ui.components.GlassPillButton
-import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
-import com.liuli.browser.ui.components.LiquidDialog
-import com.liuli.browser.ui.liquid.LiquidButton
+import com.liuli.browser.ui.components.HeaderSubtitle
+import com.liuli.browser.ui.components.ScreenHeader
 import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
@@ -158,7 +153,7 @@ fun LibraryScreen(
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(
             Modifier
-                .widthIn(max = 1000.dp)
+                .widthIn(max = Dimens.pageContentWidth)
                 .fillMaxSize()
                 .statusBarsPadding()
                 .padding(top = Space.sm)
@@ -167,20 +162,12 @@ fun LibraryScreen(
                 Modifier.fillMaxWidth().padding(horizontal = horizontal),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(Modifier.weight(1f)) {
-                    BasicText(
-                        text = "书签与历史",
-                        style = Type.display.copy(
-                            color = colors.textPrimary,
-                            fontSize = if (isTablet) 32.sp else 26.sp
-                        )
-                    )
-                    Spacer(Modifier.height(Space.xxs))
-                    BasicText(
-                        text = "仅保存在本机，不上传云端",
-                        style = Type.label.copy(color = colors.textTertiary)
-                    )
-                }
+                ScreenHeader(
+                    title = "书签与历史",
+                    isTablet = isTablet,
+                    modifier = Modifier.weight(1f),
+                    subtitle = { HeaderSubtitle("仅保存在本机，不上传云端") }
+                )
                 // 清空历史的按钮位置常驻：切到收藏页时它淡出，
                 // 关闭按钮不会因为按钮出现/消失而左右跳。
                 Box(
@@ -200,7 +187,10 @@ fun LibraryScreen(
                             onClick = { confirmClear = true },
                             backdrop = backdrop,
                             size = 44.dp,
-                            glyphSize = 18.dp
+                            glyphSize = 18.dp,
+                            // 破坏性操作：图标染上危险色，
+                            // 和旁边的关闭键一眼分得开。
+                            danger = true
                         )
                     }
                 }
@@ -287,82 +277,15 @@ private fun ClearHistoryDialog(
     onConfirm: () -> Unit,
     onCancel: () -> Unit
 ) {
-    val colors = LocalLiuliColors.current
-    // 危险色在深浅两套主题里明暗相反：文字颜色要跟着反过来选，
-    // 否则深色主题下白字压在亮红上根本看不清。
-    val onDanger = if (colors.isDark) Color(0xFF2B0B0B) else Color.White
-    LiquidDialog(
+    DangerConfirmDialog(
         visible = visible,
-        onDismiss = onCancel,
-        panelModifier = Modifier
-            .padding(Space.xl)
-            .widthIn(max = 380.dp)
-    ) {
-        GlassSurface(
-            backdrop = emptyBackdrop(),
-            modifier = Modifier
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) { },
-            shape = RoundedCornerShape(Radius.xl),
-            tint = colors.glassTintStrong.copy(alpha = 0.96f),
-            blurRadius = 0.dp,
-            lensHeight = 0.dp,
-            innerShadow = true,
-            shadow = true
-        ) {
-            Column(Modifier.padding(Space.xl)) {
-                // 警示徽标先于标题出现：这一步会丢东西，
-                // 得比"我们在聊什么"更早被看见。
-                Box(
-                    Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(colors.danger.copy(alpha = 0.14f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    GlyphIcon(Glyph.Trash, colors.danger, size = 20.dp)
-                }
-                Spacer(Modifier.height(Space.md))
-                BasicText(
-                    text = "清空全部历史？",
-                    style = Type.title.copy(color = colors.textPrimary)
-                )
-                Spacer(Modifier.height(Space.sm))
-                BasicText(
-                    text = "将删除本机保存的全部浏览记录，收藏夹不受影响。此操作不可撤销。",
-                    style = Type.bodySmall.copy(color = colors.textSecondary)
-                )
-                Spacer(Modifier.height(Space.lg))
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
-                    GlassPillButton(
-                        label = "取消",
-                        onClick = onCancel,
-                        backdrop = emptyBackdrop()
-                    )
-                    // 确认按钮用危险色：主色按钮配"不可撤销"的文案，
-                    // 看着像一次普通跳转。
-                    LiquidButton(
-                        onClick = onConfirm,
-                        backdrop = emptyBackdrop(),
-                        tint = colors.danger,
-                        surfaceColor = colors.danger,
-                        contentPadding = PaddingValues(horizontal = Space.md)
-                    ) {
-                        GlyphIcon(Glyph.Trash, onDanger, size = 18.dp)
-                        BasicText(
-                            text = "清空历史",
-                            style = Type.body.copy(
-                                color = onDanger,
-                                fontWeight = FontWeight.Medium
-                            )
-                        )
-                    }
-                }
-            }
-        }
-    }
+        title = "清空全部历史？",
+        message = "将删除本机保存的全部浏览记录，收藏夹不受影响。此操作不可撤销。",
+        confirmLabel = "清空历史",
+        glyph = Glyph.Trash,
+        onConfirm = onConfirm,
+        onCancel = onCancel
+    )
 }
 
 /**
@@ -661,7 +584,9 @@ private fun LibraryRow(
             if (monogram != null) {
                 BasicText(
                     text = monogram,
-                    style = Type.sectionTitle.copy(color = colors.accent, fontSize = 15.sp),
+                    // 首字母用 body 档加粗：此前在 sectionTitle 上另写 15.sp，
+                    // 那一档字号不在排版阶梯上。
+                    style = Type.body.copy(color = colors.accent, fontWeight = FontWeight.Bold),
                     maxLines = 1
                 )
             } else {
@@ -736,57 +661,12 @@ private fun EmptyLibrary(
     isBookmarks: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val colors = LocalLiuliColors.current
-    // 空状态也要有落位动作：图标先弹一下，文字再跟上。
-    var appeared by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { appeared = true }
-    val iconScale by animateFloatAsState(
-        targetValue = if (appeared) 1f else 0.7f,
-        animationSpec = MotionSpec.pageSpring(),
-        label = "empty-icon-scale"
+    EmptyState(
+        glyph = if (isBookmarks) Glyph.Bookmark else Glyph.History,
+        title = if (isBookmarks) "还没有收藏" else "还没有浏览记录",
+        message = if (isBookmarks) "在浏览页面菜单中点击“添加收藏”" else "浏览网页后会自动记录在这里",
+        modifier = modifier.fillMaxWidth()
     )
-    val contentAlpha by animateFloatAsState(
-        targetValue = if (appeared) 1f else 0f,
-        animationSpec = MotionSpec.value(Motion.Normal),
-        label = "empty-alpha"
-    )
-    Column(
-        modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box(
-            Modifier
-                .size(66.dp)
-                .graphicsLayer {
-                    scaleX = iconScale
-                    scaleY = iconScale
-                    alpha = contentAlpha
-                }
-                .clip(CircleShape)
-                // 强调色底座：空状态也要有一点存在感，
-                // 灰底的圆圈看着像没画完的占位符。
-                .background(colors.accent.copy(alpha = if (colors.isDark) 0.18f else 0.10f)),
-            contentAlignment = Alignment.Center
-        ) {
-            GlyphIcon(
-                glyph = if (isBookmarks) Glyph.Bookmark else Glyph.History,
-                tint = colors.accent.copy(alpha = 0.9f),
-                size = 28.dp
-            )
-        }
-        Spacer(Modifier.height(Space.md))
-        BasicText(
-            text = if (isBookmarks) "还没有收藏" else "还没有浏览记录",
-            style = Type.title.copy(fontSize = 15.sp, color = colors.textPrimary),
-            modifier = Modifier.graphicsLayer { alpha = contentAlpha }
-        )
-        Spacer(Modifier.height(Space.xs))
-        BasicText(
-            text = if (isBookmarks) "在浏览页面菜单中点击“添加收藏”" else "浏览网页后会自动记录在这里",
-            style = Type.bodySmall.copy(color = colors.textTertiary),
-            modifier = Modifier.graphicsLayer { alpha = contentAlpha }
-        )
-    }
 }
 
 private fun hostOf(url: String): String =

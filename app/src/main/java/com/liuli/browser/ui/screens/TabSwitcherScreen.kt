@@ -78,11 +78,14 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.liuli.browser.ui.components.EmptyState
 import com.liuli.browser.ui.components.GlassIconButton
 import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.components.HeaderSubtitle
+import com.liuli.browser.ui.components.ScreenHeader
 import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
@@ -167,7 +170,7 @@ fun TabSwitcherScreen(
         Column(
             Modifier
                 // 平板上把内容区收窄：否则 3 列的卡片会大得离谱。
-                .widthIn(max = if (isTablet) 1000.dp else 1160.dp)
+                .widthIn(max = Dimens.pageContentWidth)
                 .fillMaxSize()
                 .statusBarsPadding()
                 .padding(top = Space.sm)
@@ -176,21 +179,13 @@ fun TabSwitcherScreen(
                 Modifier.fillMaxWidth().padding(horizontal = if (isTablet) Space.xl else Space.lg),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(Modifier.weight(1f)) {
-                    BasicText(
-                        text = "标签页",
-                        // 页面大标题：走 display 档，平板/手机两档字号保留原样。
-                        style = Type.display.copy(
-                            color = colors.textPrimary,
-                            fontSize = if (isTablet) 32.sp else 26.sp
-                        )
-                    )
-                    Spacer(Modifier.height(Space.xxs))
+                ScreenHeader(
+                    title = "标签页",
+                    isTablet = isTablet,
+                    modifier = Modifier.weight(1f)
+                ) {
                     if (tabs.isEmpty()) {
-                        BasicText(
-                            text = "还没有打开的标签页",
-                            style = Type.label.copy(color = colors.textTertiary)
-                        )
+                        HeaderSubtitle("还没有打开的标签页")
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             // 计数滚动着换：标签增减时数字是"翻"过来的，
@@ -745,33 +740,9 @@ private fun TabBadge(
  */
 @Composable
 private fun EmptyTabState() {
-    val colors = LocalLiuliColors.current
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(horizontal = Space.xl)
-    ) {
-        Box(
-            Modifier
-                .size(76.dp)
-                .clip(CircleShape)
-                .background(colors.glassTintStrong),
-            contentAlignment = Alignment.Center
-        ) {
-            GlyphIcon(
-                glyph = Glyph.Tabs,
-                tint = colors.textTertiary,
-                size = 34.dp
-            )
-        }
-        Spacer(Modifier.height(Space.md))
-        BasicText(
-            text = "还没有打开的标签页",
-            style = Type.title.copy(color = colors.textPrimary)
-        )
-        Spacer(Modifier.height(Space.xs))
-        BasicText(
-            text = "点右上角的加号开一个新标签页",
-            style = Type.bodySmall.copy(color = colors.textTertiary)
-        )
-    }
+    EmptyState(
+        glyph = Glyph.Tabs,
+        title = "还没有打开的标签页",
+        message = "点右上角的加号开一个新标签页"
+    )
 }

@@ -114,18 +114,20 @@ fun PrivacyGate(
                                 // 宽度上限罩在最外层：留白算在里面，
                                 // 卡片总宽才不会比预期多出一截。
                                 .widthIn(max = 560.dp)
-                                .padding(22.dp)
+                                .padding(Space.xl)
                                 .fillMaxWidth()
                                 .graphicsLayer {
                                     alpha = progress
                                     translationY = (1f - progress) * 26.dp.toPx()
                                 },
-                            shape = RoundedCornerShape(34.dp),
+                            // 圆角走 Radius 阶梯：此前单独写 34dp，
+                            // 与其它玻璃面板（Radius.xl）不是同一档。
+                            shape = RoundedCornerShape(Radius.xl),
                             tint = colors.glassTintStrong,
                             blurRadius = 26.dp,
                             lensHeight = 22.dp,
                             lensAmount = 30.dp,
-                            contentPadding = PaddingValues(24.dp)
+                            contentPadding = PaddingValues(Space.xl)
                         ) {
                             Column(Modifier.fillMaxWidth()) {
                                 // 大字号下标题挤在品牌球右边会被截断，
@@ -197,7 +199,9 @@ fun PrivacyGate(
                                     GlyphIcon(Glyph.Shield, colors.success, size = 14.dp)
                                     BasicText(
                                         text = "隐私要点",
-                                        style = Type.sectionTitle.copy(color = colors.textSecondary)
+                                        // 卡内小标题用 textPrimary：页面级分区名用强调色，
+                                        // 卡内标题用正文色，两级各归各的。
+                                        style = Type.sectionTitle.copy(color = colors.textPrimary)
                                     )
                                 }
 
@@ -221,7 +225,7 @@ fun PrivacyGate(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 22.dp)
+                    .padding(horizontal = Space.xl)
                     .padding(top = Space.xs, bottom = Space.sm),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -294,7 +298,7 @@ private fun GateTitles(maxLines: Int, modifier: Modifier = Modifier) {
             maxLines = maxLines,
             overflow = TextOverflow.Ellipsis
         )
-        Spacer(Modifier.height(3.dp))
+        Spacer(Modifier.height(Space.xxs))
         BasicText(
             text = "液态玻璃设计 · Chromium 内核 · 一镜到底",
             style = Type.bodySmall.copy(color = colors.textTertiary),
@@ -455,7 +459,7 @@ private fun GatePoint(text: String, delayMillis: Int) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp)
+            .padding(vertical = Space.xxs)
             .graphicsLayer {
                 this.alpha = alpha
                 // "减少动态效果"下只留淡入，不做横向滑入。

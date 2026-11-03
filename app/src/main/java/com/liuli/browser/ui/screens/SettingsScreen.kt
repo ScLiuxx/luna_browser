@@ -84,18 +84,18 @@ import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.emptyBackdrop
 import com.liuli.browser.BuildConfig
 import com.liuli.browser.data.SearchEngine
 import com.liuli.browser.data.SettingsStore
+import com.liuli.browser.ui.components.DangerConfirmDialog
 import com.liuli.browser.ui.components.GlassIconButton
 import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
-import com.liuli.browser.ui.components.LiquidDialog
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.components.HeaderSubtitle
 import com.liuli.browser.ui.components.PrivacyPolicyDialog
-import com.liuli.browser.ui.liquid.LiquidButton
+import com.liuli.browser.ui.components.ScreenHeader
 import com.liuli.browser.ui.liquid.LiquidSlider
 import com.liuli.browser.ui.liquid.LiquidToggle
 import com.liuli.browser.ui.liquid.Visibility
@@ -141,6 +141,10 @@ fun SettingsScreen(
     var showPrivacy by rememberSaveable { mutableStateOf(false) }
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     var confirmRevoke by rememberSaveable { mutableStateOf(false) }
+    // 清空站点策略与清空对话同样是"一键抹掉全部记录"的操作，
+    // 此前一点就删、没有确认，与同页的"清除浏览数据"对不上。
+    var confirmClearPolicies by rememberSaveable { mutableStateOf(false) }
+    var confirmClearAgent by rememberSaveable { mutableStateOf(false) }
     // 页面左右留白走间距阶梯：平板 Space.xl，手机 Space.lg。
     val horizontal = if (isTablet) Space.xl else Space.lg
     val webViewPackage = remember {
@@ -162,12 +166,18 @@ fun SettingsScreen(
     BackHandler(enabled = showPrivacy) { showPrivacy = false }
     BackHandler(enabled = confirmClear) { confirmClear = false }
     BackHandler(enabled = confirmRevoke) { confirmRevoke = false }
-    BackHandler(enabled = !showPrivacy && !confirmClear && !confirmRevoke, onBack = onClose)
+    BackHandler(enabled = confirmClearPolicies) { confirmClearPolicies = false }
+    BackHandler(enabled = confirmClearAgent) { confirmClearAgent = false }
+    BackHandler(
+        enabled = !showPrivacy && !confirmClear && !confirmRevoke &&
+            !confirmClearPolicies && !confirmClearAgent,
+        onBack = onClose
+    )
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(
             Modifier
-                .widthIn(max = 860.dp)
+                .widthIn(max = Dimens.pageContentWidth)
                 .fillMaxSize()
                 .statusBarsPadding()
                 .verticalScroll(rememberScrollState())
@@ -178,20 +188,12 @@ fun SettingsScreen(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(Modifier.weight(1f)) {
-                    BasicText(
-                        text = "设置",
-                        style = Type.display.copy(
-                            color = colors.textPrimary,
-                            fontSize = if (isTablet) 32.sp else 26.sp
-                        )
-                    )
-                    Spacer(Modifier.height(Space.xxs))
-                    BasicText(
-                        text = "外观、搜索、AI 与隐私合规",
-                        style = Type.label.copy(color = colors.textTertiary)
-                    )
-                }
+                ScreenHeader(
+                    title = "设置",
+                    isTablet = isTablet,
+                    modifier = Modifier.weight(1f),
+                    subtitle = { HeaderSubtitle("外观、搜索、AI 与隐私合规") }
+                )
                 GlassIconButton(
                     glyph = Glyph.Close,
                     contentDescription = "关闭设置",
@@ -612,9 +614,12 @@ fun SettingsScreen(
                         Spacer(Modifier.height(Space.sm))
                         GlassPillButton(
                             label = "清除全部站点策略",
-                            onClick = { agentPolicies.clear() },
+                            onClick = { confirmClearPolicies = true },
                             backdrop = backdrop,
-                            glyph = Glyph.Trash
+                            glyph = Glyph.Trash,
+                            // 破坏性操作：文字与图标染上危险色，
+                            // 并先问一句再删。
+                            danger = true
                         )
                     }
                 }
@@ -731,9 +736,12 @@ fun SettingsScreen(
                 Spacer(Modifier.height(Space.md))
                 GlassPillButton(
                     label = "清除对话与审计",
-                    onClick = { agent.clear() },
+                    onClick = { confirmClearAgent = true },
                     backdrop = backdrop,
-                    glyph = Glyph.Trash
+                    glyph = Glyph.Trash,
+                    // 破坏性操作：文字与图标染上危险色，
+                    // 并先问一句再删。
+                    danger = true
                 )
             }
 
@@ -822,7 +830,9 @@ fun SettingsScreen(
                         label = "清除浏览数据",
                         onClick = { confirmClear = true },
                         backdrop = backdrop,
-                        glyph = Glyph.Trash
+                        glyph = Glyph.Trash,
+                        // 破坏性操作：文字与图标染上危险色。
+                        danger = true
                     )
                 }
             }
@@ -863,7 +873,7 @@ fun SettingsScreen(
     }
 
     PrivacyPolicyDialog(visible = showPrivacy, onDismiss = { showPrivacy = false })
-    ConfirmDialog(
+    DangerConfirmDialog(
         visible = confirmClear,
         title = "清除浏览数据？",
         message = "将删除 Cookie、缓存、书签与历史记录，此操作不可撤销。",
@@ -875,7 +885,7 @@ fun SettingsScreen(
         },
         onCancel = { confirmClear = false }
     )
-    ConfirmDialog(
+    DangerConfirmDialog(
         visible = confirmRevoke,
         title = "撤回隐私同意？",
         message = "撤回后将清除本地书签、历史、Cookie、缓存与设置，并返回隐私告知页。此操作不可撤销。",
@@ -886,6 +896,30 @@ fun SettingsScreen(
             onRevokePrivacy()
         },
         onCancel = { confirmRevoke = false }
+    )
+    DangerConfirmDialog(
+        visible = confirmClearPolicies,
+        title = "清除全部站点策略？",
+        message = "将删除本机保存的全部站点策略，各站点回到默认行为。此操作不可撤销。",
+        confirmLabel = "确认清除",
+        glyph = Glyph.Trash,
+        onConfirm = {
+            confirmClearPolicies = false
+            agentPolicies.clear()
+        },
+        onCancel = { confirmClearPolicies = false }
+    )
+    DangerConfirmDialog(
+        visible = confirmClearAgent,
+        title = "清除对话与审计？",
+        message = "将删除当前对话与审计记录，此操作不可撤销。",
+        confirmLabel = "确认清除",
+        glyph = Glyph.Trash,
+        onConfirm = {
+            confirmClearAgent = false
+            agent.clear()
+        },
+        onCancel = { confirmClearAgent = false }
     )
 }
 
@@ -1370,104 +1404,6 @@ private fun SettingsField(
                     }
                 }
             )
-        }
-    }
-}
-
-/**
- * 破坏性操作的确认框。
- *
- * 此前"清除数据"与"撤回授权"是两个几乎一样的实现，差别只有文案：
- * 同样的标题、同样的按钮、同样的措辞，唯一的提示是正文里那句"不可撤销"。
- * 这里合成一个：先给一枚警示徽标，让破坏性操作在对话框里先自报身份；
- * 确认按钮改用危险色，主色按钮配"不可撤销"的文案看着像一次普通跳转。
- */
-@Composable
-private fun ConfirmDialog(
-    visible: Boolean,
-    title: String,
-    message: String,
-    confirmLabel: String,
-    glyph: Glyph,
-    onConfirm: () -> Unit,
-    onCancel: () -> Unit
-) {
-    val colors = LocalLiuliColors.current
-    // 危险色在深浅两套主题里明暗相反：浅色主题是深红、深色主题是亮红，
-    // 文字颜色要跟着反过来选，否则深色主题下白字压在亮红上根本看不清。
-    val onDanger = if (colors.isDark) Color(0xFF2B0B0B) else Color.White
-    LiquidDialog(
-        visible = visible,
-        onDismiss = onCancel,
-        panelModifier = Modifier
-            .padding(Space.xl)
-            .widthIn(max = 380.dp)
-    ) {
-        GlassSurface(
-            backdrop = emptyBackdrop(),
-            modifier = Modifier
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) { },
-            shape = RoundedCornerShape(Radius.xl),
-            tint = colors.glassTintStrong.copy(alpha = 0.96f),
-            blurRadius = 0.dp,
-            lensHeight = 0.dp,
-            // 与隐私说明同一个面板质感：背后没有可折射的内容，
-            // 内阴影给出的厚度才让它像一块玻璃而不是灰卡片。
-            innerShadow = true,
-            shadow = true
-        ) {
-            Column(Modifier.padding(Space.xl)) {
-                // 徽标在标题之上：字号再大也没有一枚红色的图标来得直接，
-                // "这一步会丢东西"必须比"我们在聊什么"更先被看到。
-                Box(
-                    Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(colors.danger.copy(alpha = 0.14f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    GlyphIcon(glyph, colors.danger, size = 20.dp)
-                }
-                Spacer(Modifier.height(Space.md))
-                BasicText(
-                    text = title,
-                    style = Type.title.copy(color = colors.textPrimary)
-                )
-                Spacer(Modifier.height(Space.sm))
-                BasicText(
-                    text = message,
-                    style = Type.bodySmall.copy(color = colors.textSecondary)
-                )
-                Spacer(Modifier.height(Space.lg))
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
-                    GlassPillButton(
-                        label = "取消",
-                        onClick = onCancel,
-                        backdrop = emptyBackdrop()
-                    )
-                    // 确认按钮用危险色：强调色的按钮看着像"去商店"，
-                    // 和"不可撤销"这件事对不上。
-                    LiquidButton(
-                        onClick = onConfirm,
-                        backdrop = emptyBackdrop(),
-                        tint = colors.danger,
-                        surfaceColor = colors.danger,
-                        contentPadding = PaddingValues(horizontal = Space.md)
-                    ) {
-                        GlyphIcon(Glyph.Trash, onDanger, size = 18.dp)
-                        BasicText(
-                            text = confirmLabel,
-                            style = Type.body.copy(
-                                color = onDanger,
-                                fontWeight = FontWeight.Medium
-                            )
-                        )
-                    }
-                }
-            }
         }
     }
 }

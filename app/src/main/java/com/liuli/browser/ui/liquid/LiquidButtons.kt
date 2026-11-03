@@ -193,6 +193,8 @@ fun LiquidIconButton(
     size: Dp = Dimens.minTouch,
     glyphSize: Dp = 22.dp,
     selected: Boolean = false,
+    /** 破坏性操作：图标染上危险色，和普通键一眼分得开。 */
+    danger: Boolean = false,
     enabled: Boolean = true
 ) {
     val colors = LocalLiuliColors.current
@@ -215,6 +217,7 @@ fun LiquidIconButton(
         targetValue = when {
             !enabled -> colors.textTertiary
             selected -> colors.accent
+            danger -> colors.danger
             else -> colors.textPrimary
         },
         animationSpec = MotionSpec.color(),
@@ -317,6 +320,8 @@ fun LiquidTextAction(
     backdrop: Backdrop,
     modifier: Modifier = Modifier,
     accent: Boolean = false,
+    /** 破坏性操作：文字与图标都染上危险色。 */
+    danger: Boolean = false,
     glyph: Glyph? = null,
     enabled: Boolean = true,
     contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp)
@@ -326,6 +331,10 @@ fun LiquidTextAction(
     // 撤掉主色、文字转灰，禁用态一眼能认出来。
     val labelTint = when {
         !enabled -> colors.textTertiary
+        // 危险 + 主色 = 实心危险按钮：确认破坏性操作的按钮就长这样，
+        // 与对话框里的确认键同一套。
+        danger && accent -> colors.onDanger
+        danger -> colors.danger
         accent -> Color.White
         else -> colors.textPrimary
     }
@@ -335,8 +344,13 @@ fun LiquidTextAction(
         onClick = onClick,
         backdrop = backdrop,
         modifier = modifier,
-        tint = if (useAccent) colors.accent else Color.Unspecified,
+        tint = if (useAccent) {
+            if (danger) colors.danger else colors.accent
+        } else {
+            Color.Unspecified
+        },
         surfaceColor = when {
+            useAccent && danger -> colors.danger
             useAccent -> Color.Unspecified
             // 禁用时底座一起退下去：光把字变灰，玻璃还是满亮的，
             // 按钮看上去仍然"在等人点"。

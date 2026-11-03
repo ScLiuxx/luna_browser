@@ -51,7 +51,16 @@ data class LiuliColors(
     val scrim: Color,
     val danger: Color,
     val success: Color
-)
+) {
+    /**
+     * 危险色之上的文字颜色。
+     *
+     * 危险色在深浅两套主题里明暗相反：浅色主题是深红、深色主题是亮红，
+     * 压在危险色上的文字必须跟着反过来选，否则深色主题下白字糊在亮红上。
+     * 三处确认框此前各自写死这个色值，收成一处。
+     */
+    val onDanger: Color get() = if (isDark) Color(0xFF2B0B0B) else Color.White
+}
 
 private val LightColors = LiuliColors(
     isDark = false,
@@ -122,6 +131,23 @@ object Dimens {
     val barRadius: Dp = 28.dp
     val dockHeight: Dp = 66.dp
     val topBarHeight: Dp = 56.dp
+
+    /**
+     * 单栏页面的内容宽度上限。
+     *
+     * 此前首页 880dp、设置页 860dp、书签页 1000dp、标签页 1000/1160dp，
+     * 四个同类页面四个值：在平板上左右切换时内容宽度会跳。
+     * 这里收成一档，超出就居中留白，不再各页自己写数字。
+     */
+    val pageContentWidth: Dp = 1000.dp
+
+    /**
+     * 对话框面板的宽度上限。
+     *
+     * 确认框、错误卡、隐私护盾面板此前都写 380dp，隐私说明写 520dp。
+     * 前者一起收进令牌，后者是整篇文档，单独留档。
+     */
+    val dialogWidth: Dp = 380.dp
     val railWidth: Dp = 86.dp
     val minTouch: Dp = 48.dp
 }
@@ -190,9 +216,15 @@ object Space {
  * 跨页面看过去，标题就是标题、说明就是说明。
  */
 object Type {
-    /** 页面大标题：设置页、隐私门。 */
+    /**
+     * 页面大标题：设置页、书签页、标签页、隐私门。
+     *
+     * 此前这里是 23sp，而真正当页面标题用的三页各自在 display 之上
+     * 又写了一遍 26sp：同一个角色有两种字号。
+     * 这一档改成 26sp，由令牌自己定，手机上的四页完全一致。
+     */
     val display: TextStyle = TextStyle(
-        fontSize = 23.sp,
+        fontSize = 26.sp,
         fontWeight = FontWeight.SemiBold,
         letterSpacing = (-0.4).sp
     )

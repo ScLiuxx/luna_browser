@@ -79,8 +79,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.backdrop.backdrops.emptyBackdrop
 import com.liuli.browser.ui.components.BrandOrb
 import com.liuli.browser.ui.components.GlassIconButton
+import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
@@ -207,7 +209,7 @@ fun HomeScreen(
         ) {
             Column(
                 Modifier
-                    .widthIn(max = 880.dp)
+                    .widthIn(max = Dimens.pageContentWidth)
                     .fillMaxWidth()
             ) {
                 Row(
@@ -353,7 +355,9 @@ private fun SectionTitle(title: String, hint: String?) {
     ) {
         BasicText(
             text = title,
-            style = Type.sectionTitle.copy(color = colors.textPrimary)
+            // 区块标题与设置页的分区名同色：同一层级的标题只该有一种颜色，
+            // 此前首页用 textPrimary、设置页用 accent，跨页面看过去像两种产品。
+            style = Type.sectionTitle.copy(color = colors.accent)
         )
         Spacer(Modifier.weight(1f))
         // 右侧提示跟着区块走：两个区块的交互不同，提示文案也不该共用一句。
@@ -441,7 +445,7 @@ private fun HomeSearchBar(
                     onValueChange = onQueryChange,
                     modifier = Modifier
                         .weight(1f)
-                        .padding(horizontal = 2.dp)
+                        .padding(horizontal = Space.xxs)
                         .focusRequester(focusRequester)
                         .semantics { contentDescription = "搜索或输入网址" },
                     interactionSource = interactionSource,
@@ -529,31 +533,16 @@ private fun HomeSearchBar(
                 exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
                     shrinkHorizontally(animationSpec = MotionSpec.sizeValue())
             ) {
-                val goInteraction = remember { MutableInteractionSource() }
-                Box(
-                    modifier = Modifier
-                        .heightIn(min = Dimens.minTouch)
-                        .clip(RoundedCornerShape(Radius.pill))
-                        .background(colors.accent.copy(alpha = 0.14f))
-                        .clickable(
-                            interactionSource = goInteraction,
-                            indication = null,
-                            role = Role.Button,
-                            onClickLabel = "搜索",
-                            onClick = onSubmit
-                        )
-                        .pressScale(pressedScale = 0.90f, interactionSource = goInteraction)
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    BasicText(
-                        text = "前往",
-                        style = Type.body.copy(
-                            color = colors.accent,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    )
-                }
+                // 「前往」按钮与地址栏编辑态里的那颗同款：
+                // 两边是同一块共享元素，首页用淡强调色底、地址栏用实底，
+                // 来回切换时按钮会整个变一次样。
+                GlassPillButton(
+                    label = "前往",
+                    onClick = onSubmit,
+                    backdrop = emptyBackdrop(),
+                    accent = true,
+                    contentPadding = PaddingValues(horizontal = Space.lg)
+                )
             }
         }
     }

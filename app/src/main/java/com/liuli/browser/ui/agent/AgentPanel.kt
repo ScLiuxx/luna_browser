@@ -93,7 +93,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
@@ -102,6 +105,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
+import com.liuli.browser.ui.components.EmptyState
 import com.liuli.browser.ui.components.GlassIconButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
@@ -127,6 +131,7 @@ import com.liuli.browser.web.agent.AgentMode
 import com.liuli.browser.web.agent.AgentPlan
 import com.liuli.browser.web.agent.AgentPlanCommand
 import com.liuli.browser.web.agent.AgentPlanStatus
+import com.liuli.browser.web.agent.AgentPlanStepKind
 import com.liuli.browser.web.agent.AgentReport
 import com.liuli.browser.web.agent.AgentReportFormat
 import com.liuli.browser.web.agent.AgentSiteMode
@@ -499,8 +504,10 @@ fun AgentPanel(
                         contentDescription = "关闭 Agent",
                         onClick = onClose,
                         backdrop = backdrop,
+                        // 与隐私说明、隐私护盾面板的关闭键同一规格：
+                        // 三个浮层此前一个 15dp、一个 16dp。
                         size = 40.dp,
-                        glyphSize = 15.dp
+                        glyphSize = 16.dp
                     )
                 }
 
@@ -570,7 +577,7 @@ fun AgentPanel(
                         enter = fadeIn(animationSpec = fadeInSpec),
                         exit = fadeOut(animationSpec = fadeOutSpec)
                     ) {
-                        EmptyState(
+                        AgentEmptyState(
                             tabTitle = tabTitle,
                             modifier = Modifier
                                 .fillMaxSize()
@@ -1097,7 +1104,7 @@ private fun QuickChip(
 }
 
 @Composable
-private fun EmptyState(tabTitle: String, modifier: Modifier = Modifier) {
+private fun AgentEmptyState(tabTitle: String, modifier: Modifier = Modifier) {
     val colors = LocalLiuliColors.current
     // 面板打开时内容淡入上移，避免"啪"地一下出现。
     var visible by remember { mutableStateOf(false) }
@@ -1115,43 +1122,20 @@ private fun EmptyState(tabTitle: String, modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
-            Modifier
-                .size(56.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            colors.accent.copy(alpha = 0.20f),
-                            colors.accentSecondary.copy(alpha = 0.12f)
-                        )
-                    )
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            GlyphIcon(Glyph.Sparkle, colors.accent, size = 26.dp)
-        }
-        Spacer(Modifier.height(Space.md))
-        BasicText(
-            text = "向当前页面提问",
-            style = Type.title.copy(
-                color = colors.textPrimary,
-                fontSize = 15.sp
-            )
-        )
-        Spacer(Modifier.height(Space.xs))
-        BasicText(
-            text = tabTitle.take(48).ifBlank { "当前页面" },
-            style = Type.label.copy(color = colors.textTertiary),
-            maxLines = 1
+        // 与其它空状态共用一套外观：底座尺寸、配色与标题层级都一致，
+        // 面板内外看着才像同一个产品。
+        EmptyState(
+            glyph = Glyph.Sparkle,
+            title = "向当前页面提问",
+            message = tabTitle.take(48).ifBlank { "当前页面" },
+            modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(Space.md))
         BasicText(
             text = "速览、查找与问答默认在本机完成。\n也可以让我滚动、点击或填写，每次都会先确认。",
-            style = Type.bodySmall.copy(
-                color = colors.textTertiary,
-                fontSize = 11.sp
-            )
+            style = Type.bodySmall.copy(color = colors.textTertiary),
+            modifier = Modifier.fillMaxWidth(),
+            textAlign = TextAlign.Center
         )
     }
 }
@@ -1266,12 +1250,32 @@ private fun PlanCard(
             }
         }
         Spacer(Modifier.height(Space.sm))
+        // 目标：用户批准前要判断的正是这一句，
+        // 压成 caption 档几乎读不出来，等于没写。
         BasicText(
             text = plan.goal,
-            style = Type.caption.copy(color = colors.textTertiary),
-            maxLines = 2,
+            style = Type.body.copy(color = colors.textPrimary),
+            maxLines = 3,
             overflow = TextOverflow.Ellipsis
         )
+        Spacer(Modifier.height(Space.sm))
+        // 执行进度：步骤列表只能看出"哪些做完了"，
+        // 看不出"现在走到第几步"，执行中需要后者。
+        Visibility(
+            visible = plan.status == AgentPlanStatus.Running ||
+                plan.status == AgentPlanStatus.Paused,
+            enter = fadeIn(animationSpec = MotionSpec.enter(Motion.Quick)) +
+                expandVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick)),
+            exit = fadeOut(animationSpec = MotionSpec.exit(Motion.Quick)) +
+                shrinkVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick))
+        ) {
+            PlanProgress(
+                done = plan.currentStep.coerceIn(0, plan.steps.size),
+                total = plan.steps.size,
+                current = (plan.currentStep + 1).coerceAtMost(plan.steps.size.coerceAtLeast(1)),
+                tint = statusTint
+            )
+        }
         Spacer(Modifier.height(Space.sm))
         plan.steps.forEachIndexed { index, step ->
             val completed = index < plan.currentStep
@@ -1318,6 +1322,17 @@ private fun PlanCard(
                     )
                 }
                 Spacer(Modifier.width(Space.xs))
+                // 步骤类型单独一列：滚动、点击、输入的风险完全不同，
+                // 批准之前必须一眼看出哪几步会点页面、哪几步会打字。
+                BasicText(
+                    text = step.kind.label(),
+                    style = Type.caption.copy(
+                        color = if (completed) colors.textTertiary.copy(alpha = 0.7f)
+                        else colors.textTertiary
+                    ),
+                    modifier = Modifier.width(26.dp)
+                )
+                Spacer(Modifier.width(Space.xs))
                 BasicText(
                     text = step.description,
                     style = Type.bodySmall.copy(
@@ -1325,7 +1340,9 @@ private fun PlanCard(
                         fontSize = 11.sp
                     ),
                     modifier = Modifier.weight(1f),
-                    maxLines = 1,
+                    // 一步的描述常常是半句话，截成一行就只剩动作名，
+                    // 看不出要点在哪个元素上。
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 when {
@@ -1396,6 +1413,72 @@ private fun PlanCard(
             }
         }
     }
+}
+
+/**
+ * 计划执行进度条。
+ *
+ * 步骤列表只能看出"哪些做完了"，看不出"现在第几步、还剩几步"。
+ * 执行中的多步任务最怕这一点：用户不知道它是在跑还是卡住了。
+ * 这里补一条进度轨与"第 N / M 步"，两者一起回答同一个问题。
+ */
+@Composable
+private fun PlanProgress(
+    done: Int,
+    total: Int,
+    current: Int,
+    tint: Color
+) {
+    val colors = LocalLiuliColors.current
+    val fraction = if (total <= 0) 0f else (done.toFloat() / total).coerceIn(0f, 1f)
+    // 进度是连续量，插值让步与步之间的推进平滑，而不是一跳一跳。
+    val animated by animateFloatAsState(
+        targetValue = fraction,
+        animationSpec = MotionSpec.value(Motion.Slow),
+        label = "plan-progress"
+    )
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            BasicText(
+                text = "第 $current / $total 步",
+                style = Type.caption.copy(color = colors.textSecondary)
+            )
+            Spacer(Modifier.weight(1f))
+            BasicText(
+                text = "已完成 $done 步",
+                style = Type.caption.copy(color = colors.textTertiary)
+            )
+        }
+        Spacer(Modifier.height(Space.xs))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+                .clip(RoundedCornerShape(Radius.pill))
+                .background(colors.textPrimary.copy(alpha = 0.08f))
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(animated)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(Radius.pill))
+                    .background(tint)
+            )
+        }
+    }
+}
+
+/**
+ * 步骤类型的中文标签。
+ *
+ * 滚动、点击、输入三种动作的风险差别很大：
+ * 滚动几乎无害，点击会跳转，输入会往页面里写字。
+ * 批准之前必须让用户一眼看出这一步属于哪一类。
+ */
+private fun AgentPlanStepKind.label(): String = when (this) {
+    AgentPlanStepKind.Scroll -> "滚动"
+    AgentPlanStepKind.Click -> "点击"
+    AgentPlanStepKind.Type -> "输入"
 }
 
 @Composable

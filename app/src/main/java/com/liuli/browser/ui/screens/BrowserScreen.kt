@@ -587,7 +587,7 @@ fun BrowserScreen(
                 onHome = onNewHomeTab,
                 modifier = Modifier
                     .padding(horizontal = 24.dp)
-                    .widthIn(max = 380.dp)
+                    .widthIn(max = Dimens.dialogWidth)
             )
         }
 
@@ -854,7 +854,7 @@ private fun PrivacyShieldPanel(
             backdrop = com.kyant.backdrop.backdrops.emptyBackdrop(),
             modifier = Modifier
                 .padding(Space.xl)
-                .widthIn(max = 380.dp)
+                .widthIn(max = Dimens.dialogWidth)
                 // 十条说明加一段正文，屏幕矮一点就装不下。
                 // 给卡片封顶并让内容滚动，否则底部那几条直接看不见。
                 .heightIn(max = (maxHeight - 88.dp).coerceAtLeast(0.dp))
