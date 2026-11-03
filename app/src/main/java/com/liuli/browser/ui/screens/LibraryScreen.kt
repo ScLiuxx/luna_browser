@@ -15,8 +15,10 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,10 +56,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -70,11 +75,16 @@ import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.backdrop.backdrops.emptyBackdrop
 import com.liuli.browser.data.LibraryEntry
 import com.liuli.browser.data.LibraryStore
 import com.liuli.browser.ui.components.GlassIconButton
+import com.liuli.browser.ui.components.GlassPillButton
+import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.components.LiquidDialog
+import com.liuli.browser.ui.liquid.LiquidButton
 import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
@@ -110,6 +120,9 @@ fun LibraryScreen(
 ) {
     val colors = LocalLiuliColors.current
     var section by rememberSaveable { mutableIntStateOf(0) }
+    // 清空历史要问一句：这是一键抹掉全部记录的操作，
+    // 按错了就没有回头路。
+    var confirmClear by rememberSaveable { mutableStateOf(false) }
     // 页面左右留白走间距阶梯：平板 Space.xl，手机 Space.lg。
     val horizontal = if (isTablet) Space.xl else Space.lg
     // 已经演过入场动画的条目：滚动出去再回来不重播。
@@ -184,7 +197,7 @@ fun LibraryScreen(
                         GlassIconButton(
                             glyph = Glyph.Trash,
                             contentDescription = "清空历史",
-                            onClick = { library.clearHistory() },
+                            onClick = { confirmClear = true },
                             backdrop = backdrop,
                             size = 44.dp,
                             glyphSize = 18.dp
@@ -247,6 +260,105 @@ fun LibraryScreen(
                         pendingRemovals = pendingRemovals,
                         onOpenUrl = onOpenUrl
                     )
+                }
+            }
+        }
+    }
+
+    ClearHistoryDialog(
+        visible = confirmClear,
+        onConfirm = {
+            confirmClear = false
+            library.clearHistory()
+        },
+        onCancel = { confirmClear = false }
+    )
+}
+
+/**
+ * 清空历史的确认框。
+ *
+ * 顶栏那个垃圾桶一点就把全部记录抹掉，手滑一下就没了：
+ * 先问一句，比事后才发现历史没了强。
+ */
+@Composable
+private fun ClearHistoryDialog(
+    visible: Boolean,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val colors = LocalLiuliColors.current
+    // 危险色在深浅两套主题里明暗相反：文字颜色要跟着反过来选，
+    // 否则深色主题下白字压在亮红上根本看不清。
+    val onDanger = if (colors.isDark) Color(0xFF2B0B0B) else Color.White
+    LiquidDialog(
+        visible = visible,
+        onDismiss = onCancel,
+        panelModifier = Modifier
+            .padding(Space.xl)
+            .widthIn(max = 380.dp)
+    ) {
+        GlassSurface(
+            backdrop = emptyBackdrop(),
+            modifier = Modifier
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { },
+            shape = RoundedCornerShape(Radius.xl),
+            tint = colors.glassTintStrong.copy(alpha = 0.96f),
+            blurRadius = 0.dp,
+            lensHeight = 0.dp,
+            innerShadow = true,
+            shadow = true
+        ) {
+            Column(Modifier.padding(Space.xl)) {
+                // 警示徽标先于标题出现：这一步会丢东西，
+                // 得比"我们在聊什么"更早被看见。
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(colors.danger.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    GlyphIcon(Glyph.Trash, colors.danger, size = 20.dp)
+                }
+                Spacer(Modifier.height(Space.md))
+                BasicText(
+                    text = "清空全部历史？",
+                    style = Type.title.copy(color = colors.textPrimary)
+                )
+                Spacer(Modifier.height(Space.sm))
+                BasicText(
+                    text = "将删除本机保存的全部浏览记录，收藏夹不受影响。此操作不可撤销。",
+                    style = Type.bodySmall.copy(color = colors.textSecondary)
+                )
+                Spacer(Modifier.height(Space.lg))
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                    GlassPillButton(
+                        label = "取消",
+                        onClick = onCancel,
+                        backdrop = emptyBackdrop()
+                    )
+                    // 确认按钮用危险色：主色按钮配"不可撤销"的文案，
+                    // 看着像一次普通跳转。
+                    LiquidButton(
+                        onClick = onConfirm,
+                        backdrop = emptyBackdrop(),
+                        tint = colors.danger,
+                        surfaceColor = colors.danger,
+                        contentPadding = PaddingValues(horizontal = Space.md)
+                    ) {
+                        GlyphIcon(Glyph.Trash, onDanger, size = 18.dp)
+                        BasicText(
+                            text = "清空历史",
+                            style = Type.body.copy(
+                                color = onDanger,
+                                fontWeight = FontWeight.Medium
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -316,17 +428,21 @@ private fun LibrarySegments(
             Modifier.fillMaxWidth().padding(Space.xs),
             horizontalArrangement = Arrangement.spacedBy(Space.xs)
         ) {
+            // 两段各占一半：控件本身就是满宽的，
+            // 两段却缩在左边，右边空一大块，看着没做完。
             SegmentTab(
                 label = "收藏 $bookmarkCount",
                 selected = selected == 0,
                 onClick = { onSelect(0) },
-                onBoundsChanged = { segmentBounds[0] = it }
+                onBoundsChanged = { segmentBounds[0] = it },
+                modifier = Modifier.weight(1f)
             )
             SegmentTab(
                 label = "历史 $historyCount",
                 selected = selected == 1,
                 onClick = { onSelect(1) },
-                onBoundsChanged = { segmentBounds[1] = it }
+                onBoundsChanged = { segmentBounds[1] = it },
+                modifier = Modifier.weight(1f)
             )
         }
     }
@@ -337,7 +453,8 @@ private fun SegmentTab(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
-    onBoundsChanged: (Rect) -> Unit
+    onBoundsChanged: (Rect) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val colors = LocalLiuliColors.current
     val interactionSource = remember { MutableInteractionSource() }
@@ -353,7 +470,7 @@ private fun SegmentTab(
         label = "segment-weight"
     )
     Box(
-        Modifier
+        modifier
             .onGloballyPositioned {
                 val origin = it.positionInParent()
                 onBoundsChanged(
@@ -407,8 +524,10 @@ private fun LibrarySection(
         Box(
             Modifier
                 .fillMaxSize()
-                .padding(horizontal = horizontal, vertical = 56.dp),
-            contentAlignment = Alignment.TopCenter
+                .padding(horizontal = horizontal, vertical = Space.xl),
+            // 空状态居中：贴在顶上像是下面还有内容没加载出来，
+            // 居中才像"这里确实没有东西"。
+            contentAlignment = Alignment.Center
         ) {
             EmptyLibrary(isBookmarks = section == 0)
         }
@@ -496,11 +615,28 @@ private fun LibraryRow(
     val colors = LocalLiuliColors.current
     val rowInteraction = remember { MutableInteractionSource() }
     val deleteInteraction = remember { MutableInteractionSource() }
+    val haptics = LocalHapticFeedback.current
+    // 删除键按下时才染上危险色：整列常驻红色会变成一排警告，
+    // 反而没人敢碰。
+    val deletePressed by deleteInteraction.collectIsPressedAsState()
+    val deleteTint by animateColorAsState(
+        targetValue = if (deletePressed) colors.danger else colors.textTertiary,
+        animationSpec = MotionSpec.color(),
+        label = "library-delete-tint"
+    )
+    val host = hostOf(entry.url)
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(Radius.sm))
             .background(colors.glassTint)
+            // 行要有一圈细边：深色下玻璃底色几乎融进背景，
+            // 没有轮廓时整列看着像贴上去的一摊色块。
+            .border(
+                1.dp,
+                colors.textPrimary.copy(alpha = if (colors.isDark) 0.10f else 0.05f),
+                RoundedCornerShape(Radius.sm)
+            )
             .clickable(
                 interactionSource = rowInteraction,
                 indication = null,
@@ -512,6 +648,8 @@ private fun LibraryRow(
             .padding(start = Space.md, top = Space.sm, bottom = Space.sm, end = Space.xs),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // 站点头像取域名首字母：应用里没有图标缓存，
+        // 一排一模一样的书签图标根本认不出是哪家站点。
         Box(
             Modifier
                 .size(38.dp)
@@ -519,11 +657,20 @@ private fun LibraryRow(
                 .background(colors.accent.copy(alpha = if (colors.isDark) 0.22f else 0.12f)),
             contentAlignment = Alignment.Center
         ) {
-            GlyphIcon(
-                glyph = if (isBookmark) Glyph.BookmarkFilled else Glyph.History,
-                tint = colors.accent,
-                size = 18.dp
-            )
+            val monogram = monogramOf(entry.url)
+            if (monogram != null) {
+                BasicText(
+                    text = monogram,
+                    style = Type.sectionTitle.copy(color = colors.accent, fontSize = 15.sp),
+                    maxLines = 1
+                )
+            } else {
+                GlyphIcon(
+                    glyph = if (isBookmark) Glyph.BookmarkFilled else Glyph.History,
+                    tint = colors.accent,
+                    size = 18.dp
+                )
+            }
         }
         Spacer(Modifier.width(Space.md))
         Column(Modifier.weight(1f)) {
@@ -537,19 +684,29 @@ private fun LibraryRow(
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(Space.xxs))
-            BasicText(
-                text = "${hostOf(entry.url)} · ${formatTime(entry.timestamp)}",
-                style = Type.caption.copy(color = colors.textTertiary),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            // 域名与时间分成两级：域名是认出站点的依据，
+            // 时间只是顺带的信息，不该和域名一样重。
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BasicText(
+                    text = host,
+                    style = Type.caption.copy(color = colors.textSecondary),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                BasicText(
+                    text = " · ${formatTime(entry.timestamp)}",
+                    style = Type.caption.copy(color = colors.textTertiary),
+                    maxLines = 1
+                )
+            }
         }
         Box(
             Modifier
                 .size(Dimens.minTouch)
-                // 关闭图标是纯图形，读屏软件读不到它，得自己报出这一项的名字。
+                // 删除图标是纯图形，读屏软件读不到它，得自己报出这一项的名字。
                 .semantics {
-                    contentDescription = "删除"
+                    contentDescription = "删除${entry.title.ifBlank { host }}"
                     role = Role.Button
                 }
                 .clickable(
@@ -557,12 +714,19 @@ private fun LibraryRow(
                     indication = null,
                     role = Role.Button,
                     onClickLabel = "删除",
-                    onClick = onDelete
+                    onClick = {
+                        // 删除不可撤销：手指抬起时给一次轻触反馈，
+                        // 让用户立刻知道这一下真的生效了。
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onDelete()
+                    }
                 )
                 .pressScale(pressedScale = 0.82f, interactionSource = deleteInteraction),
             contentAlignment = Alignment.Center
         ) {
-            GlyphIcon(Glyph.Close, colors.textTertiary, size = 16.dp)
+            // 垃圾桶而不是叉号：叉号在列表里常被当成"关闭这一行"，
+            // 垃圾桶才是"删掉它"的意思。
+            GlyphIcon(Glyph.Trash, deleteTint, size = 16.dp)
         }
     }
 }
@@ -599,12 +763,14 @@ private fun EmptyLibrary(
                     alpha = contentAlpha
                 }
                 .clip(CircleShape)
-                .background(colors.glassTint),
+                // 强调色底座：空状态也要有一点存在感，
+                // 灰底的圆圈看着像没画完的占位符。
+                .background(colors.accent.copy(alpha = if (colors.isDark) 0.18f else 0.10f)),
             contentAlignment = Alignment.Center
         ) {
             GlyphIcon(
                 glyph = if (isBookmarks) Glyph.Bookmark else Glyph.History,
-                tint = colors.textTertiary,
+                tint = colors.accent.copy(alpha = 0.9f),
                 size = 28.dp
             )
         }
@@ -626,6 +792,19 @@ private fun EmptyLibrary(
 private fun hostOf(url: String): String =
     runCatching { android.net.Uri.parse(url).host?.removePrefix("www.") }.getOrNull()
         ?: url
+
+/**
+ * 域名首字母，当作站点的标识。
+ *
+ * 本机没有图标缓存，列表里全是同一个书签图标，
+ * 认站点只能靠域名；取首字母做头像，一眼就能分出是哪家。
+ */
+private fun monogramOf(url: String): String? =
+    runCatching { android.net.Uri.parse(url).host?.removePrefix("www.") }.getOrNull()
+        ?.takeIf { it.isNotBlank() }
+        ?.firstOrNull()
+        ?.uppercaseChar()
+        ?.toString()
 
 private fun formatTime(timestamp: Long): String {
     val now = System.currentTimeMillis()

@@ -14,8 +14,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -65,9 +64,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -79,7 +78,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.liuli.browser.ui.components.BrandOrb
 import com.liuli.browser.ui.components.GlassIconButton
@@ -104,17 +102,26 @@ private data class QuickLink(
     val color: Color
 )
 
+/**
+ * 常用网站。
+ *
+ * 颜色取各站品牌色，但统一压低了一档明度与饱和度：
+ * 十个高饱和色块并排会互相打架，也会盖过搜索框；
+ * 压暗之后仍认得出站点，整片网格却安静下来了。
+ *
+ * 顺序也按色相排过：同色系不挨着放，两块红色中间隔着别的颜色。
+ */
 private val QuickLinks = listOf(
-    QuickLink("百度", "https://m.baidu.com/", Color(0xFF3A6BFF)),
-    QuickLink("哔哩哔哩", "https://m.bilibili.com/", Color(0xFFFB7299)),
-    QuickLink("知乎", "https://www.zhihu.com/", Color(0xFF1772F6)),
-    QuickLink("微博", "https://m.weibo.cn/", Color(0xFFE36A28)),
-    QuickLink("小红书", "https://www.xiaohongshu.com/", Color(0xFFE64A50)),
-    QuickLink("GitHub", "https://github.com/", Color(0xFF4A4F5A)),
-    QuickLink("淘宝", "https://m.taobao.com/", Color(0xFFFF6A00)),
-    QuickLink("豆瓣", "https://m.douban.com/", Color(0xFF2E9E58)),
+    QuickLink("百度", "https://m.baidu.com/", Color(0xFF2F5FE0)),
+    QuickLink("哔哩哔哩", "https://m.bilibili.com/", Color(0xFFF0618F)),
+    QuickLink("微博", "https://m.weibo.cn/", Color(0xFFE85A2C)),
+    QuickLink("知乎", "https://www.zhihu.com/", Color(0xFF1B6FD9)),
+    QuickLink("小红书", "https://www.xiaohongshu.com/", Color(0xFFEF3F5C)),
+    QuickLink("豆瓣", "https://m.douban.com/", Color(0xFF2F9E58)),
+    QuickLink("GitHub", "https://github.com/", Color(0xFF414957)),
     QuickLink("京东", "https://m.jd.com/", Color(0xFFE1251B)),
-    QuickLink("网易云音乐", "https://music.163.com/", Color(0xFFD93B3B))
+    QuickLink("淘宝", "https://m.taobao.com/", Color(0xFFE8840E)),
+    QuickLink("网易云音乐", "https://music.163.com/", Color(0xFFA8232B))
 )
 
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -174,7 +181,11 @@ fun HomeScreen(
     val recentTabs = tabs.filter { !it.isPrivate && it.url.isNotBlank() }
         .sortedByDescending { it.lastUsedAt }
         .take(6)
-    val horizontalPadding = if (isTablet) 28.dp else 18.dp
+    // 页面左右留白走间距阶梯，与其它页面一致。
+    val horizontal = if (isTablet) Space.xl else Space.lg
+    // 区块间距只有一档，手机 24 / 平板 32：
+    // 之前是 26、24、22、28 混着用，页面看着总有一处没对齐。
+    val sectionGap = if (isTablet) Space.xxl else Space.xl
     val columns = if (isTablet) 5 else 4
 
     Box(
@@ -191,32 +202,31 @@ fun HomeScreen(
                     alpha = entrance
                     translationY = (1f - entrance) * 22.dp.toPx()
                 }
-                .padding(horizontal = horizontalPadding)
-                .padding(top = if (isTablet) 18.dp else 10.dp),
+                .padding(horizontal = horizontal),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Column(
                 Modifier
-                    .widthIn(max = 1040.dp)
+                    .widthIn(max = 880.dp)
                     .fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    BrandOrb(size = if (isTablet) 46.dp else 40.dp)
+                    BrandOrb(size = if (isTablet) 42.dp else 36.dp)
                     Spacer(Modifier.width(Space.md))
                     Column(Modifier.weight(1f)) {
+                        // 产品名只当署名，不当标题：
+                        // 浏览器首屏该由搜索框当主角，二十多号的产品名
+                        // 压在搜索框上方，第一眼看到的是应用而不是输入框。
                         BasicText(
                             text = "琉璃浏览器",
-                            style = Type.display.copy(
-                                color = colors.textPrimary,
-                                fontSize = if (isTablet) 28.sp else 23.sp
-                            ),
+                            style = Type.title.copy(color = colors.textPrimary),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(Modifier.height(2.dp))
+                        Spacer(Modifier.height(Space.xxs))
                         BasicText(
                             text = if (isPrivate) "隐私标签 · 不记录历史" else "轻盈 · 安全 · 一镜到底",
                             style = Type.bodySmall.copy(
@@ -239,7 +249,7 @@ fun HomeScreen(
                     }
                 }
 
-                Spacer(Modifier.height(if (isTablet) 34.dp else 26.dp))
+                Spacer(Modifier.height(sectionGap))
 
                 HomeSearchBar(
                     backdrop = backdrop,
@@ -254,7 +264,7 @@ fun HomeScreen(
                     modifier = addressSharedModifier
                 )
 
-                Spacer(Modifier.height(if (isTablet) 30.dp else 24.dp))
+                Spacer(Modifier.height(sectionGap))
 
                 SectionTitle("常用网站", "轻触即可打开")
                 Spacer(Modifier.height(Space.md))
@@ -267,13 +277,15 @@ fun HomeScreen(
                     onOpenUrl = onOpenUrl
                 )
 
+                Spacer(Modifier.height(sectionGap))
                 if (recentTabs.isNotEmpty()) {
-                    Spacer(Modifier.height(if (isTablet) 30.dp else 24.dp))
-                    SectionTitle("继续浏览", "轻触继续浏览")
+                    SectionTitle("继续浏览", "轻触切回标签页")
                     Spacer(Modifier.height(Space.md))
                     LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        contentPadding = PaddingValues(0.dp)
+                        horizontalArrangement = Arrangement.spacedBy(Space.md),
+                        // 末尾留一段空白：最后一张卡要能完整停稳，
+                        // 而不是永远卡在屏幕边缘被切掉。
+                        contentPadding = PaddingValues(end = horizontal)
                     ) {
                         itemsIndexed(recentTabs, key = { _, tab -> tab.id }) { index, tab ->
                             // 逐张浮现：横向滚动条里的卡片错峰落位。
@@ -314,20 +326,26 @@ fun HomeScreen(
                             }
                         }
                     }
+                } else {
+                    // 没有可继续的标签页时给一句话说明，
+                    // 空白的一段会让用户以为这个功能坏了。
+                    SectionTitle("继续浏览", null)
+                    Spacer(Modifier.height(Space.md))
+                    EmptyRecentHint(onOpenLibrary = onOpenLibrary)
                 }
 
-                Spacer(Modifier.height(if (isTablet) 28.dp else 22.dp))
+                Spacer(Modifier.height(sectionGap))
 
-                PrivacyCard(backdrop = backdrop, onOpenLibrary = onOpenLibrary)
+                PrivacyCard(backdrop = backdrop)
 
-                Spacer(Modifier.height(bottomSpace + 20.dp))
+                Spacer(Modifier.height(bottomSpace + Space.lg))
             }
         }
     }
 }
 
 @Composable
-private fun SectionTitle(title: String, hint: String) {
+private fun SectionTitle(title: String, hint: String?) {
     val colors = LocalLiuliColors.current
     Row(
         Modifier.fillMaxWidth(),
@@ -339,10 +357,12 @@ private fun SectionTitle(title: String, hint: String) {
         )
         Spacer(Modifier.weight(1f))
         // 右侧提示跟着区块走：两个区块的交互不同，提示文案也不该共用一句。
-        BasicText(
-            text = hint,
-            style = Type.label.copy(color = colors.textTertiary)
-        )
+        if (hint != null) {
+            BasicText(
+                text = hint,
+                style = Type.label.copy(color = colors.textTertiary)
+            )
+        }
     }
 }
 
@@ -379,7 +399,6 @@ private fun HomeSearchBar(
     GlassSurface(
         backdrop = backdrop,
         modifier = modifier
-            .widthIn(max = 720.dp)
             .fillMaxWidth()
             .heightIn(min = 64.dp)
             .graphicsLayer {
@@ -551,11 +570,11 @@ private fun QuickLinkGrid(
 ) {
     // 常用网站逐块浮现：九宫格一次整片亮起像张贴图，
     // 错开落位才看得出是"摆上去"的。
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Space.md)) {
         links.chunked(columns).forEachIndexed { rowIndex, rowLinks ->
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(Space.md)
             ) {
                 rowLinks.forEachIndexed { columnIndex, link ->
                     Box(
@@ -627,7 +646,7 @@ private fun QuickLinkTile(
     GlassSurface(
         backdrop = backdrop,
         modifier = modifier
-            .height(if (isTablet) 112.dp else 96.dp)
+            .height(if (isTablet) 108.dp else 92.dp)
             .clip(RoundedCornerShape(Radius.md))
             .clickable(
                 interactionSource = interaction,
@@ -651,7 +670,7 @@ private fun QuickLinkTile(
         ) {
             Box(
                 Modifier
-                    .size(if (isTablet) 44.dp else 38.dp)
+                    .size(if (isTablet) 42.dp else 36.dp)
                     .clip(CircleShape)
                     .background(link.color.copy(alpha = 0.92f)),
                 contentAlignment = Alignment.Center
@@ -664,7 +683,7 @@ private fun QuickLinkTile(
                     )
                 )
             }
-            Spacer(Modifier.height(9.dp))
+            Spacer(Modifier.height(Space.sm))
             BasicText(
                 text = link.label,
                 style = (if (isTablet) {
@@ -688,17 +707,19 @@ private fun RecentTabCard(
 ) {
     val colors = LocalLiuliColors.current
     val interaction = remember { MutableInteractionSource() }
+    val title = tab.pageTitle()
+    val host = tab.displayHost
     GlassSurface(
         backdrop = backdrop,
         modifier = Modifier
-            .width(if (isTablet) 270.dp else 220.dp)
-            .height(if (isTablet) 104.dp else 92.dp)
+            .width(if (isTablet) 260.dp else 214.dp)
+            .height(if (isTablet) 100.dp else 88.dp)
             .clip(RoundedCornerShape(Radius.md))
             .clickable(
                 interactionSource = interaction,
                 indication = null,
                 role = Role.Button,
-                onClickLabel = "继续浏览",
+                onClickLabel = "切回 $title",
                 onClick = onClick
             )
             .pressScale(pressedScale = 0.95f, interactionSource = interaction),
@@ -710,22 +731,14 @@ private fun RecentTabCard(
         shadow = true
     ) {
         Row(
-            Modifier.fillMaxSize().padding(horizontal = 14.dp),
+            Modifier.fillMaxSize().padding(horizontal = Space.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(Radius.sm))
-                    .background(colors.accent.copy(alpha = if (colors.isDark) 0.24f else 0.14f)),
-                contentAlignment = Alignment.Center
-            ) {
-                GlyphIcon(Glyph.Globe, colors.accent, size = 20.dp)
-            }
+            TabIcon(tab)
             Spacer(Modifier.width(Space.md))
             Column(Modifier.weight(1f)) {
                 BasicText(
-                    text = tab.pageTitle(),
+                    text = title,
                     style = Type.body.copy(
                         color = colors.textPrimary,
                         fontWeight = FontWeight.SemiBold
@@ -733,22 +746,123 @@ private fun RecentTabCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(Modifier.height(Space.xs))
-                BasicText(
-                    text = tab.displayHost,
-                    style = Type.label.copy(color = colors.textTertiary),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                // 标题就是域名时不重复写一遍：那行是给"站点名 ≠ 域名"的页面用的。
+                if (host != title) {
+                    Spacer(Modifier.height(Space.xs))
+                    BasicText(
+                        text = host,
+                        style = Type.label.copy(color = colors.textTertiary),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
+        }
+    }
+}
+
+/**
+ * 标签页的站点图标。
+ *
+ * 有 favicon 就用真的：颜色和形状本身就是最强的身份提示，
+ * 一排相同的地球图标只能靠文字认人。拿不到时退回地球符号。
+ */
+@Composable
+private fun TabIcon(tab: BrowserTab) {
+    val colors = LocalLiuliColors.current
+    val favicon = tab.favicon?.asImageBitmap()
+    Box(
+        Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(Radius.sm))
+            .background(colors.glassTintStrong),
+        contentAlignment = Alignment.Center
+    ) {
+        if (favicon != null) {
+            Image(
+                bitmap = favicon,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                contentScale = ContentScale.Fit
+            )
+        } else {
+            GlyphIcon(Glyph.Globe, colors.accent, size = 20.dp)
+        }
+    }
+}
+
+/**
+ * 没有可继续的标签页时的提示。
+ *
+ * 底部空着一段会让人以为"继续浏览"出了故障，
+ * 这里补一句话说明它什么时候才有内容，并给出去书签的入口。
+ */
+@Composable
+private fun EmptyRecentHint(onOpenLibrary: () -> Unit) {
+    val colors = LocalLiuliColors.current
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(Radius.sm))
+                .background(colors.glassTint),
+            contentAlignment = Alignment.Center
+        ) {
+            GlyphIcon(Glyph.History, colors.textTertiary, size = 20.dp)
+        }
+        Spacer(Modifier.width(Space.md))
+        Column(Modifier.weight(1f)) {
+            BasicText(
+                text = "还没有打开的网页",
+                style = Type.body.copy(
+                    color = colors.textSecondary,
+                    fontWeight = FontWeight.Medium
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(Space.xxs))
+            BasicText(
+                text = "打开过的页面会出现在这里",
+                style = Type.label.copy(color = colors.textTertiary),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        val libraryInteraction = remember { MutableInteractionSource() }
+        Box(
+            Modifier
+                .heightIn(min = 36.dp)
+                .clip(RoundedCornerShape(Radius.pill))
+                .background(colors.accent.copy(alpha = 0.12f))
+                .clickable(
+                    interactionSource = libraryInteraction,
+                    indication = null,
+                    role = Role.Button,
+                    onClickLabel = "打开书签",
+                    onClick = onOpenLibrary
+                )
+                .pressScale(pressedScale = 0.90f, interactionSource = libraryInteraction)
+                .padding(horizontal = Space.md),
+            contentAlignment = Alignment.Center
+        ) {
+            BasicText(
+                text = "书签",
+                style = Type.label.copy(
+                    color = colors.accent,
+                    fontWeight = FontWeight.SemiBold
+                )
+            )
         }
     }
 }
 
 @Composable
 private fun PrivacyCard(
-    backdrop: LayerBackdrop,
-    onOpenLibrary: () -> Unit
+    backdrop: LayerBackdrop
 ) {
     val colors = LocalLiuliColors.current
     GlassSurface(
@@ -762,22 +876,24 @@ private fun PrivacyCard(
         shadow = true
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(16.dp),
+            Modifier.fillMaxWidth().padding(horizontal = Space.lg, vertical = Space.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 Modifier
-                    .size(42.dp)
+                    .size(36.dp)
                     .clip(CircleShape)
                     .background(colors.success.copy(alpha = if (colors.isDark) 0.22f else 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
-                GlyphIcon(Glyph.Shield, colors.success, size = 21.dp)
+                GlyphIcon(Glyph.Shield, colors.success, size = 18.dp)
             }
             Spacer(Modifier.width(Space.md))
             Column(Modifier.weight(1f)) {
+                // 这一句是承诺，不是条款：
+                // 讲清"数据在哪儿、什么时候消失"，比列一堆开关名更像人话。
                 BasicText(
-                    text = "隐私优先，数据留在本地",
+                    text = "浏览数据不会离开这台设备",
                     style = Type.body.copy(
                         color = colors.textPrimary,
                         fontWeight = FontWeight.SemiBold
@@ -787,35 +903,10 @@ private fun PrivacyCard(
                 )
                 Spacer(Modifier.height(Space.xxs))
                 BasicText(
-                    text = "隐私护盾默认开启 · 退出即清除数据",
-                    style = Type.label.copy(color = colors.textTertiary),
-                    maxLines = 2,
+                    text = "拦截追踪器 · 退出即清除",
+                    style = Type.caption.copy(color = colors.textTertiary),
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
-                )
-            }
-            // 按下反馈要跟点击共用同一个 interactionSource，
-            // 否则 pressScale 监听的是另一个源，按下时不会缩。
-            val libraryInteraction = remember { MutableInteractionSource() }
-            Box(
-                Modifier
-                    .heightIn(min = 44.dp)
-                    .clip(RoundedCornerShape(Radius.pill))
-                    .clickable(
-                        interactionSource = libraryInteraction,
-                        indication = null,
-                        role = Role.Button,
-                        onClickLabel = "打开书签",
-                        onClick = onOpenLibrary
-                    )
-                    .pressScale(pressedScale = 0.90f, interactionSource = libraryInteraction)
-                    .padding(horizontal = 14.dp)
-            ) {
-                BasicText(
-                    text = "书签",
-                    style = Type.bodySmall.copy(
-                        color = colors.accent,
-                        fontWeight = FontWeight.SemiBold
-                    )
                 )
             }
         }

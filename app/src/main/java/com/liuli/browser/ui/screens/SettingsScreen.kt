@@ -84,6 +84,7 @@ import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.backdrop.backdrops.emptyBackdrop
 import com.liuli.browser.BuildConfig
 import com.liuli.browser.data.SearchEngine
 import com.liuli.browser.data.SettingsStore
@@ -94,6 +95,7 @@ import com.liuli.browser.ui.components.LiquidDialog
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.components.PrivacyPolicyDialog
+import com.liuli.browser.ui.liquid.LiquidButton
 import com.liuli.browser.ui.liquid.LiquidSlider
 import com.liuli.browser.ui.liquid.LiquidToggle
 import com.liuli.browser.ui.liquid.Visibility
@@ -205,7 +207,12 @@ fun SettingsScreen(
             SettingsSection(title = "外观", backdrop = backdrop, index = 0) {
                 SettingsLabel("主题色", "液态玻璃的折射色调")
                 Spacer(Modifier.height(Space.md))
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                // 色板整排等宽：五个色块按可用宽度平分，
+                // 窄屏上不会挤成一团，宽屏上也不会散得找不着对应关系。
+                Row(
+                    Modifier.widthIn(max = 320.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Space.xs)
+                ) {
                     AccentPalettes.forEachIndexed { index, palette ->
                         val selected = settings.accentIndex == index
                         val interaction = remember { MutableInteractionSource() }
@@ -220,50 +227,88 @@ fun SettingsScreen(
                             animationSpec = MotionSpec.value(Motion.Quick),
                             label = "accent-mark-alpha"
                         )
-                        Box(
-                            Modifier
-                                .size(Dimens.minTouch)
-                                .clip(CircleShape)
-                                // 色块是纯图形，读屏软件只会念出"按钮"，
-                                // 得自己报出色名，并说明当前是否已选中。
-                                .semantics {
-                                    contentDescription = if (selected) {
-                                        "${palette.label}主题色，已选中"
-                                    } else {
-                                        "${palette.label}主题色"
-                                    }
-                                    role = Role.Button
-                                }
-                                .clickable(
-                                    interactionSource = interaction,
-                                    indication = null,
-                                    role = Role.Button,
-                                    onClickLabel = palette.label
-                                ) { settings.updateAccentIndex(index) }
-                                .pressScale(pressedScale = 0.86f, interactionSource = interaction),
-                            contentAlignment = Alignment.Center
+                        // 外圈跟着选中态亮起：勾号只有 16dp，
+                        // 光靠它认出当前用的是哪套颜色还是太吃力。
+                        val ringAlpha by animateFloatAsState(
+                            targetValue = if (selected) 1f else 0f,
+                            animationSpec = MotionSpec.value(Motion.Quick),
+                            label = "accent-ring-alpha"
+                        )
+                        Column(
+                            Modifier.weight(1f),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Box(
                                 Modifier
-                                    .size(34.dp)
+                                    .fillMaxWidth()
+                                    .height(Dimens.minTouch)
                                     .clip(CircleShape)
-                                    .background(
-                                        androidx.compose.ui.graphics.Brush.linearGradient(
-                                            listOf(palette.primary, palette.secondary, palette.tertiary)
-                                        )
-                                    ),
+                                    // 色块是纯图形，读屏软件只会念出"按钮"，
+                                    // 得自己报出色名，并说明当前是否已选中。
+                                    .semantics {
+                                        contentDescription = if (selected) {
+                                            "${palette.label}主题色，已选中"
+                                        } else {
+                                            "${palette.label}主题色"
+                                        }
+                                        role = Role.Button
+                                    }
+                                    .clickable(
+                                        interactionSource = interaction,
+                                        indication = null,
+                                        role = Role.Button,
+                                        onClickLabel = palette.label
+                                    ) { settings.updateAccentIndex(index) }
+                                    .pressScale(pressedScale = 0.86f, interactionSource = interaction),
                                 contentAlignment = Alignment.Center
                             ) {
-                                GlyphIcon(
-                                    glyph = Glyph.Check,
-                                    tint = Color.White.copy(alpha = markAlpha),
-                                    modifier = Modifier.graphicsLayer {
-                                        scaleX = markScale
-                                        scaleY = markScale
-                                    },
-                                    size = 16.dp
-                                )
+                                Box(
+                                    Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .border(
+                                            1.5.dp,
+                                            colors.accent.copy(alpha = ringAlpha),
+                                            CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Box(
+                                        Modifier
+                                            .size(34.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                androidx.compose.ui.graphics.Brush.linearGradient(
+                                                    listOf(palette.primary, palette.secondary, palette.tertiary)
+                                                )
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        GlyphIcon(
+                                            glyph = Glyph.Check,
+                                            tint = Color.White.copy(alpha = markAlpha),
+                                            modifier = Modifier.graphicsLayer {
+                                                scaleX = markScale
+                                                scaleY = markScale
+                                            },
+                                            size = 16.dp
+                                        )
+                                    }
+                                }
                             }
+                            Spacer(Modifier.height(Space.xxs))
+                            // 色名写在色块下面：光有一排颜色分不出是哪一套，
+                            // 名字写出来才认得出当前用的是哪个。
+                            BasicText(
+                                text = palette.label,
+                                style = Type.caption.copy(
+                                    color = if (selected) colors.accent else colors.textTertiary,
+                                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal
+                                ),
+                                maxLines = 1,
+                                // 色名已经报进色块的语义里，这里不要再念一遍。
+                                modifier = Modifier.clearAndSetSemantics { }
+                            )
                         }
                     }
                 }
@@ -277,7 +322,13 @@ fun SettingsScreen(
                 Spacer(Modifier.height(Space.md))
                 ToggleRow(
                     title = "动态流光背景",
-                    subtitle = "低功耗地缓慢流动；关闭后保持静态",
+                    // 说明跟着状态走：写死一句"关闭后保持静态"，
+                    // 用户关了也看不出现在到底是不是静态的。
+                    subtitle = if (settings.dynamicBackground) {
+                        "低功耗地缓慢流动"
+                    } else {
+                        "已关闭：背景保持静态"
+                    },
                     checked = settings.dynamicBackground,
                     onCheckedChange = { settings.updateDynamicBackground(it) },
                     backdrop = backdrop
@@ -311,6 +362,13 @@ fun SettingsScreen(
                             targetValue = if (selected) 1f else 0f,
                             animationSpec = MotionSpec.value(Motion.Quick),
                             label = "engine-mark-alpha"
+                        )
+                        // 空心圈是"未选中"的那一半，得单独一条透明度：
+                        // 复用勾号的透明度的话，未选中时圈也跟着透明，等于没画。
+                        val ringAlpha by animateFloatAsState(
+                            targetValue = if (selected) 0f else 1f,
+                            animationSpec = MotionSpec.value(Motion.Quick),
+                            label = "engine-ring-alpha"
                         )
                         val labelColor by animateColorAsState(
                             targetValue = if (selected) colors.accent else colors.textPrimary,
@@ -350,23 +408,35 @@ fun SettingsScreen(
                                     }
                                 }
                                 .pressScale(pressedScale = 0.98f, interactionSource = interaction)
-                                .padding(horizontal = Space.xs, vertical = Space.sm),
+                                // 横向不再自带留白：卡片里每一行的文字都要落在同一条竖线上。
+                                .padding(vertical = Space.sm),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(Modifier.size(17.dp), contentAlignment = Alignment.Center) {
-                                GlyphIcon(
-                                    glyph = if (selected) Glyph.Check else Glyph.Search,
-                                    tint = if (selected) {
-                                        colors.accent.copy(alpha = markAlpha)
-                                    } else {
-                                        colors.textTertiary
-                                    },
-                                    modifier = Modifier.graphicsLayer {
-                                        scaleX = markScale
-                                        scaleY = markScale
-                                    },
-                                    size = 17.dp
-                                )
+                                if (selected) {
+                                    GlyphIcon(
+                                        glyph = Glyph.Check,
+                                        tint = colors.accent.copy(alpha = markAlpha),
+                                        modifier = Modifier.graphicsLayer {
+                                            scaleX = markScale
+                                            scaleY = markScale
+                                        },
+                                        size = 17.dp
+                                    )
+                                } else {
+                                    // 未选中时画一个空心圈：这一行的语义是单选，
+                                    // 放大镜图标会让人以为按下去是去搜索。
+                                    Box(
+                                        Modifier
+                                            .size(13.dp)
+                                            .clip(CircleShape)
+                                            .border(
+                                                1.5.dp,
+                                                colors.textTertiary.copy(alpha = ringAlpha),
+                                                CircleShape
+                                            )
+                                    )
+                                }
                             }
                             Spacer(Modifier.width(Space.sm))
                             BasicText(
@@ -384,7 +454,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(Space.md))
 
             SettingsSection(title = "浏览", backdrop = backdrop, index = 2) {
-                SettingsLabel("标签页上限", "达到上限后自动回收最久未使用的标签")
+                SettingsLabel("标签页上限", "达到上限后自动回收最久未使用的标签，可选 4–12 个")
                 Spacer(Modifier.height(Space.xs))
                 Row(
                     Modifier.fillMaxWidth(),
@@ -408,14 +478,23 @@ fun SettingsScreen(
                         text = "$maxTabs 个",
                         style = Type.bodySmall.copy(
                             color = colors.textPrimary,
-                            fontWeight = FontWeight.Medium
-                        )
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.End
+                        ),
+                        maxLines = 1,
+                        // 读数宽度固定：数字从 8 变成 12 时滑块不能跟着变窄，
+                        // 否则拖到一半轨道会缩，拇指会在眼前自己往前挪一点。
+                        modifier = Modifier.width(52.dp)
                     )
                 }
                 Divider()
                 ToggleRow(
                     title = "新标签使用桌面版网站",
-                    subtitle = "对需要完整布局的网站更友好",
+                    subtitle = if (settings.desktopModeDefault) {
+                        "对需要完整布局的网站更友好"
+                    } else {
+                        "已关闭：新标签按站点的移动版布局打开"
+                    },
                     checked = settings.desktopModeDefault,
                     onCheckedChange = { settings.updateDesktopModeDefault(it) },
                     backdrop = backdrop
@@ -423,7 +502,11 @@ fun SettingsScreen(
                 Divider()
                 ToggleRow(
                     title = "阻止第三方 Cookie",
-                    subtitle = "默认开启，减少跨站跟踪",
+                    subtitle = if (settings.blockThirdPartyCookies) {
+                        "默认开启，减少跨站跟踪"
+                    } else {
+                        "已关闭：跨站 Cookie 会被放行"
+                    },
                     checked = settings.blockThirdPartyCookies,
                     onCheckedChange = {
                         settings.updateBlockThirdPartyCookies(it)
@@ -434,7 +517,11 @@ fun SettingsScreen(
                 Divider()
                 ToggleRow(
                     title = "滚动时收起工具栏",
-                    subtitle = "向下滚动时压缩顶栏并隐藏底栏，向上滚动恢复",
+                    subtitle = if (settings.autoHideToolbar) {
+                        "向下滚动时压缩顶栏并隐藏底栏，向上滚动恢复"
+                    } else {
+                        "已关闭：顶栏与底栏始终保持展开"
+                    },
                     checked = settings.autoHideToolbar,
                     onCheckedChange = {
                         settings.updateAutoHideToolbar(it)
@@ -677,7 +764,11 @@ fun SettingsScreen(
                 Divider()
                 ToggleRow(
                     title = "退出即清除数据",
-                    subtitle = "关闭应用时清除 Cookie、缓存、历史与标签会话",
+                    subtitle = if (settings.clearOnExit) {
+                        "关闭应用时清除 Cookie、缓存、历史与标签会话"
+                    } else {
+                        "已关闭：本地数据会保留，直到手动清除"
+                    },
                     checked = settings.clearOnExit,
                     onCheckedChange = { settings.updateClearOnExit(it) },
                     backdrop = backdrop
@@ -704,16 +795,21 @@ fun SettingsScreen(
             Spacer(Modifier.height(Space.md))
 
             SettingsSection(title = "金标联盟 · 隐私与合规", backdrop = backdrop, index = 5) {
+                // 十条条目平铺在一起会像一堵墙：拆成三组，
+                // 每一组的用途一眼可见，滑动时也有段落感。
+                GroupLabel("数据与权限")
                 ComplianceRow("权限最小化", "仅 INTERNET，无存储、定位、相机、通讯录等敏感权限")
                 ComplianceRow("隐私首启同意", "首次启动展示说明，同意后才创建 WebView 与联网")
                 ComplianceRow("无第三方 SDK", "零统计、零广告、零账号；书签与历史仅存本机")
+                GroupLabel("防护")
                 ComplianceRow("隐私护盾", "本机拦截追踪器、去除跟踪参数、退出即清除数据")
+                ComplianceRow("安全浏览", "SSL 错误阻断、混合内容阻止、文件访问禁用、Safe Browsing")
+                GroupLabel("体验")
                 ComplianceRow("64 位兼容", "仅打包 arm64-v8a / x86_64 64 位 ABI，无 32 位原生库")
                 ComplianceRow("Android 17", "targetSdk 37，适配新版前台与内存策略")
                 ComplianceRow("大屏与折叠屏", "响应式侧栏、多列标签、可调整窗口与旋转")
                 ComplianceRow("一镜到底", "搜索框与标签卡片共享元素/容器，弹簧曲线驱动")
                 ComplianceRow("深色与无障碍", "深色模式、48dp 触控、语义标签、字体缩放、减弱动效")
-                ComplianceRow("安全浏览", "SSL 错误阻断、混合内容阻止、文件访问禁用、Safe Browsing")
                 Spacer(Modifier.height(Space.md))
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
                     GlassPillButton(
@@ -734,8 +830,11 @@ fun SettingsScreen(
             Spacer(Modifier.height(Space.md))
 
             SettingsSection(title = "关于", backdrop = backdrop, index = 6) {
+                GroupLabel("版本")
                 AboutRow("应用版本", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                GroupLabel("内核")
                 kernelRows.forEach { (label, value) -> AboutRow(label, value) }
+                GroupLabel("平台与实现")
                 AboutRow("运行平台", "Android ${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}")
                 AboutRow("设计语言", "Liquid Glass · Backdrop (Apache-2.0)")
                 AboutRow("界面框架", "Jetpack Compose 1.12 · Kotlin 2.4")
@@ -764,16 +863,24 @@ fun SettingsScreen(
     }
 
     PrivacyPolicyDialog(visible = showPrivacy, onDismiss = { showPrivacy = false })
-    ConfirmClearDialog(
+    ConfirmDialog(
         visible = confirmClear,
+        title = "清除浏览数据？",
+        message = "将删除 Cookie、缓存、书签与历史记录，此操作不可撤销。",
+        confirmLabel = "确认清除",
+        glyph = Glyph.Trash,
         onConfirm = {
             confirmClear = false
             vm.clearBrowsingData()
         },
         onCancel = { confirmClear = false }
     )
-    ConfirmRevokeDialog(
+    ConfirmDialog(
         visible = confirmRevoke,
+        title = "撤回隐私同意？",
+        message = "撤回后将清除本地书签、历史、Cookie、缓存与设置，并返回隐私告知页。此操作不可撤销。",
+        confirmLabel = "撤回并清除",
+        glyph = Glyph.Shield,
         onConfirm = {
             confirmRevoke = false
             onRevokePrivacy()
@@ -815,7 +922,9 @@ private fun SettingsSection(
             // 分区名用强调色：卡片里的字段名比它还大也更深，
             // 不给分区名一点色彩，整屏就分不出组。
             style = Type.sectionTitle.copy(color = colors.accent),
-            modifier = Modifier.padding(start = Space.xs, bottom = Space.sm)
+            // 分区名与卡片左边缘对齐：之前多缩进 4dp，
+            // 和卡片、以及卡片里的文字都不在同一条竖线上。
+            modifier = Modifier.padding(bottom = Space.sm)
         )
         GlassSurface(
             backdrop = backdrop,
@@ -954,7 +1063,9 @@ private fun SettingsLabel(title: String, subtitle: String?) {
             text = title,
             style = Type.body.copy(
                 color = colors.textPrimary,
-                fontWeight = FontWeight.Medium
+                // 字段名比开关名重一档：两者字号一样、只差半个字重时，
+                // 卡片里分不清哪行是分组、哪行是条目。
+                fontWeight = FontWeight.SemiBold
             )
         )
         if (subtitle != null) {
@@ -965,6 +1076,22 @@ private fun SettingsLabel(title: String, subtitle: String?) {
             )
         }
     }
+}
+
+/**
+ * 卡片内的小组标题。
+ *
+ * 同一张卡片里塞进十条以上的行时，整屏看上去没有尽头。
+ * 拆成几组、每组给一个标题，长列表才有段落感。
+ */
+@Composable
+private fun GroupLabel(text: String) {
+    val colors = LocalLiuliColors.current
+    BasicText(
+        text = text,
+        style = Type.label.copy(color = colors.textSecondary),
+        modifier = Modifier.padding(top = Space.sm, bottom = Space.xxs)
+    )
 }
 
 @Composable
@@ -993,7 +1120,9 @@ private fun ToggleRow(
         Modifier
             .fillMaxWidth()
             .heightIn(min = Dimens.minTouch),
-        verticalAlignment = Alignment.CenterVertically
+        // 开关顶对齐：说明文字一行还是两行，各行开关的高度都不一样，
+        // 顶对齐才能让所有开关落在同一条竖线上。
+        verticalAlignment = Alignment.Top
     ) {
         // 标题整块都是开关的点击区：既要点得中，也要报得出开/关。
         // 竖向内边距从外层挪到这里，点击区才真正覆盖到 48dp。
@@ -1015,26 +1144,33 @@ private fun ToggleRow(
                     role = Role.Switch
                 ) { onCheckedChange(!checked) }
                 .pressScale(pressedScale = 0.97f, interactionSource = interaction)
-                // 横向留白与搜索引擎那几行对齐，卡片里各行的起点才一致。
-                .padding(horizontal = Space.xs, vertical = Space.sm)
+                // 横向不再自带留白：卡片里各行的文字都落在同一条竖线上。
+                .padding(end = Space.md, top = Space.sm, bottom = Space.sm)
         ) {
             BasicText(
                 text = title,
-                style = Type.body.copy(color = colors.textPrimary)
+                // 行高写死：开关要拿它当基准对齐标题，不能随字体度量漂移。
+                style = Type.body.copy(color = colors.textPrimary, lineHeight = 20.sp)
             )
             Spacer(Modifier.height(Space.xxs))
             BasicText(
                 text = subtitle,
-                style = Type.caption.copy(color = colors.textTertiary)
+                style = Type.caption.copy(color = colors.textTertiary, lineHeight = 14.sp)
             )
         }
-        Spacer(Modifier.width(Space.md))
-        LiquidToggle(
-            selected = { checked },
-            onSelect = onCheckedChange,
-            backdrop = backdrop,
-            contentDescription = title
-        )
+        // 开关与标题行中心对齐：标题行 20dp、开关 28dp，
+        // 往下挪 4dp 两者的中心才在同一条基线上。
+        Box(
+            Modifier.offset(y = Space.sm - 4.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            LiquidToggle(
+                selected = { checked },
+                onSelect = onCheckedChange,
+                backdrop = backdrop,
+                contentDescription = title
+            )
+        }
     }
 }
 
@@ -1238,13 +1374,28 @@ private fun SettingsField(
     }
 }
 
+/**
+ * 破坏性操作的确认框。
+ *
+ * 此前"清除数据"与"撤回授权"是两个几乎一样的实现，差别只有文案：
+ * 同样的标题、同样的按钮、同样的措辞，唯一的提示是正文里那句"不可撤销"。
+ * 这里合成一个：先给一枚警示徽标，让破坏性操作在对话框里先自报身份；
+ * 确认按钮改用危险色，主色按钮配"不可撤销"的文案看着像一次普通跳转。
+ */
 @Composable
-private fun ConfirmRevokeDialog(
+private fun ConfirmDialog(
     visible: Boolean,
+    title: String,
+    message: String,
+    confirmLabel: String,
+    glyph: Glyph,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    // 危险色在深浅两套主题里明暗相反：浅色主题是深红、深色主题是亮红，
+    // 文字颜色要跟着反过来选，否则深色主题下白字压在亮红上根本看不清。
+    val onDanger = if (colors.isDark) Color(0xFF2B0B0B) else Color.White
     LiquidDialog(
         visible = visible,
         onDismiss = onCancel,
@@ -1253,7 +1404,7 @@ private fun ConfirmRevokeDialog(
             .widthIn(max = 380.dp)
     ) {
         GlassSurface(
-            backdrop = com.kyant.backdrop.backdrops.emptyBackdrop(),
+            backdrop = emptyBackdrop(),
             modifier = Modifier
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -1269,13 +1420,25 @@ private fun ConfirmRevokeDialog(
             shadow = true
         ) {
             Column(Modifier.padding(Space.xl)) {
+                // 徽标在标题之上：字号再大也没有一枚红色的图标来得直接，
+                // "这一步会丢东西"必须比"我们在聊什么"更先被看到。
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(colors.danger.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    GlyphIcon(glyph, colors.danger, size = 20.dp)
+                }
+                Spacer(Modifier.height(Space.md))
                 BasicText(
-                    text = "撤回隐私同意？",
+                    text = title,
                     style = Type.title.copy(color = colors.textPrimary)
                 )
                 Spacer(Modifier.height(Space.sm))
                 BasicText(
-                    text = "撤回后将清除本地书签、历史、Cookie、缓存与设置，并返回隐私告知页。此操作不可撤销。",
+                    text = message,
                     style = Type.bodySmall.copy(color = colors.textSecondary)
                 )
                 Spacer(Modifier.height(Space.lg))
@@ -1283,71 +1446,26 @@ private fun ConfirmRevokeDialog(
                     GlassPillButton(
                         label = "取消",
                         onClick = onCancel,
-                        backdrop = com.kyant.backdrop.backdrops.emptyBackdrop()
+                        backdrop = emptyBackdrop()
                     )
-                    GlassPillButton(
-                        label = "撤回并清除",
+                    // 确认按钮用危险色：强调色的按钮看着像"去商店"，
+                    // 和"不可撤销"这件事对不上。
+                    LiquidButton(
                         onClick = onConfirm,
-                        backdrop = com.kyant.backdrop.backdrops.emptyBackdrop(),
-                        accent = true,
-                        glyph = Glyph.Trash
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConfirmClearDialog(
-    visible: Boolean,
-    onConfirm: () -> Unit,
-    onCancel: () -> Unit
-) {
-    val colors = LocalLiuliColors.current
-    LiquidDialog(
-        visible = visible,
-        onDismiss = onCancel,
-        panelModifier = Modifier
-            .padding(Space.xl)
-            .widthIn(max = 380.dp)
-    ) {
-        GlassSurface(
-            backdrop = com.kyant.backdrop.backdrops.emptyBackdrop(),
-            modifier = Modifier
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) { },
-            shape = RoundedCornerShape(Radius.xl),
-            tint = colors.glassTintStrong.copy(alpha = 0.96f),
-            blurRadius = 0.dp,
-            lensHeight = 0.dp,
-            // 与隐私说明同一个面板质感：背后没有可折射的内容，
-            // 内阴影给出的厚度才让它像一块玻璃而不是灰卡片。
-            innerShadow = true,
-            shadow = true
-        ) {
-            Column(Modifier.padding(Space.xl)) {
-                BasicText(
-                    text = "清除浏览数据？",
-                    style = Type.title.copy(color = colors.textPrimary)
-                )
-                Spacer(Modifier.height(Space.sm))
-                BasicText(
-                    text = "将删除 Cookie、缓存、书签与历史记录，此操作不可撤销。",
-                    style = Type.bodySmall.copy(color = colors.textSecondary)
-                )
-                Spacer(Modifier.height(Space.lg))
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
-                    GlassPillButton(label = "取消", onClick = onCancel, backdrop = com.kyant.backdrop.backdrops.emptyBackdrop())
-                    GlassPillButton(
-                        label = "确认清除",
-                        onClick = onConfirm,
-                        backdrop = com.kyant.backdrop.backdrops.emptyBackdrop(),
-                        accent = true,
-                        glyph = Glyph.Trash
-                    )
+                        backdrop = emptyBackdrop(),
+                        tint = colors.danger,
+                        surfaceColor = colors.danger,
+                        contentPadding = PaddingValues(horizontal = Space.md)
+                    ) {
+                        GlyphIcon(Glyph.Trash, onDanger, size = 18.dp)
+                        BasicText(
+                            text = confirmLabel,
+                            style = Type.body.copy(
+                                color = onDanger,
+                                fontWeight = FontWeight.Medium
+                            )
+                        )
+                    }
                 }
             }
         }
