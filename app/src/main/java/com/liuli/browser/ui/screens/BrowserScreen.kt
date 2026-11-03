@@ -23,6 +23,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -31,6 +32,8 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -58,8 +61,11 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -71,15 +77,20 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -93,15 +104,18 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -201,7 +215,8 @@ fun BrowserScreen(
     BackHandler(enabled = tab.isFullscreen) { vm.exitFullscreen() }
     BackHandler(enabled = agentOpen) { agentOpen = false }
 
-    val fontScale = LocalDensity.current.fontScale
+    val density = LocalDensity.current
+    val fontScale = density.fontScale
     val idleBarHeight = if (fontScale > 1.3f) 76.dp else 64.dp
     val canNavigateBack = tab.canGoBack || vm.tabs.size > 1 || !tab.isHome
     val collapsed = settings.autoHideToolbar && vm.toolbarCollapsed && !editing && !menuOpen && !shieldOpen
@@ -229,6 +244,13 @@ fun BrowserScreen(
         },
         animationSpec = MotionSpec.pageSpring(0.01.dp),
         label = "address-morph"
+    )
+    // 全屏时顶部控件让位给视频：淡出并稍稍上移，
+    // 硬切会让地址栏"啪"地消失，和视频的切换撞在一起。
+    val chromeAlpha by animateFloatAsState(
+        targetValue = if (tab.isFullscreen) 0f else 1f,
+        animationSpec = MotionSpec.value(Motion.Quick),
+        label = "fullscreen-chrome"
     )
     // 地址栏在"浏览态 ↔ 编辑态"之间形变：
     // 容器高度用弹簧伸缩，内容同时做方向性滑动，
@@ -351,6 +373,8 @@ fun BrowserScreen(
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
+                // 全屏时整块淡出，而不是硬切。
+                .graphicsLayer { alpha = chromeAlpha }
                 // 记下地址栏的底边位置，边缘手势只在它下面接管。
                 .onGloballyPositioned {
                     chromeBottom.floatValue = it.positionInParent().y + it.size.height
@@ -364,7 +388,10 @@ fun BrowserScreen(
                 backdrop = backdrop,
                 modifier = addressSharedModifier
                     .fillMaxWidth()
-                    .height(barHeight),
+                    .height(barHeight)
+                    // 描边画在玻璃之上：玻璃自带的白色描边在白底页面上看不见，
+                    // 地址栏会像"印"在页面里。这圈细边把它钉在页面之上。
+                    .glassHairline(color = colors.textPrimary.copy(alpha = 0.11f)),
                 shape = RoundedCornerShape(barHeight / 2),
                 tint = colors.glassTintStrong,
                 blurRadius = 22.dp,
@@ -764,7 +791,10 @@ fun BrowserScreen(
             ) {
                 GlassSurface(
                     backdrop = backdrop,
-                    modifier = Modifier.size(52.dp),
+                    modifier = Modifier
+                        .size(52.dp)
+                        // 提示也是浮在网页上的玻璃圆，白底页面上同样要看得见边。
+                        .glassHairline(color = colors.textPrimary.copy(alpha = 0.13f)),
                     shape = CircleShape,
                     tint = colors.glassTintStrong,
                     blurRadius = 18.dp,
@@ -1008,12 +1038,34 @@ private fun AddressIdleContent(
         label = "security-tint"
     )
     val shieldInteraction = remember { MutableInteractionSource() }
+    // 徽标要说清楚当前状态：护盾开着时报拦截数，
+    // 否则说明连接本身安不安全（读屏也靠这句）。
+    val securityDescription = when {
+        tab.isPrivate -> "隐私标签页"
+        shieldOn -> "隐私护盾，已拦截 $blockedTrackers 个跟踪请求"
+        tab.url.startsWith("https://") -> "安全连接"
+        tab.url.startsWith("http://") -> "连接不安全"
+        else -> "尚未打开网页"
+    }
     // 拦截计数角标：从 0 冒出时弹入，归零时缩回。
     val shieldBadgeScale by animateFloatAsState(
         targetValue = if (blockedTrackers > 0) 1f else 0f,
         animationSpec = MotionSpec.pageSpring(),
         label = "shield-badge-scale"
     )
+    // 拦截数上涨时角标要"顶"一下：光靠换字的话，
+    // 用户看不出护盾刚刚又挡下了一个请求。
+    // 只在真的往上加时才顶：从 0 冒出角标有自己的弹入动画，不必再叠一次。
+    val trackerPop = remember { Animatable(1f) }
+    var lastTrackerCount by remember { mutableIntStateOf(blockedTrackers) }
+    LaunchedEffect(blockedTrackers) {
+        val grew = blockedTrackers > lastTrackerCount
+        lastTrackerCount = blockedTrackers
+        if (grew && !reduced) {
+            trackerPop.snapTo(1.34f)
+            trackerPop.animateTo(1f, MotionSpec.pageSpring(reduced))
+        }
+    }
     // 收起/展开时，护盾徽标、图标、角标与间距都跟着连续变化：
     // 直接换尺寸会让这几个元素在收起的一瞬间"缩"一下，与整体形变脱节。
     val shieldSize by animateDpAsState(
@@ -1027,7 +1079,7 @@ private fun AddressIdleContent(
         label = "shield-glyph-size"
     )
     val shieldBadgeSize by animateDpAsState(
-        targetValue = if (compact) 13.dp else 15.dp,
+        targetValue = if (compact) 14.dp else 16.dp,
         animationSpec = MotionSpec.pageSpring(0.01.dp),
         label = "shield-badge-size"
     )
@@ -1037,7 +1089,7 @@ private fun AddressIdleContent(
         label = "shield-gap"
     )
     val shieldBadgeFont by animateIntAsState(
-        targetValue = if (compact) 7 else 8,
+        targetValue = if (compact) 8 else 9,
         animationSpec = MotionSpec.intValue(Motion.Quick),
         label = "shield-badge-font"
     )
@@ -1066,10 +1118,8 @@ private fun AddressIdleContent(
             Modifier
                 .size(shieldSize)
                 .pressScale(pressedScale = 0.9f, interactionSource = shieldInteraction)
-                .clip(CircleShape)
-                .background(animatedSecurityTint.copy(alpha = if (colors.isDark) 0.18f else 0.10f))
                 .semantics {
-                    if (shieldOn) contentDescription = "隐私护盾，已拦截 $blockedTrackers 个跟踪请求"
+                    contentDescription = securityDescription
                 }
                 .clickable(
                     interactionSource = shieldInteraction,
@@ -1081,48 +1131,73 @@ private fun AddressIdleContent(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            // 安全图标本身也会换（锁↔感叹号↔隐身），换形时淡入淡出而不是硬切。
-            AnimatedContent(
-                targetState = securityGlyph,
-                modifier = Modifier.size(shieldGlyphSize),
-                contentAlignment = Alignment.Center,
-                transitionSpec = {
-                    ((fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick)) +
-                        scaleIn(
-                            animationSpec = MotionSpec.enter(reduced, Motion.Quick),
-                            initialScale = 0.7f
-                        )) togetherWith
-                        (fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)) +
-                            scaleOut(
-                                animationSpec = MotionSpec.exit(reduced, Motion.Quick),
-                                targetScale = 0.7f
-                            ))).using(null)
-                },
-                label = "security-glyph"
-            ) { glyph ->
-                GlyphIcon(glyph, animatedSecurityTint, size = shieldGlyphSize)
+            // 圆盘单独一层并裁剪：
+            // 角标贴在圆盘右上角，若跟着圆盘一起裁会被切掉一块。
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .background(animatedSecurityTint.copy(alpha = if (colors.isDark) 0.20f else 0.13f))
+                    // 描一圈边：玻璃件浮在任意底色的网页上，
+                    // 光靠一层淡色底，圆形轮廓在白页上根本看不出来。
+                    .drawBehind {
+                        drawCircle(
+                            color = animatedSecurityTint.copy(alpha = 0.45f),
+                            radius = size.minDimension / 2f - 0.75.dp.toPx(),
+                            style = Stroke(width = 1.5.dp.toPx())
+                        )
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                // 安全图标本身也会换（锁↔感叹号↔隐身），换形时淡入淡出而不是硬切。
+                AnimatedContent(
+                    targetState = securityGlyph,
+                    modifier = Modifier.size(shieldGlyphSize),
+                    contentAlignment = Alignment.Center,
+                    transitionSpec = {
+                        ((fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick)) +
+                            scaleIn(
+                                animationSpec = MotionSpec.enter(reduced, Motion.Quick),
+                                initialScale = 0.7f
+                            )) togetherWith
+                            (fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)) +
+                                scaleOut(
+                                    animationSpec = MotionSpec.exit(reduced, Motion.Quick),
+                                    targetScale = 0.7f
+                                ))).using(null)
+                    },
+                    label = "security-glyph"
+                ) { glyph ->
+                    GlyphIcon(glyph, animatedSecurityTint, size = shieldGlyphSize)
+                }
             }
             // 角标常驻组合，用缩放与透明度控制显隐，不突然冒出或消失。
             Box(
                 Modifier
                     .align(Alignment.TopEnd)
                     .graphicsLayer {
-                        scaleX = shieldBadgeScale
-                        scaleY = shieldBadgeScale
+                        val pop = trackerPop.value
+                        scaleX = shieldBadgeScale * pop
+                        scaleY = shieldBadgeScale * pop
                         alpha = shieldBadgeScale
                     }
-                    .size(shieldBadgeSize)
-                    .clip(CircleShape)
-                    .background(colors.accent),
+                    .height(shieldBadgeSize)
+                    // 药丸而不是圆点：两位数（12、25）在圆里会被压扁看不清。
+                    .widthIn(min = shieldBadgeSize)
+                    .clip(RoundedCornerShape(50))
+                    .background(colors.accent)
+                    // 白圈：角标压在圆盘上，没有这一圈就分不清两层。
+                    .border(1.5.dp, colors.glassTintStrong, RoundedCornerShape(50))
+                    .padding(horizontal = 4.dp),
                 contentAlignment = Alignment.Center
             ) {
                 // 数字变化时交叉淡入：拦截数从 9 跳到 10，
                 // 直接换字会"闪"一下。
                 AnimatedContent(
-                    targetState = blockedTrackers.coerceAtMost(99),
+                    targetState = blockedTrackers,
                     // 尺寸固定：AnimatedContent 默认会补间尺寸变化，
                     // 角标是固定大小，让它自己补间会抖。
-                    modifier = Modifier.size(shieldBadgeSize),
+                    modifier = Modifier.height(shieldBadgeSize),
                     contentAlignment = Alignment.Center,
                     transitionSpec = {
                         ((fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick)) +
@@ -1140,7 +1215,8 @@ private fun AddressIdleContent(
                 ) { count ->
                     if (count > 0) {
                         BasicText(
-                            text = count.toString(),
+                            // 超过两位就写"99+"：写死 99 会让人以为只挡了 99 个。
+                            text = if (count > 99) "99+" else count.toString(),
                             style = TextStyle(
                                 color = Color.White,
                                 fontSize = shieldBadgeFont.sp,
@@ -1375,6 +1451,20 @@ private fun AddressEditContent(
     focusRequester: FocusRequester
 ) {
     val colors = LocalLiuliColors.current
+    val interactionSource = remember { MutableInteractionSource() }
+    // 聚焦时放大镜与占位文字一起转成强调色：
+    // 地址栏和首页搜索框是同一块玻璃，焦点表现必须长得一样。
+    val focused by interactionSource.collectIsFocusedAsState()
+    val glyphTint by animateColorAsState(
+        targetValue = if (focused) colors.accent else colors.textSecondary,
+        animationSpec = MotionSpec.color(Motion.Quick),
+        label = "address-glyph-tint"
+    )
+    val hintTint by animateColorAsState(
+        targetValue = if (focused) colors.textSecondary else colors.textTertiary,
+        animationSpec = MotionSpec.color(Motion.Quick),
+        label = "address-hint-tint"
+    )
     Column(
         Modifier
             .fillMaxSize()
@@ -1384,37 +1474,65 @@ private fun AddressEditContent(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            GlyphIcon(Glyph.Search, colors.textSecondary, size = 19.dp)
+            GlyphIcon(Glyph.Search, glyphTint, size = 19.dp)
             Spacer(Modifier.width(10.dp))
-            BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
-                modifier = Modifier
-                    .weight(1f)
-                    .focusRequester(focusRequester),
-                textStyle = TextStyle(
-                    color = colors.textPrimary,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium
-                ),
-                cursorBrush = SolidColor(colors.accent),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                keyboardActions = KeyboardActions(onGo = { onSubmit() }),
-                // 清空之后输入框是全空的，没有提示就不知道这里能输入什么。
-                decorationBox = { innerTextField ->
-                    Box {
-                        if (value.text.isEmpty()) {
-                            BasicText(
-                                text = "搜索或输入网址",
-                                style = TextStyle(color = colors.textTertiary, fontSize = 15.sp),
-                                maxLines = 1
-                            )
+            // 选区底色与手柄跟随强调色，和首页搜索框保持一致。
+            // 整个输入框都要裹进去：手柄是画在装饰框之外的兄弟节点，
+            // 只包 decorationBox 的话手柄仍是默认蓝。
+            CompositionLocalProvider(
+                LocalTextSelectionColors provides TextSelectionColors(
+                    handleColor = colors.accent,
+                    backgroundColor = colors.accent.copy(alpha = 0.28f)
+                )
+            ) {
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(focusRequester)
+                        .semantics {
+                            contentDescription = "地址栏"
+                            // 声明成网址字段：自动填充与密码管理器据此
+                            // 才知道这里填的是网址而不是一段普通文字。
+                            contentType = ContentType("url")
+                        },
+                    interactionSource = interactionSource,
+                    textStyle = TextStyle(
+                        color = colors.textPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    cursorBrush = SolidColor(colors.accent),
+                    singleLine = true,
+                    // 地址栏是网址输入框：键盘给 URL 版面（带 / . : 键），
+                    // 自动纠错与首字母大写都会把网址改坏，一律关掉。
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                        keyboardType = KeyboardType.Uri,
+                        imeAction = ImeAction.Go
+                    ),
+                    // 回车键与「前往」按钮同一把尺：空内容同样不提交，
+                    // 否则键盘上能走通、按钮却按不动，用户会以为按键坏了。
+                    keyboardActions = KeyboardActions(
+                        onGo = { if (value.text.isNotBlank()) onSubmit() }
+                    ),
+                    // 清空之后输入框是全空的，没有提示就不知道这里能输入什么。
+                    decorationBox = { innerTextField ->
+                        Box {
+                            if (value.text.isEmpty()) {
+                                BasicText(
+                                    text = "搜索或输入网址",
+                                    style = TextStyle(color = hintTint, fontSize = 15.sp),
+                                    maxLines = 1
+                                )
+                            }
+                            innerTextField()
                         }
-                        innerTextField()
                     }
-                }
-            )
+                )
+            }
             // 「清空」按钮淡入：有文字才出现，硬切会让输入框看起来在闪。
             Visibility(
                 visible = value.text.isNotEmpty(),
@@ -1526,6 +1644,9 @@ private fun AddressEditContent(
                 onClick = onSubmit,
                 backdrop = com.kyant.backdrop.backdrops.emptyBackdrop(),
                 accent = true,
+                // 空内容没有可去的地方：按钮置灰，
+                // 比按下去再弹一句"请输入网址"少一次往返。
+                enabled = value.text.isNotBlank(),
                 contentPadding = PaddingValues(horizontal = 14.dp)
             )
         }
@@ -1653,15 +1774,18 @@ private fun RowScope.ToolDockButton(
                         scaleY = badgeScale
                         alpha = badgeScale
                     }
-                    .size(16.dp)
-                    .clip(CircleShape)
-                    .background(colors.accent),
+                    .height(17.dp)
+                    // 药丸而不是圆点：两位数（12、25）在圆里会被压扁看不清。
+                    .widthIn(min = 17.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(colors.accent)
+                    .padding(horizontal = 4.dp),
                 contentAlignment = Alignment.Center
             ) {
                 // 数字变化时交叉淡入：11 → 12 是换字，不是整块角标闪一下。
                 AnimatedContent(
                     targetState = badge,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.height(17.dp),
                     contentAlignment = Alignment.Center,
                     transitionSpec = {
                         ((fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick)) +
@@ -1682,7 +1806,7 @@ private fun RowScope.ToolDockButton(
                             text = count.coerceAtMost(99).toString(),
                             style = TextStyle(
                                 color = Color.White,
-                                fontSize = 8.sp,
+                                fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         )
@@ -1710,7 +1834,11 @@ private fun BrowserDock(
     val colors = LocalLiuliColors.current
     GlassSurface(
         backdrop = backdrop,
-        modifier = modifier.fillMaxWidth().height(Dimens.dockHeight),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(Dimens.dockHeight)
+            // 底栏同样浮在网页上，白底页面上也要有一条看得见的边。
+            .glassHairline(color = colors.textPrimary.copy(alpha = 0.11f)),
         shape = RoundedCornerShape(Dimens.dockHeight / 2),
         tint = colors.dockTint,
         blurRadius = 24.dp,
@@ -1739,10 +1867,13 @@ private fun PageErrorCard(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalLiuliColors.current
+    // WebView 的原始描述是给开发看的（net::ERR_XXX），
+    // 直接摆给用户等于什么都没说。这里翻成"发生了什么 + 该怎么办"。
+    val copy = remember(message) { explainError(message) }
     GlassSurface(
         backdrop = backdrop,
         modifier = modifier,
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(Radius.lg),
         tint = colors.glassTintStrong,
         blurRadius = 24.dp,
         lensHeight = 18.dp,
@@ -1750,7 +1881,7 @@ private fun PageErrorCard(
         shadow = true
     ) {
         Column(
-            Modifier.padding(22.dp),
+            Modifier.padding(Space.xl),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // 整卡已有缩放淡入，内部元素再错开一点：
@@ -1765,33 +1896,26 @@ private fun PageErrorCard(
             ) {
                 GlyphIcon(Glyph.Info, colors.danger, size = 24.dp)
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(Space.md))
             BasicText(
-                text = "页面无法打开",
+                text = copy.title,
                 modifier = Modifier.errorReveal(index = 1),
-                style = TextStyle(
-                    color = colors.textPrimary,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+                style = Type.title.copy(color = colors.textPrimary, textAlign = TextAlign.Center)
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(Space.xs))
             BasicText(
-                text = message,
+                text = copy.detail,
                 modifier = Modifier.errorReveal(index = 2),
-                style = TextStyle(
-                    color = colors.textSecondary,
-                    fontSize = 13.sp
-                ),
+                style = Type.bodySmall.copy(color = colors.textSecondary, textAlign = TextAlign.Center),
                 // 错误文案来自 WebView，长度不受控：
                 // 限三行并省略，否则超长报错会把整张卡片顶出屏幕。
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(Space.lg))
             Row(
                 modifier = Modifier.errorReveal(index = 3),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(Space.sm)
             ) {
                 GlassPillButton(
                     label = "重试",
@@ -1808,6 +1932,46 @@ private fun PageErrorCard(
                 )
             }
         }
+    }
+}
+
+/**
+ * 错误卡上给用户看的两句话：发生了什么、接下来怎么办。
+ *
+ * WebView 抛回来的描述是 net::ERR_NAME_NOT_RESOLVED 这类内部代号，
+ * 直接展示等于什么都没解释。这里挑常见的几类翻成中文，
+ * 认不出来的就给一句通用建议，别把机器码甩给用户。
+ */
+private data class ErrorCopy(val title: String, val detail: String)
+
+private fun explainError(raw: String): ErrorCopy {
+    val text = raw.trim()
+    return when {
+        text.isBlank() -> ErrorCopy("页面无法打开", "请稍后重试，或检查网络连接。")
+        text.contains("HTTPS") ->
+            ErrorCopy("已拦截不安全的连接", text)
+        text.contains("ERR_NAME_NOT_RESOLVED") || text.contains("ERR_NAME_RESOLUTION_FAILED") ->
+            ErrorCopy("找不到这个网站", "域名可能拼错了，或设备暂时没有联网。")
+        text.contains("ERR_INTERNET_DISCONNECTED") || text.contains("ERR_NETWORK_CHANGED") ->
+            ErrorCopy("网络已断开", "请打开 Wi-Fi 或移动数据后再试一次。")
+        text.contains("ERR_CONNECTION_TIMED_OUT") || text.contains("ERR_TIMED_OUT") ->
+            ErrorCopy("连接超时", "服务器没有及时响应，可以稍后重试。")
+        text.contains("ERR_CONNECTION_REFUSED") || text.contains("ERR_CONNECTION_RESET") ->
+            ErrorCopy("连接被中断", "对方没有接受这次请求，稍后再试一次。")
+        text.contains("ERR_ADDRESS_UNREACHABLE") ->
+            ErrorCopy("无法访问该地址", "网络或代理设置可能挡住了这次访问。")
+        text.contains("ERR_ACCESS_DENIED") ->
+            ErrorCopy("访问被拒绝", "该站点拒绝了这次访问请求。")
+        text.contains("ERR_FILE_NOT_FOUND") || text.contains("ERR_FILE_ACCESS_DENIED") ->
+            ErrorCopy("文件打不开", "本地文件可能已被移动或没有权限读取。")
+        text.contains("ERR_CACHE_MISS") ->
+            ErrorCopy("缓存已失效", "重新加载一次通常就能恢复。")
+        text.contains("ERR_QUIC_PROTOCOL_ERROR") || text.contains("ERR_SSL_PROTOCOL_ERROR") ->
+            ErrorCopy("安全连接失败", "这个站点的加密握手没有成功，可以稍后重试。")
+        // 剩下的多半是应用自己写的中文提示，原样展示即可。
+        text.contains("net::ERR") || text.contains("ERR_") ->
+            ErrorCopy("页面无法打开", "请检查网络连接后重试一次。")
+        else -> ErrorCopy("页面无法打开", text)
     }
 }
 
@@ -1869,7 +2033,11 @@ private fun BrowserMenu(
         val glyph: Glyph,
         val label: String,
         val onClick: () -> Unit,
-        val trailing: String? = null
+        val trailing: String? = null,
+        // 破坏性操作要和普通条目分开：
+        // 手指一滑就点错代价太大，至少要让"关标签"看起来不一样。
+        val destructive: Boolean = false,
+        val dividerBefore: Boolean = false
     )
 
     val entries = listOf(
@@ -1905,7 +2073,13 @@ private fun BrowserMenu(
             vm.collapseToolbar()
         }),
         MenuEntry(Glyph.Settings, "设置", onOpenSettings),
-        MenuEntry(Glyph.Trash, "关闭此标签页", onCloseTab)
+        MenuEntry(
+            Glyph.Trash,
+            "关闭此标签页",
+            onCloseTab,
+            destructive = true,
+            dividerBefore = true
+        )
     )
 
     GlassSurface(
@@ -1981,11 +2155,34 @@ private fun BrowserMenu(
                     animationSpec = MotionSpec.value(Motion.Normal),
                     label = "menu-entry-alpha"
                 )
+                // 按下的底色：玻璃面板上只有缩放的话几乎看不出按到了哪一行，
+                // 补一层淡淡的填充，手指落点才明确。
+                val pressed by interaction.collectIsPressedAsState()
+                val pressFill by animateColorAsState(
+                    targetValue = if (pressed) {
+                        colors.textPrimary.copy(alpha = 0.07f)
+                    } else {
+                        Color.Transparent
+                    },
+                    animationSpec = MotionSpec.color(Motion.Quick),
+                    label = "menu-entry-press"
+                )
+                val entryTint = if (entry.destructive) colors.danger else colors.textSecondary
+                if (entry.dividerBefore) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = Space.md, vertical = Space.xs)
+                            .height(1.dp)
+                            .background(colors.textPrimary.copy(alpha = 0.10f))
+                    )
+                }
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .heightIn(min = Dimens.minTouch)
                         .clip(RoundedCornerShape(Radius.sm))
+                        .background(pressFill)
                         .clickable(
                             interactionSource = interaction,
                             indication = null,
@@ -2000,11 +2197,13 @@ private fun BrowserMenu(
                         .padding(horizontal = Space.md, vertical = Space.sm),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    GlyphIcon(entry.glyph, colors.textSecondary, size = 20.dp)
+                    GlyphIcon(entry.glyph, entryTint, size = 20.dp)
                     Spacer(Modifier.width(Space.md))
                     BasicText(
                         text = entry.label,
-                        style = Type.body.copy(color = colors.textPrimary),
+                        style = Type.body.copy(
+                            color = if (entry.destructive) colors.danger else colors.textPrimary
+                        ),
                         modifier = Modifier.weight(1f)
                     )
                     if (entry.trailing != null) {
@@ -2035,6 +2234,29 @@ private fun BrandMini(colors: com.liuli.browser.ui.theme.LiuliColors) {
         GlyphIcon(Glyph.Globe, Color.White, size = 18.dp)
     }
 }
+
+/**
+ * 浮在网页上的玻璃件需要一圈看得见的边。
+ *
+ * 玻璃自带的描边是半透明白色：白底页面上地址栏和底栏会像"印"在页面里，
+ * 完全读不出浮起来的感觉。这圈按主题反色的细边把轮廓钉住，
+ * 深浅主题下都能与任意底色拉开距离。
+ *
+ * 画在玻璃之后而不是另起一层：这样描边会跟着共享元素一起飞，
+ * 首页与浏览器之间来回切换时不会留下一条掉队的线。
+ *
+ * 圆角按实际高度取一半：地址栏与底栏都是胶囊形，
+ * 而且共享元素切换时高度会被重新测量，半高圆角在任何尺寸下都贴合。
+ */
+private fun Modifier.glassHairline(color: Color): Modifier =
+    drawWithContent {
+        drawContent()
+        drawRoundRect(
+            color = color,
+            cornerRadius = CornerRadius(size.height / 2f),
+            style = Stroke(width = 1.dp.toPx())
+        )
+    }
 
 /**
  * 地址栏要显示的站点名。

@@ -58,7 +58,10 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -92,6 +95,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -131,6 +136,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.util.Locale
+
+/**
+ * 提问框的字数上限。
+ *
+ * 超出部分会被丢掉，所以必须在接近上限时给出提示，
+ * 否则用户粘贴一段长文后只看到尾巴没了，却不知道是被截断的。
+ */
+private const val AgentInputLimit = 500
 
 @Composable
 fun AgentOrb(
@@ -788,6 +801,24 @@ fun AgentPanel(
                 }
 
                 Spacer(Modifier.height(Space.sm))
+                // 接近上限时提示剩余字数：粘贴长文被截断却毫无提示，
+                // 用户只会觉得"尾巴怎么没了"。
+                Visibility(
+                    visible = input.length >= AgentInputLimit * 4 / 5,
+                    enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
+                        expandVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick)),
+                    exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
+                        shrinkVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick))
+                ) {
+                    BasicText(
+                        text = "还可输入 ${AgentInputLimit - input.length} 字",
+                        style = Type.micro.copy(
+                            color = colors.textTertiary,
+                            textAlign = TextAlign.End
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     // 输入框聚焦时描一圈主色：光标之外还有一处"正在输入"的提示。
                     val inputInteraction = remember { MutableInteractionSource() }
@@ -801,48 +832,108 @@ fun AgentPanel(
                         animationSpec = MotionSpec.color(),
                         label = "input-border"
                     )
+                    // 聚焦时底色也偏向强调色：与设置页的输入框同一套反馈，
+                    // 只描边不换底色时两者看起来像两种控件。
+                    val inputBackground by animateColorAsState(
+                        targetValue = if (inputFocused) {
+                            colors.accent.copy(alpha = 0.10f)
+                        } else {
+                            colors.textPrimary.copy(alpha = 0.06f)
+                    },
+                        animationSpec = MotionSpec.color(),
+                        label = "input-background"
+                    )
                     Box(
                         Modifier
                             .weight(1f)
                             .heightIn(min = 44.dp)
                             .clip(RoundedCornerShape(Radius.md))
-                            .background(colors.textPrimary.copy(alpha = 0.06f))
+                            .background(inputBackground)
                             .border(1.dp, inputBorder, RoundedCornerShape(Radius.md))
                             .padding(horizontal = Space.md, vertical = Space.xxs),
                         contentAlignment = Alignment.CenterStart
                     ) {
-                        BasicTextField(
-                            value = input,
-                            onValueChange = { input = it.take(500) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 40.dp)
-                                .focusRequester(focusRequester),
-                            interactionSource = inputInteraction,
-                            textStyle = Type.body.copy(
-                                color = colors.textPrimary,
-                                fontSize = 13.sp,
-                                lineHeight = 18.sp
-                            ),
-                            cursorBrush = SolidColor(colors.accent),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                            keyboardActions = KeyboardActions(onSend = { submit(input) }),
-                            decorationBox = { innerTextField ->
-                                Box(contentAlignment = Alignment.CenterStart) {
-                                    if (input.isEmpty()) {
-                                        BasicText(
-                                            text = "询问本页内容…",
-                                            style = Type.body.copy(
-                                                color = colors.textTertiary,
-                                                fontSize = 13.sp
-                                            )
-                                        )
+                        // 选区底色与手柄跟随强调色，和地址栏、首页搜索框一致。
+                        // 整个输入框都要裹进去：手柄是画在装饰框之外的兄弟节点，
+                        // 只包 decorationBox 的话手柄仍是默认蓝。
+                        CompositionLocalProvider(
+                            LocalTextSelectionColors provides TextSelectionColors(
+                                handleColor = colors.accent,
+                                backgroundColor = colors.accent.copy(alpha = 0.28f)
+                            )
+                        ) {
+                            BasicTextField(
+                                value = input,
+                                // 超出上限的字符会被丢掉。上面有字数提示兜底，
+                                // 用户至少知道内容被截断了。
+                                onValueChange = { input = it.take(AgentInputLimit) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 40.dp)
+                                    .focusRequester(focusRequester)
+                                    .semantics { contentDescription = "向助手提问" },
+                                interactionSource = inputInteraction,
+                                textStyle = Type.body.copy(
+                                    color = colors.textPrimary,
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp
+                                ),
+                                cursorBrush = SolidColor(colors.accent),
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Sentences,
+                                    imeAction = ImeAction.Send
+                                ),
+                                keyboardActions = KeyboardActions(onSend = { submit(input) }),
+                                decorationBox = { innerTextField ->
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(Modifier.weight(1f)) {
+                                            if (input.isEmpty()) {
+                                                BasicText(
+                                                    text = "询问本页内容…",
+                                                    style = Type.body.copy(
+                                                        color = colors.textTertiary,
+                                                        fontSize = 13.sp
+                                                    )
+                                                )
+                                            }
+                                            innerTextField()
+                                        }
+                                        // 清空入口：逐字删太慢，
+                                        // 给一个能直接擦掉的按钮。
+                                        Visibility(
+                                            visible = input.isNotEmpty(),
+                                            enter = fadeIn(MotionSpec.enter(Motion.Quick)),
+                                            exit = fadeOut(MotionSpec.exit(Motion.Quick))
+                                        ) {
+                                            val clearInteraction = remember { MutableInteractionSource() }
+                                            Box(
+                                                Modifier
+                                                    .size(26.dp)
+                                                    .clip(CircleShape)
+                                                    .semantics {
+                                                        contentDescription = "清空提问"
+                                                        role = Role.Button
+                                                    }
+                                                    .clickable(
+                                                        interactionSource = clearInteraction,
+                                                        indication = null,
+                                                        role = Role.Button,
+                                                        onClickLabel = "清空"
+                                                    ) { input = "" }
+                                                    .pressScale(
+                                                        pressedScale = 0.82f,
+                                                        interactionSource = clearInteraction
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                GlyphIcon(Glyph.Close, colors.textTertiary, size = 13.dp)
+                                            }
+                                        }
                                     }
-                                    innerTextField()
                                 }
-                            }
-                        )
+                            )
+                        }
                     }
                     Spacer(Modifier.width(Space.sm))
                     val canSend = input.isNotBlank() && !agent.busy

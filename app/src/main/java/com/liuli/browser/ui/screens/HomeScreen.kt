@@ -9,6 +9,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.core.tween
@@ -43,8 +45,11 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -65,9 +70,12 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -399,33 +407,94 @@ private fun HomeSearchBar(
             ) {
                 GlyphIcon(Glyph.Search, focusTint, size = 21.dp)
             }
-            BasicTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 2.dp)
-                    .focusRequester(focusRequester)
-                    .semantics { contentDescription = "搜索或输入网址" },
-                interactionSource = interactionSource,
-                textStyle = Type.title.copy(
-                    color = colors.textPrimary,
-                    fontWeight = FontWeight.Medium
-                ),
-                cursorBrush = SolidColor(colors.accent),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                keyboardActions = KeyboardActions(onGo = { onSubmit() }),
-                decorationBox = { innerTextField ->
-                    if (query.isEmpty()) {
-                        BasicText(
-                            text = "搜索或输入网址",
-                            style = Type.title.copy(color = hintTint)
-                        )
+            // 选区底色与拖拽手柄改用强调色：
+            // 平台默认的蓝色落在这套配色上很跳，选中的字会像贴错了色。
+            // 整个输入框都要裹进去：手柄是画在装饰框之外的兄弟节点，
+            // 只包 decorationBox 的话手柄仍是默认蓝。
+            CompositionLocalProvider(
+                LocalTextSelectionColors provides TextSelectionColors(
+                    handleColor = colors.accent,
+                    backgroundColor = colors.accent.copy(alpha = 0.28f)
+                )
+            ) {
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 2.dp)
+                        .focusRequester(focusRequester)
+                        .semantics { contentDescription = "搜索或输入网址" },
+                    interactionSource = interactionSource,
+                    textStyle = Type.title.copy(
+                        color = colors.textPrimary,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    cursorBrush = SolidColor(colors.accent),
+                    singleLine = true,
+                    // 与地址栏共用同一套键盘规格：首页搜索框和地址栏本就是同一个
+                    // 共享元素，输入法行为必须一致，否则两屏之间会突然换手感。
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                        keyboardType = KeyboardType.Uri,
+                        imeAction = ImeAction.Go
+                    ),
+                    keyboardActions = KeyboardActions(onGo = { onSubmit() }),
+                    decorationBox = { innerTextField ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.weight(1f)) {
+                                if (query.isEmpty()) {
+                                    BasicText(
+                                        text = "搜索或输入网址",
+                                        style = Type.title.copy(color = hintTint)
+                                    )
+                                }
+                                innerTextField()
+                            }
+                            // 清空入口：全选删除太慢，长按也不够直觉，
+                            // 给一个一键擦掉的按钮。
+                            Visibility(
+                                visible = query.isNotEmpty(),
+                                enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
+                                    scaleIn(
+                                        animationSpec = MotionSpec.pageSpring(),
+                                        initialScale = 0.7f
+                                    ),
+                                exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
+                                    scaleOut(
+                                        animationSpec = MotionSpec.pageSpring(),
+                                        targetScale = 0.7f
+                                    )
+                            ) {
+                                val clearInteraction = remember { MutableInteractionSource() }
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .semantics {
+                                            contentDescription = "清空搜索内容"
+                                            role = Role.Button
+                                        }
+                                        .clickable(
+                                            interactionSource = clearInteraction,
+                                            indication = null,
+                                            role = Role.Button,
+                                            onClickLabel = "清空"
+                                        ) { onQueryChange("") }
+                                        .pressScale(
+                                            pressedScale = 0.82f,
+                                            interactionSource = clearInteraction
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    GlyphIcon(Glyph.Close, colors.textTertiary, size = 13.dp)
+                                }
+                            }
+                        }
                     }
-                    innerTextField()
-                }
-            )
+                )
+            }
             // 「前往」按钮淡入并轻微右移：
             // 输入框里一有字它就弹出来，硬切会让键盘显得很急躁。
             // 用项目自己的 Visibility：这一行在 Row 作用域里，

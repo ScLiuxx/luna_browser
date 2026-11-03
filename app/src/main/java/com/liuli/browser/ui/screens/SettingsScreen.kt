@@ -38,9 +38,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -59,6 +63,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -67,6 +72,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -548,14 +555,18 @@ fun SettingsScreen(
                             label = "接口地址（OpenAI 兼容）",
                             value = settings.agentEndpoint,
                             placeholder = SettingsStore.DEFAULT_AGENT_ENDPOINT,
-                            onValueChange = { settings.updateAgentEndpoint(it) }
+                            onValueChange = { settings.updateAgentEndpoint(it) },
+                            keyboardType = KeyboardType.Uri
                         )
                         Spacer(Modifier.height(Space.sm))
                         SettingsField(
                             label = "模型名称",
                             value = settings.agentModel,
                             placeholder = SettingsStore.DEFAULT_AGENT_MODEL,
-                            onValueChange = { settings.updateAgentModel(it) }
+                            onValueChange = { settings.updateAgentModel(it) },
+                            // 模型名（gpt-4o 之类）不是网址：URL 键盘会塞进
+                            // 一堆斜杠点号键位，反而碍事。
+                            keyboardType = KeyboardType.Text
                         )
                         Spacer(Modifier.height(Space.sm))
                         SettingsField(
@@ -563,6 +574,7 @@ fun SettingsScreen(
                             value = settings.agentApiKey,
                             placeholder = "不写入磁盘，退出应用即失效",
                             onValueChange = { settings.updateAgentApiKey(it) },
+                            keyboardType = KeyboardType.Password,
                             password = true
                         )
                     }
@@ -1108,9 +1120,11 @@ private fun SettingsField(
     value: String,
     placeholder: String,
     onValueChange: (String) -> Unit,
+    keyboardType: KeyboardType = KeyboardType.Uri,
     password: Boolean = false
 ) {
     val colors = LocalLiuliColors.current
+    val focusManager = LocalFocusManager.current
     var focused by remember { mutableStateOf(false) }
     // 聚焦时底色偏向强调色并描出细边：玻璃件没有光标提示，
     // 不给这层反馈，用户不知道键盘落在哪个框里。
@@ -1128,75 +1142,99 @@ private fun SettingsField(
         animationSpec = MotionSpec.color(),
         label = "field-border"
     )
+    val hintTint by animateColorAsState(
+        targetValue = if (focused) colors.textSecondary else colors.textTertiary,
+        animationSpec = MotionSpec.color(),
+        label = "field-hint-tint"
+    )
     Column {
         BasicText(
             text = label,
             style = Type.label.copy(color = colors.textSecondary)
         )
         Spacer(Modifier.height(Space.xs))
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            modifier = Modifier
-                .fillMaxWidth()
-                .onFocusChanged { focused = it.isFocused }
-                .clip(RoundedCornerShape(Radius.sm))
-                .background(fieldBackground)
-                .border(1.dp, fieldBorder, RoundedCornerShape(Radius.sm))
-                .padding(horizontal = Space.md, vertical = Space.md),
-            textStyle = Type.sectionTitle.copy(color = colors.textPrimary, fontWeight = FontWeight.Normal),
-            cursorBrush = SolidColor(colors.accent),
-            singleLine = true,
-            visualTransformation = if (password) {
-                PasswordVisualTransformation()
-            } else {
-                VisualTransformation.None
-            },
-            keyboardOptions = KeyboardOptions(
-                keyboardType = if (password) KeyboardType.Password else KeyboardType.Uri
-            ),
-            decorationBox = { innerTextField ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f)) {
-                        if (value.isEmpty()) {
-                            BasicText(
-                                text = placeholder,
-                                style = Type.sectionTitle.copy(color = colors.textTertiary, fontWeight = FontWeight.Normal)
-                            )
+        // 选区底色与手柄跟随强调色，和地址栏、首页搜索框一致。
+        // 整个输入框都要裹进去：手柄是画在装饰框之外的兄弟节点，
+        // 只包 decorationBox 的话手柄仍是默认蓝。
+        CompositionLocalProvider(
+            LocalTextSelectionColors provides TextSelectionColors(
+                handleColor = colors.accent,
+                backgroundColor = colors.accent.copy(alpha = 0.28f)
+            )
+        ) {
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { focused = it.isFocused }
+                    .semantics { contentDescription = label }
+                    .clip(RoundedCornerShape(Radius.sm))
+                    .background(fieldBackground)
+                    .border(1.dp, fieldBorder, RoundedCornerShape(Radius.sm))
+                    .padding(horizontal = Space.md, vertical = Space.md),
+                textStyle = Type.sectionTitle.copy(color = colors.textPrimary, fontWeight = FontWeight.Normal),
+                cursorBrush = SolidColor(colors.accent),
+                singleLine = true,
+                visualTransformation = if (password) {
+                    PasswordVisualTransformation()
+                } else {
+                    VisualTransformation.None
+                },
+                // 这些框里填的全是地址、模型名、密钥这类"术语"，
+                // 不是句子：自动纠错和首字母大写只会把内容改坏，一律关掉。
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    autoCorrectEnabled = false,
+                    keyboardType = keyboardType,
+                    imeAction = ImeAction.Done
+                ),
+                // 键盘上的"完成"键：收起键盘而不是留一个光标在框里，
+                // 否则设置页会被键盘挡掉一半。
+                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                decorationBox = { innerTextField ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.weight(1f)) {
+                            if (value.isEmpty()) {
+                                BasicText(
+                                    text = placeholder,
+                                    style = Type.sectionTitle.copy(color = hintTint, fontWeight = FontWeight.Normal)
+                                )
+                            }
+                            innerTextField()
                         }
-                        innerTextField()
-                    }
-                    // 清除按钮：全选删除太慢，长按也不够直觉，
-                    // 给一个能直接擦掉的入口。
-                    Visibility(
-                        visible = value.isNotEmpty(),
-                        enter = fadeIn(animationSpec = MotionSpec.enter(Motion.Quick)),
-                        exit = fadeOut(animationSpec = MotionSpec.exit(Motion.Quick))
-                    ) {
-                        val clearInteraction = remember { MutableInteractionSource() }
-                        Box(
-                            Modifier
-                                .size(26.dp)
-                                .clip(CircleShape)
-                                .semantics {
-                                    contentDescription = "清除$label"
-                                    role = Role.Button
-                                }
-                                .clickable(
-                                    interactionSource = clearInteraction,
-                                    indication = null,
-                                    role = Role.Button,
-                                    onClickLabel = "清除"
-                                ) { onValueChange("") }
-                                .pressScale(pressedScale = 0.82f, interactionSource = clearInteraction),
-                            contentAlignment = Alignment.Center
+                        // 清除按钮：全选删除太慢，长按也不够直觉，
+                        // 给一个能直接擦掉的入口。
+                        Visibility(
+                            visible = value.isNotEmpty(),
+                            enter = fadeIn(animationSpec = MotionSpec.enter(Motion.Quick)),
+                            exit = fadeOut(animationSpec = MotionSpec.exit(Motion.Quick))
                         ) {
-                            GlyphIcon(Glyph.Close, colors.textTertiary, size = 13.dp)
+                            val clearInteraction = remember { MutableInteractionSource() }
+                            Box(
+                                Modifier
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .semantics {
+                                        contentDescription = "清除$label"
+                                        role = Role.Button
+                                    }
+                                    .clickable(
+                                        interactionSource = clearInteraction,
+                                        indication = null,
+                                        role = Role.Button,
+                                        onClickLabel = "清除"
+                                    ) { onValueChange("") }
+                                    .pressScale(pressedScale = 0.82f, interactionSource = clearInteraction),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                GlyphIcon(Glyph.Close, colors.textTertiary, size = 13.dp)
+                            }
                         }
                     }
                 }
-            }
-        )
+            )
+        }
     }
 }
 
