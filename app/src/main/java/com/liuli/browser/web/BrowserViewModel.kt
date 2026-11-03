@@ -1127,7 +1127,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     ?.let { runCatching { Uri.parse(it).host }.getOrNull() }
                 val targetHost = runCatching { Uri.parse(url).host }.getOrNull()
                 if (isRedirect && pendingHost != null && pendingHost == targetHost) {
-                    if (id != null) httpUpgradeOrigins.remove(id)
+                    // pendingHost 非空说明 id 一定非空，不用再判一次。
+                    httpUpgradeOrigins.remove(id)
                     tabFor(view)?.let {
                         it.isLoading = false
                         it.errorText = "该网站将加密连接重定向回明文 HTTP，为保护隐私已阻止访问"
