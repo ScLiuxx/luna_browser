@@ -1133,9 +1133,11 @@ private fun AgentEmptyState(tabTitle: String, modifier: Modifier = Modifier) {
         Spacer(Modifier.height(Space.md))
         BasicText(
             text = "速览、查找与问答默认在本机完成。\n也可以让我滚动、点击或填写，每次都会先确认。",
-            style = Type.bodySmall.copy(color = colors.textTertiary),
-            modifier = Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Center
+            style = Type.bodySmall.copy(
+                color = colors.textTertiary,
+                textAlign = TextAlign.Center
+            ),
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }
