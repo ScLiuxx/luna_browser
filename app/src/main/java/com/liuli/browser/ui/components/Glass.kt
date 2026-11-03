@@ -1,6 +1,5 @@
 package com.liuli.browser.ui.components
 
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -11,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -23,7 +21,6 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
@@ -46,8 +43,6 @@ import com.liuli.browser.ui.liquid.LiquidTextAction
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
-import com.liuli.browser.ui.theme.Motion
-import com.liuli.browser.ui.theme.MotionSpec
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -229,6 +224,10 @@ fun GlassSurface(
 /**
  * Kept as a thin adapter so the whole app uses the catalog's InteractiveHighlight
  * and Backdrop lens pipeline.
+ *
+ * 禁用态由底层的 Liquid 组件统一表达（图标转灰、底座退淡、不铺主色），
+ * 这里不再额外压一层透明度：两处各管一半，
+ * 同一屏里的图标键与胶囊键会灰得不一样。
  */
 @Composable
 fun GlassIconButton(
@@ -242,19 +241,12 @@ fun GlassIconButton(
     accent: Boolean = false,
     enabled: Boolean = true
 ) {
-    // 底层只把图标调暗，玻璃底座依旧是满亮的，看不出按钮已经失效。
-    // 整块一起压暗，并在明暗之间过渡，禁用态才立得住。
-    val dimAlpha by animateFloatAsState(
-        targetValue = if (enabled) 1f else 0.62f,
-        animationSpec = MotionSpec.value(Motion.Quick),
-        label = "glass-icon-button-alpha"
-    )
     LiquidIconButton(
         glyph = glyph,
         description = contentDescription,
         onClick = onClick,
         backdrop = backdrop,
-        modifier = modifier.graphicsLayer { alpha = dimAlpha },
+        modifier = modifier,
         size = maxOf(size, Dimens.minTouch),
         glyphSize = glyphSize,
         selected = accent,
@@ -273,18 +265,11 @@ fun GlassPillButton(
     enabled: Boolean = true,
     contentPadding: PaddingValues = PaddingValues(horizontal = 18.dp)
 ) {
-    // 胶囊按钮此前完全没有禁用态：文字与底色和可用时一模一样，
-    // 用户按下去没反应才知道按钮是灰的。这里整体压暗并过渡。
-    val dimAlpha by animateFloatAsState(
-        targetValue = if (enabled) 1f else 0.42f,
-        animationSpec = MotionSpec.value(Motion.Quick),
-        label = "glass-pill-button-alpha"
-    )
     LiquidTextAction(
         label = label,
         onClick = onClick,
         backdrop = backdrop,
-        modifier = modifier.graphicsLayer { alpha = dimAlpha },
+        modifier = modifier,
         accent = accent,
         glyph = glyph,
         enabled = enabled,

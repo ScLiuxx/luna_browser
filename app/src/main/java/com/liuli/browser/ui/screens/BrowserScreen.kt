@@ -125,6 +125,7 @@ import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
 import com.liuli.browser.ui.theme.Radius
 import com.liuli.browser.ui.theme.Space
+import com.liuli.browser.ui.theme.Type
 import com.liuli.browser.ui.theme.reduceMotion
 import com.liuli.browser.web.BrowserTab
 import com.liuli.browser.web.BrowserViewModel
@@ -822,7 +823,7 @@ private fun PrivacyShieldPanel(
         GlassSurface(
             backdrop = com.kyant.backdrop.backdrops.emptyBackdrop(),
             modifier = Modifier
-                .padding(22.dp)
+                .padding(Space.xl)
                 .widthIn(max = 380.dp)
                 // 十条说明加一段正文，屏幕矮一点就装不下。
                 // 给卡片封顶并让内容滚动，否则底部那几条直接看不见。
@@ -844,7 +845,7 @@ private fun PrivacyShieldPanel(
             Column(
                 Modifier
                     .verticalScroll(rememberScrollState())
-                    .padding(22.dp)
+                    .padding(Space.xl)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -856,19 +857,15 @@ private fun PrivacyShieldPanel(
                     ) {
                         GlyphIcon(Glyph.Shield, colors.success, size = 20.dp)
                     }
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(Space.sm))
                     Column(Modifier.weight(1f)) {
                         BasicText(
                             text = "隐私护盾已开启",
-                            style = TextStyle(
-                                color = colors.textPrimary,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            style = Type.title.copy(color = colors.textPrimary)
                         )
                         BasicText(
                             text = "全部拦截在本机完成",
-                            style = TextStyle(color = colors.textTertiary, fontSize = 10.sp)
+                            style = Type.caption.copy(color = colors.textTertiary)
                         )
                     }
                     GlassIconButton(
@@ -880,7 +877,7 @@ private fun PrivacyShieldPanel(
                         glyphSize = 16.dp
                     )
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(Space.md))
                 ShieldPoint("已拦截 $blocked 个跟踪请求", colors.success, 0)
                 ShieldPoint(
                     if (blockThirdParty) "第三方 Cookie 已阻止" else "第三方 Cookie 已允许",
@@ -914,14 +911,10 @@ private fun PrivacyShieldPanel(
                     if (secureScreen) colors.success else colors.textTertiary,
                     9
                 )
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(Space.sm))
                 BasicText(
                     text = "网页无法读取剪贴板、通讯录、定位、相机或麦克风。跟踪参数会在导航时自动移除，HTTP 自动升级为 HTTPS，并阻止 DNS 预取、sendBeacon 与 window.open 数据外泄。",
-                    style = TextStyle(
-                        color = colors.textTertiary,
-                        fontSize = 10.sp,
-                        lineHeight = 16.sp
-                    )
+                    style = Type.caption.copy(color = colors.textTertiary)
                 )
             }
         }
@@ -946,7 +939,7 @@ private fun ShieldPoint(text: String, tint: Color, index: Int = 0) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
+            .padding(vertical = Space.xxs)
             .graphicsLayer {
                 this.alpha = alpha
                 translationX = (1f - alpha) * 10.dp.toPx()
@@ -962,10 +955,10 @@ private fun ShieldPoint(text: String, tint: Color, index: Int = 0) {
         ) {
             GlyphIcon(Glyph.Check, tint, size = 9.dp)
         }
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(Space.sm))
         BasicText(
             text = text,
-            style = TextStyle(color = colors.textSecondary, fontSize = 12.sp)
+            style = Type.bodySmall.copy(color = colors.textSecondary)
         )
     }
 }
@@ -1951,28 +1944,24 @@ private fun BrowserMenu(
             Modifier
                 .heightIn(max = 540.dp)
                 .verticalScroll(rememberScrollState())
-                .padding(8.dp)
+                .padding(Space.sm)
         ) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                Modifier.fillMaxWidth().padding(horizontal = Space.md, vertical = Space.sm),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 BrandMini(colors)
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(Space.sm))
                 Column(Modifier.weight(1f)) {
                     BasicText(
                         text = tab.pageTitle(),
-                        style = TextStyle(
-                            color = colors.textPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold
-                        ),
+                        style = Type.title.copy(color = colors.textPrimary),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     BasicText(
                         text = tab.addressLabel(),
-                        style = TextStyle(color = colors.textTertiary, fontSize = 11.sp),
+                        style = Type.caption.copy(color = colors.textTertiary),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1996,31 +1985,32 @@ private fun BrowserMenu(
                     Modifier
                         .fillMaxWidth()
                         .heightIn(min = Dimens.minTouch)
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(Radius.sm))
                         .clickable(
                             interactionSource = interaction,
                             indication = null,
-                            role = Role.Button
+                            role = Role.Button,
+                            onClickLabel = entry.label
                         ) { entry.onClick() }
                         .pressScale(pressedScale = 0.97f, interactionSource = interaction)
                         .graphicsLayer {
                             this.alpha = alpha
                             translationX = (1f - alpha) * 14.dp.toPx()
                         }
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(horizontal = Space.md, vertical = Space.sm),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     GlyphIcon(entry.glyph, colors.textSecondary, size = 20.dp)
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(Space.md))
                     BasicText(
                         text = entry.label,
-                        style = TextStyle(color = colors.textPrimary, fontSize = 14.sp),
+                        style = Type.body.copy(color = colors.textPrimary),
                         modifier = Modifier.weight(1f)
                     )
                     if (entry.trailing != null) {
                         BasicText(
                             text = entry.trailing,
-                            style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
+                            style = Type.caption.copy(color = colors.textTertiary)
                         )
                     }
                 }

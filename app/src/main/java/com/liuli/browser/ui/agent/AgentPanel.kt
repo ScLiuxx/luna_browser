@@ -80,8 +80,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -206,6 +208,8 @@ fun AgentPanel(
     val scope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+    // 开关型操作（语音回复）靠轻触反馈告知状态翻转。
+    val haptics = LocalHapticFeedback.current
     // 已经演过入场动画的消息：滚出去再回来不重播。
     val revealedMessageIds = remember { mutableStateListOf<Long>() }
     // "减少动态效果"开关：AnimatedContent 的 transitionSpec 不是 @Composable 上下文，
@@ -528,6 +532,9 @@ fun AgentPanel(
                         label = if (voiceReplies) "停止语音" else "语音回复",
                         active = voiceReplies
                     ) {
+                        // 开关型操作给一次轻触反馈：与设置页的开关、手风琴一致，
+                        // 用户不看字也知道状态翻过去了。
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         voiceReplies = !voiceReplies
                         if (!voiceReplies) replySpeech.stop()
                     }
@@ -598,6 +605,9 @@ fun AgentPanel(
                             ) {
                                 MessageBubble(
                                     message = message,
+                                    // 标注跟随这一条消息自己的来路：
+                                    // 云端规划失败改用本机汇总时，这条就该写"本机"。
+                                    modeLabel = bubbleModeLabel(message.mode, isPrivate),
                                     onConfirm = { onConfirmAction(message.id) },
                                     onCancel = { onCancelAction(message.id) }
                                 )
@@ -887,7 +897,8 @@ fun AgentPanel(
                 ) {
                     BasicText(
                         text = "受控操作：单步动作需逐条确认；多步任务需先批准计划，执行中可暂停或取消，不会自动提交表单。",
-                        style = Type.micro.copy(color = colors.textTertiary, lineHeight = 13.sp)
+                        // 这是承诺条款，不是角标：走 caption 档才读得下去。
+                        style = Type.caption.copy(color = colors.textTertiary)
                     )
                 }
                 // 审计行与会话行：出现/消失都带高度过渡，输入框不会被顶来顶去。
@@ -902,10 +913,7 @@ fun AgentPanel(
                         Spacer(Modifier.height(Space.xxs))
                         BasicText(
                             text = "审计 ${agent.audit.size} 条 · 仅本机内存，清除对话或退出时删除",
-                            style = Type.micro.copy(
-                                color = colors.textTertiary,
-                                lineHeight = 13.sp
-                            )
+                            style = Type.caption.copy(color = colors.textTertiary)
                         )
                     }
                 }
@@ -924,10 +932,7 @@ fun AgentPanel(
                                 if (agent.recordingMacro) append(" · 正在录制宏")
                                 append("（不后台运行）")
                             },
-                            style = Type.micro.copy(
-                                color = colors.textTertiary,
-                                lineHeight = 13.sp
-                            )
+                            style = Type.caption.copy(color = colors.textTertiary)
                         )
                     }
                 }
@@ -1136,7 +1141,9 @@ private fun PlanCard(
                 BasicText(
                     text = "${plan.steps.size} 步 · " +
                         "${if (plan.source == AgentMode.Cloud) "云端规划" else "本地规划"}",
-                    style = Type.micro.copy(color = colors.textTertiary)
+                    // 卡片副信息走 caption 档：micro 是留给角标数字的，
+                    // 9sp 排一行元信息几乎读不出来。
+                    style = Type.caption.copy(color = colors.textTertiary)
                 )
             }
             // 状态徽标：待批准→执行中→已完成，颜色交叉过渡而不是瞬时换色。
@@ -1273,7 +1280,7 @@ private fun PlanCard(
                     Spacer(Modifier.height(Space.xs))
                     BasicText(
                         text = "批准后按顺序执行；点击可能跳转或提交表单，填写不会自动提交。",
-                        style = Type.micro.copy(color = colors.textTertiary, lineHeight = 13.sp)
+                        style = Type.caption.copy(color = colors.textTertiary)
                     )
                 }
                 AgentPlanStatus.Running -> {
@@ -1347,7 +1354,7 @@ private fun ReportCard(
                 )
                 BasicText(
                     text = "${report.sources.size} 个来源 · ${report.mode.label}整理 · 全部带引用",
-                    style = Type.micro.copy(color = colors.textTertiary)
+                    style = Type.caption.copy(color = colors.textTertiary)
                 )
             }
             Box(
@@ -1373,7 +1380,7 @@ private fun ReportCard(
             Spacer(Modifier.height(Space.xs))
             BasicText(
                 text = report.note,
-                style = Type.micro.copy(color = colors.textTertiary, lineHeight = 13.sp)
+                style = Type.caption.copy(color = colors.textTertiary)
             )
         }
         Spacer(Modifier.height(Space.sm))
@@ -1423,30 +1430,33 @@ private fun ReportCard(
         Spacer(Modifier.height(Space.sm))
         report.sources.forEach { source ->
             val credibility = ResearchEngine.assessSource(source.url, source.title, source.charCount)
+            val sourceInteraction = remember { MutableInteractionSource() }
             BasicText(
                 text = "[${source.id}] ${source.title} · ${source.host}" +
                     " · 可信度 ${credibility.label} ${credibility.score}" +
                     (if (source.isPrivate) " · 隐私" else ""),
-                style = Type.micro.copy(color = colors.textTertiary),
+                style = Type.caption.copy(color = colors.textTertiary),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(Radius.xs))
                     .clickable(
+                        interactionSource = sourceInteraction,
+                        // 不用系统水波纹：来源行坐在玻璃卡上，
+                        // 水波纹会直接画在折射层上面。
+                        indication = null,
                         role = Role.Button,
                         onClickLabel = "在新标签页打开来源 ${source.id}"
                     ) { onOpenSource(source.url, source.isPrivate) }
+                    // 来源行也是能点的：没有按压反馈，用户不知道手指按到了没有。
+                    .pressScale(pressedScale = 0.97f, interactionSource = sourceInteraction)
                     .padding(vertical = Space.xxs)
             )
         }
         BasicText(
             text = "点按来源可在新标签页打开；隐私来源保持为隐私标签。",
-            style = Type.caption.copy(
-                color = colors.textTertiary,
-                fontSize = 8.sp,
-                lineHeight = 12.sp
-            ),
+            style = Type.caption.copy(color = colors.textTertiary),
             modifier = Modifier.padding(top = Space.xxs)
         )
         Spacer(Modifier.height(Space.sm))
@@ -1496,7 +1506,7 @@ private fun ReportCard(
         Spacer(Modifier.height(Space.xs))
         BasicText(
             text = "报告保存在本机内存，只有你选择保存位置后才会写入文件。",
-            style = Type.micro.copy(color = colors.textTertiary, lineHeight = 13.sp)
+            style = Type.caption.copy(color = colors.textTertiary)
         )
     }
 }
@@ -1560,7 +1570,7 @@ private fun CreationCard(
                 )
                 BasicText(
                     text = creation.title,
-                    style = Type.micro.copy(color = colors.textTertiary),
+                    style = Type.caption.copy(color = colors.textTertiary),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1588,7 +1598,7 @@ private fun CreationCard(
             Spacer(Modifier.height(Space.xs))
             BasicText(
                 text = creation.note,
-                style = Type.micro.copy(color = colors.textTertiary, lineHeight = 13.sp)
+                style = Type.caption.copy(color = colors.textTertiary)
             )
         }
         Spacer(Modifier.height(Space.sm))
@@ -1627,7 +1637,7 @@ private fun CreationCard(
         Spacer(Modifier.height(Space.xs))
         BasicText(
             text = "创作产物保存在本机内存，导出或分享前不会写入文件。",
-            style = Type.micro.copy(color = colors.textTertiary, lineHeight = 13.sp)
+            style = Type.caption.copy(color = colors.textTertiary)
         )
     }
 }
@@ -1635,6 +1645,7 @@ private fun CreationCard(
 @Composable
 private fun MessageBubble(
     message: AgentMessage,
+    modeLabel: String,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -1699,8 +1710,13 @@ private fun MessageBubble(
                 enter = fadeIn(animationSpec = captionSpec)
             ) {
                 BasicText(
-                    text = "${message.mode.label} · 只读",
-                    style = Type.micro.copy(color = colors.textTertiary),
+                    // 措辞跟右上角徽标同源（"本机"/"云端"/"本地"），
+                    // 但取值看这一条消息自己的来路：
+                    // 云端失败改用本机汇总的那一条必须写"本机"。
+                    text = "$modeLabel · 只读",
+                    // 标注是承诺，不是角标：走 caption 档并用次级色，
+                    // 9sp 的三级色在玻璃上几乎读不出来。
+                    style = Type.caption.copy(color = colors.textSecondary),
                     modifier = Modifier.padding(start = Space.xs, top = Space.xxs)
                 )
             }
@@ -1829,7 +1845,7 @@ private fun ActionCard(
         }
         BasicText(
             text = "仅执行此一步，不会自动连续操作",
-            style = Type.micro.copy(color = colors.textTertiary),
+            style = Type.caption.copy(color = colors.textTertiary),
             modifier = Modifier.padding(start = Space.xs, top = Space.xxs)
         )
     }
@@ -1988,6 +2004,20 @@ private fun rememberBreath(active: Boolean): Float {
         }
     }
     return breath.value
+}
+
+/**
+ * 气泡下方的"来路"标注。
+ *
+ * 面板右上角的徽标按面板整体状态显示（隐私标签一律"本机"），
+ * 气泡则按这一条消息真正的处理位置显示：
+ * 云端规划失败改用本机汇总的那一条，就该写"本机"而不是"云端"。
+ * 两种说法混在一起会让用户分不清哪条消息真的出过本机。
+ */
+private fun bubbleModeLabel(mode: AgentMode, isPrivate: Boolean): String = when {
+    mode == AgentMode.Cloud -> "云端"
+    isPrivate -> "本机"
+    else -> "本地"
 }
 
 /**

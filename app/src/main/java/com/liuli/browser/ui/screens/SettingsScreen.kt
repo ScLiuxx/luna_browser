@@ -1225,6 +1225,9 @@ private fun ConfirmRevokeDialog(
             tint = colors.glassTintStrong.copy(alpha = 0.96f),
             blurRadius = 0.dp,
             lensHeight = 0.dp,
+            // 与隐私说明同一个面板质感：背后没有可折射的内容，
+            // 内阴影给出的厚度才让它像一块玻璃而不是灰卡片。
+            innerShadow = true,
             shadow = true
         ) {
             Column(Modifier.padding(Space.xl)) {
@@ -1279,9 +1282,12 @@ private fun ConfirmClearDialog(
                     indication = null
                 ) { },
             shape = RoundedCornerShape(Radius.xl),
-            tint = colors.glassTintStrong.copy(alpha = 0.94f),
+            tint = colors.glassTintStrong.copy(alpha = 0.96f),
             blurRadius = 0.dp,
             lensHeight = 0.dp,
+            // 与隐私说明同一个面板质感：背后没有可折射的内容，
+            // 内阴影给出的厚度才让它像一块玻璃而不是灰卡片。
+            innerShadow = true,
             shadow = true
         ) {
             Column(Modifier.padding(Space.xl)) {

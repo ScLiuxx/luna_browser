@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -30,9 +31,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastCoerceAtMost
 import androidx.compose.ui.util.lerp
 import com.kyant.backdrop.Backdrop
@@ -49,6 +50,7 @@ import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.MotionSpec
+import com.liuli.browser.ui.theme.Type
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -82,6 +84,9 @@ fun LiquidButton(
     }
     // 按钮本体也参与按压回弹：玻璃件形变之外，整块再缩一点，手感更"实"。
     val interaction = remember { MutableInteractionSource() }
+    // 禁用时不接手势：按钮推不动，玻璃却还在跟着手指弯、指下还在发亮，
+    // 用户会以为它能点。液态跟随只在真正可点时才有。
+    val liquidActive = isInteractive && enabled
 
     Row(
         modifier
@@ -95,7 +100,7 @@ fun LiquidButton(
                         lens(12f.dp.toPx(), 24f.dp.toPx(), chromaticAberration = true)
                     }
                 },
-                layerBlock = if (isInteractive) {
+                layerBlock = if (liquidActive) {
                     {
                         val width = size.width
                         val heightPx = size.height
@@ -158,7 +163,7 @@ fun LiquidButton(
             )
             .pressScale(pressedScale = 0.95f, interactionSource = interaction)
             .then(
-                if (isInteractive) {
+                if (liquidActive) {
                     Modifier
                         .then(interactiveHighlight.modifier)
                         .then(interactiveHighlight.gestureModifier)
@@ -198,26 +203,26 @@ fun LiquidIconButton(
     // 选中态的颜色用插值过渡，而不是啪地换色：
     // 工具栏按钮被选中时，玻璃底色与图标一起渐变过去。
     val tint by animateColorAsState(
-        targetValue = if (selected) {
-            colors.accent.copy(alpha = if (colors.isDark) 0.30f else 0.20f)
-        } else {
-            colors.glassTint.copy(alpha = if (colors.isDark) 0.42f else 0.50f)
+        targetValue = when {
+            !enabled -> colors.glassTint.copy(alpha = if (colors.isDark) 0.26f else 0.32f)
+            selected -> colors.accent.copy(alpha = if (colors.isDark) 0.30f else 0.20f)
+            else -> colors.glassTint.copy(alpha = if (colors.isDark) 0.42f else 0.50f)
         },
         animationSpec = MotionSpec.color(),
         label = "liquid-icon-button-tint"
     )
     val glyphTint by animateColorAsState(
-        targetValue = if (selected) {
-            colors.accent
-        } else if (enabled) {
-            colors.textPrimary
-        } else {
-            colors.textTertiary.copy(alpha = 0.4f)
+        targetValue = when {
+            !enabled -> colors.textTertiary
+            selected -> colors.accent
+            else -> colors.textPrimary
         },
         animationSpec = MotionSpec.color(),
         label = "liquid-icon-button-glyph-tint"
     )
     val interaction = remember { MutableInteractionSource() }
+    // 禁用时不接手势：玻璃不该跟着手指弯，也不该在指下发亮。
+    val liquidActive = enabled
 
     Box(
         modifier
@@ -232,24 +237,28 @@ fun LiquidIconButton(
                         lens(10f.dp.toPx(), 18f.dp.toPx(), chromaticAberration = true)
                     }
                 },
-                layerBlock = {
-                    val width = this.size.width
-                    val height = this.size.height
-                    val progress = interactiveHighlight.pressProgress
-                    val scale = lerp(1f, 1f + 5f.dp.toPx() / height, progress)
-                    val maxOffset = this.size.minDimension
-                    val initialDerivative = 0.05f
-                    val offset = interactiveHighlight.offset
-                    translationX = maxOffset * tanh(initialDerivative * offset.x / maxOffset)
-                    translationY = maxOffset * tanh(initialDerivative * offset.y / maxOffset)
-                    val maxDragScale = 5f.dp.toPx() / height
-                    val angle = atan2(offset.y, offset.x)
-                    scaleX = scale + maxDragScale *
-                        abs(cos(angle) * offset.x / this.size.maxDimension) *
-                        (width / height).fastCoerceAtMost(1f)
-                    scaleY = scale + maxDragScale *
-                        abs(sin(angle) * offset.y / this.size.maxDimension) *
-                        (height / width).fastCoerceAtMost(1f)
+                layerBlock = if (liquidActive) {
+                    {
+                        val width = this.size.width
+                        val height = this.size.height
+                        val progress = interactiveHighlight.pressProgress
+                        val scale = lerp(1f, 1f + 5f.dp.toPx() / height, progress)
+                        val maxOffset = this.size.minDimension
+                        val initialDerivative = 0.05f
+                        val offset = interactiveHighlight.offset
+                        translationX = maxOffset * tanh(initialDerivative * offset.x / maxOffset)
+                        translationY = maxOffset * tanh(initialDerivative * offset.y / maxOffset)
+                        val maxDragScale = 5f.dp.toPx() / height
+                        val angle = atan2(offset.y, offset.x)
+                        scaleX = scale + maxDragScale *
+                            abs(cos(angle) * offset.x / this.size.maxDimension) *
+                            (width / height).fastCoerceAtMost(1f)
+                        scaleY = scale + maxDragScale *
+                            abs(sin(angle) * offset.y / this.size.maxDimension) *
+                            (height / width).fastCoerceAtMost(1f)
+                    }
+                } else {
+                    null
                 },
                 highlight = {
                     // 同上：按下时高光增强。
@@ -282,8 +291,15 @@ fun LiquidIconButton(
                 onClick = onClick
             )
             .pressScale(pressedScale = 0.90f, interactionSource = interaction)
-            .then(interactiveHighlight.modifier)
-            .then(interactiveHighlight.gestureModifier),
+            .then(
+                if (liquidActive) {
+                    Modifier
+                        .then(interactiveHighlight.modifier)
+                        .then(interactiveHighlight.gestureModifier)
+                } else {
+                    Modifier
+                }
+            ),
         contentAlignment = Alignment.Center
     ) {
         GlyphIcon(
@@ -306,12 +322,27 @@ fun LiquidTextAction(
     contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp)
 ) {
     val colors = LocalLiuliColors.current
+    // 禁用态在这里一并处理：主色铺底与白字都会把"不可用"这件事藏起来。
+    // 撤掉主色、文字转灰，禁用态一眼能认出来。
+    val labelTint = when {
+        !enabled -> colors.textTertiary
+        accent -> Color.White
+        else -> colors.textPrimary
+    }
+    // 禁用时不再铺主色，但玻璃底座还在：按钮不能凭空消失。
+    val useAccent = accent && enabled
     LiquidButton(
         onClick = onClick,
         backdrop = backdrop,
         modifier = modifier,
-        tint = if (accent) colors.accent else Color.Unspecified,
-        surfaceColor = if (accent) Color.Unspecified else colors.glassTint,
+        tint = if (useAccent) colors.accent else Color.Unspecified,
+        surfaceColor = when {
+            useAccent -> Color.Unspecified
+            // 禁用时底座一起退下去：光把字变灰，玻璃还是满亮的，
+            // 按钮看上去仍然"在等人点"。
+            !enabled -> colors.glassTint.copy(alpha = colors.glassTint.alpha * 0.55f)
+            else -> colors.glassTint
+        },
         enabled = enabled,
         contentPadding = contentPadding,
         contentDescription = label
@@ -319,16 +350,15 @@ fun LiquidTextAction(
         if (glyph != null) {
             GlyphIcon(
                 glyph = glyph,
-                tint = if (accent) Color.White else colors.textPrimary,
+                tint = labelTint,
                 size = 18.dp
             )
         }
-        androidx.compose.foundation.text.BasicText(
+        BasicText(
             text = label,
-            style = androidx.compose.ui.text.TextStyle(
-                color = if (accent) Color.White else colors.textPrimary,
-                fontSize = 14.sp,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
+            style = Type.body.copy(
+                color = labelTint,
+                fontWeight = FontWeight.Medium
             )
         )
     }
