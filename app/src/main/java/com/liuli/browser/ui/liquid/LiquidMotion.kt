@@ -3,11 +3,9 @@ package com.liuli.browser.ui.liquid
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.MutatorMutex
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -34,10 +32,7 @@ import com.kyant.backdrop.asComposeShader
 import com.kyant.backdrop.isRuntimeShaderSupported
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 
 /**
  * Pointer-driven specular highlight from AndroidLiquidGlass's InteractiveHighlight.
@@ -171,20 +166,20 @@ half4 main(float2 coord) {
 }
 
 /**
- * Spring-driven value used by the glass toggle, slider and bottom tabs.
- * This is the same damped drag model used by the AndroidLiquidGlass catalog.
+ * 按压形变与甩动速度的驱动器，供开关、滑块与底栏共用。
+ *
+ * 它只管"手指按下去时玻璃怎么形变"与"手指甩得多快"，
+ * **不管控件的位置**：位置由各控件自己用普通状态直接写，
+ * 拖拽期间 1:1 跟手，松手后的归位才由控件自己的弹簧负责。
+ *
+ * 早先这个类还兼管数值动画，于是每个指针事件都要起一个协程去同步
+ * Animatable，上百个协程互相打断，控件明显滞后于手指。
+ * 那套做法已被废弃，不要在这里把位置重新接回来。
  */
 class DampedDragAnimation(
     private val animationScope: CoroutineScope,
-    val initialValue: Float,
-    val valueRange: ClosedRange<Float>,
-    val visibilityThreshold: Float,
     val initialScale: Float,
     val pressedScale: Float,
-    /** 数值动画的阻尼比；默认临界阻尼（不过冲），液态场景可传入更小的值。 */
-    val valueDampingRatio: Float = 1f,
-    /** 数值动画的刚度。 */
-    val valueStiffness: Float = 1000f,
     /**
      * 是否响应系统的"减少动态效果"。
      * 开启后弹簧不过冲、收得更快，液滴不再有甩出去的过冲感。
@@ -194,17 +189,6 @@ class DampedDragAnimation(
     val onDragStopped: DampedDragAnimation.() -> Unit,
     val onDrag: DampedDragAnimation.(size: IntSize, dragAmount: Offset) -> Unit,
 ) {
-    private val valueAnimationSpec = if (reducedMotion) {
-        // 减少动态效果：临界阻尼 + 高刚度，快而稳，不产生过冲。
-        spring(dampingRatio = 1f, stiffness = 2000f, visibilityThreshold = visibilityThreshold)
-    } else {
-        spring(
-            dampingRatio = valueDampingRatio,
-            stiffness = valueStiffness,
-            visibilityThreshold = visibilityThreshold
-        )
-    }
-    private val velocityAnimationSpec = spring(0.5f, 300f, visibilityThreshold * 10f)
     private val pressProgressAnimationSpec = spring(1f, 1000f, 0.001f)
     private val scaleXAnimationSpec = if (reducedMotion) {
         spring(1f, 800f, 0.001f)
@@ -217,16 +201,12 @@ class DampedDragAnimation(
         spring(0.7f, 250f, 0.001f)
     }
 
-    private val valueAnimation = Animatable(initialValue, visibilityThreshold)
-    private val velocityAnimation = Animatable(0f, 5f)
     private val pressProgressAnimation = Animatable(0f, 0.001f)
     private val scaleXAnimation = Animatable(initialScale, 0.001f)
     private val scaleYAnimation = Animatable(initialScale, 0.001f)
 
-    private val mutatorMutex = MutatorMutex()
-    private val velocityTracker = VelocityTracker()
-    // 手指速度单独跟踪：数值动画的速度说的是"自己动得多快"，
-    // 甩动手感需要的是"手指甩得多快"，两者不是一回事。
+    // 手指速度单独跟踪：它说的是"手指甩得多快"，
+    // 与控件自己动得多快不是一回事。
     private val pointerVelocityTracker = VelocityTracker()
 
     /**
@@ -236,14 +216,9 @@ class DampedDragAnimation(
     var pointerVelocity: Float = 0f
         private set
 
-    val value: Float get() = valueAnimation.value
-    val progress: Float
-        get() = (value - valueRange.start) / (valueRange.endInclusive - valueRange.start)
-    val targetValue: Float get() = valueAnimation.targetValue
     val pressProgress: Float get() = pressProgressAnimation.value
     val scaleX: Float get() = scaleXAnimation.value
     val scaleY: Float get() = scaleYAnimation.value
-    val velocity: Float get() = velocityAnimation.value
 
     val modifier: Modifier = Modifier.pointerInput(Unit) {
         inspectDragGestures(
@@ -270,7 +245,6 @@ class DampedDragAnimation(
     }
 
     fun press() {
-        velocityTracker.resetTracking()
         animationScope.launch {
             launch { pressProgressAnimation.animateTo(1f, pressProgressAnimationSpec) }
             launch { scaleXAnimation.animateTo(pressedScale, scaleXAnimationSpec) }
@@ -280,76 +254,12 @@ class DampedDragAnimation(
 
     fun release() {
         animationScope.launch {
+            // 先等一帧再回弹：按下时形变刚起，回得太快会与手指形成对抗。
             withFrameNanos { }
-            if (value != targetValue) {
-                val threshold = (valueRange.endInclusive - valueRange.start) * 0.025f
-                snapshotFlow { valueAnimation.value }
-                    .filter { abs(it - valueAnimation.targetValue) < threshold }
-                    .first()
-            }
             launch { pressProgressAnimation.animateTo(0f, pressProgressAnimationSpec) }
             launch { scaleXAnimation.animateTo(initialScale, scaleXAnimationSpec) }
             launch { scaleYAnimation.animateTo(initialScale, scaleYAnimationSpec) }
         }
-    }
-
-    fun updateValue(value: Float) {
-        val targetValue = value.coerceIn(valueRange)
-        animationScope.launch {
-            launch { valueAnimation.animateTo(targetValue, valueAnimationSpec) { updateVelocity() } }
-        }
-    }
-
-    /**
-     * 直接跳到目标值，不走弹簧。
-     * 拖拽过程中必须用它，否则拇指会落后于手指半拍。
-     */
-    fun snapValue(value: Float) {
-        val targetValue = value.coerceIn(valueRange)
-        animationScope.launch {
-            valueAnimation.snapTo(targetValue)
-        }
-    }
-
-    /**
-     * 上报拖拽速度（value 单位/秒）。
-     * 液滴据此在运动方向上拉伸，停手后自然回弹。
-     */
-    fun reportDragVelocity(dragVelocity: Float) {
-        animationScope.launch {
-            velocityAnimation.animateTo(dragVelocity, velocityAnimationSpec)
-        }
-    }
-
-    /**
-     * 弹到目标值。
-     * [initialVelocity] 用于甩动：松手时把手指的速度交给弹簧，
-     * 液滴会带着惯性继续走，狠甩比轻推落得更远。
-     */
-    fun animateToValue(value: Float, initialVelocity: Float = 0f) {
-        animationScope.launch {
-            mutatorMutex.mutate {
-                press()
-                val targetValue = value.coerceIn(valueRange)
-                launch {
-                    valueAnimation.animateTo(targetValue, valueAnimationSpec, initialVelocity)
-                }
-                if (velocity != 0f) {
-                    launch { velocityAnimation.animateTo(0f, velocityAnimationSpec) }
-                }
-                release()
-            }
-        }
-    }
-
-    private fun updateVelocity() {
-        velocityTracker.addPosition(
-            System.nanoTime() / 1_000_000L,
-            Offset(value, 0f)
-        )
-        val targetVelocity =
-            velocityTracker.calculateVelocity().x / (valueRange.endInclusive - valueRange.start)
-        animationScope.launch { velocityAnimation.animateTo(targetVelocity, velocityAnimationSpec) }
     }
 }
 

@@ -198,9 +198,6 @@ fun LiquidToggle(
     val dampedDragAnimation = remember(animationScope) {
         DampedDragAnimation(
             animationScope = animationScope,
-            initialValue = thumbState.floatValue,
-            valueRange = 0f..1f,
-            visibilityThreshold = 0.001f,
             initialScale = 1f,
             // 按下时拇指鼓成一颗液滴：1.25 倍刚好看得见形变，
             // 又不会胀到比轨道还高（1.5 倍会顶出轨道，看着像穿模）。

@@ -306,16 +306,8 @@ fun LiquidDock(
         val dampedDragAnimation = remember(animationScope, reduced, tabWidth) {
             DampedDragAnimation(
                 animationScope = animationScope,
-                initialValue = selectedIndex.toFloat(),
-                // 值域两端各留一点余量：越界时液滴能被拽出去一点，
-                // 松手再弹回来，而不是硬邦邦地卡在边界上。
-                valueRange = -overscrollValue..(maxValue + overscrollValue),
-                visibilityThreshold = 0.001f,
                 initialScale = 1f,
                 pressedScale = 78f / 56f,
-                // 液滴甩到目标位置时允许轻微过冲，而不是直落到位。
-                valueDampingRatio = 0.62f,
-                valueStiffness = 700f,
                 reducedMotion = reduced,
                 onDragStarted = {
                     // 抓住液滴时从它当前所在的位置接着走，避免跳一下。
@@ -375,7 +367,6 @@ fun LiquidDock(
                     // 两段连起来，液滴从头到尾都是"活的"。
                     val fingerVelocity = pointerVelocity / tabWidth * if (isLtr) 1f else -1f
                     dropletVelocity.floatValue = fingerVelocity
-                    reportDragVelocity(fingerVelocity)
                     // 跨过标签分界时给一次轻触：拖动过程中能感知到自己滑过了几个。
                     val crossed = raw.fastRoundToInt().fastCoerceIn(0, lastIndex)
                     if (crossed != hapticIndexState.value) {

@@ -207,9 +207,6 @@ fun LiquidSlider(
         val dampedDragAnimation = remember(animationScope) {
             DampedDragAnimation(
                 animationScope = animationScope,
-                initialValue = value(),
-                valueRange = valueRange,
-                visibilityThreshold = visibilityThreshold,
                 initialScale = 1f,
                 // 按下时拇指鼓成一颗液滴：1.2 倍刚好看得出形变，
                 // 又不会胀到把两边的刻度整个盖住。
