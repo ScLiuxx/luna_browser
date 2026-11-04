@@ -794,7 +794,10 @@ fun AgentPanel(
                                 exit = fadeOut(animationSpec = fadeOutSpec) +
                                     shrinkVertically(animationSpec = expandSpec)
                             ) {
-                                ThinkingRow()
+                                ThinkingRow(
+                                    phase = agent.currentPhase?.label,
+                                    onStop = { agent.cancelCurrent() }
+                                )
                             }
                         }
                     }
@@ -2458,9 +2461,15 @@ private fun ActionButton(
  * "减少动态效果"开启时退化为静态图标。
  */
 @Composable
-private fun ThinkingRow() {
+private fun ThinkingRow(
+    /** 控制器给出的当前阶段；为空时给一句笼统的提示。 */
+    phase: String?,
+    /** 停止本次请求。 */
+    onStop: () -> Unit
+) {
     val colors = LocalLiuliColors.current
     val reduced = reduceMotion
+    val haptics = LocalHapticFeedback.current
     // 三点波纹：用无限循环的相位偏移错开，模拟依次点亮的节奏。
     val wave = remember { Animatable(0f) }
     LaunchedEffect(reduced) {
@@ -2478,7 +2487,7 @@ private fun ThinkingRow() {
             }
         }
     }
-    val phase = wave.value
+    val wavePhase = wave.value
     // 已等待的秒数：这一行是用户等待时唯一盯着的东西，
     // 只给一句"正在…"的话，分不清它是在跑还是已经卡住了。
     var seconds by remember { mutableStateOf(0) }
@@ -2490,17 +2499,19 @@ private fun ThinkingRow() {
     }
 
     Row(
-        Modifier.padding(start = Space.xs, top = Space.sm, bottom = Space.xs),
+        Modifier.padding(start = Space.xs, top = Space.sm, bottom = Space.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
         GlyphIcon(
             glyph = Glyph.Sparkle,
-            tint = colors.accent.copy(alpha = 0.55f + 0.45f * phase),
+            tint = colors.accent.copy(alpha = 0.55f + 0.45f * wavePhase),
             size = 13.dp
         )
         Spacer(Modifier.width(Space.xs))
         BasicText(
-            text = "正在读取页面或与页面交互…",
+            // 阶段由控制器给出：它此刻真正在做什么，
+            // 比一句笼统的"正在处理…"更能让人放心。
+            text = phase ?: "正在处理…",
             style = Type.label.copy(color = colors.textTertiary)
         )
         Spacer(Modifier.width(Space.xs))
@@ -2516,7 +2527,7 @@ private fun ThinkingRow() {
         ) {
             repeat(3) { index ->
                 // 每个点落后前一个 1/3 个周期，形成从左到右的流动感。
-                val offset = (phase - index / 3f).let { if (it < 0f) it + 1f else it }
+                val offset = (wavePhase - index / 3f).let { if (it < 0f) it + 1f else it }
                 val dotAlpha = 0.25f + 0.75f * (1f - offset)
                 val dotScale = 0.72f + 0.42f * (1f - offset)
                 Box(
@@ -2531,6 +2542,41 @@ private fun ThinkingRow() {
                         .background(colors.accent)
                 )
             }
+        }
+        Spacer(Modifier.width(Space.sm))
+        // 停止：等待时用户唯一需要的就是"我不要它继续了"。
+        // 此前只有"清空整段对话"与"等它跑完"两条路，
+        // 前者代价太大（已生成的回答与引用全没了），后者让人干等。
+        val stopInteraction = remember { MutableInteractionSource() }
+        val stopPressed by stopInteraction.collectIsPressedAsState()
+        val stopTint by animateColorAsState(
+            targetValue = if (stopPressed) colors.textSecondary else colors.textTertiary,
+            animationSpec = MotionSpec.color(Motion.Quick),
+            label = "agent-stop-tint"
+        )
+        Row(
+            Modifier
+                .heightIn(min = Dimens.minTouch)
+                .clip(RoundedCornerShape(Radius.pill))
+                .clickable(
+                    interactionSource = stopInteraction,
+                    indication = null,
+                    role = Role.Button,
+                    onClickLabel = "停止本次请求"
+                ) {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onStop()
+                }
+                .pressScale(pressedScale = 0.92f, interactionSource = stopInteraction)
+                .padding(horizontal = Space.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.xxs)
+        ) {
+            GlyphIcon(Glyph.Close, stopTint, size = 11.dp)
+            BasicText(
+                text = "停止",
+                style = Type.micro.copy(color = stopTint)
+            )
         }
     }
 }

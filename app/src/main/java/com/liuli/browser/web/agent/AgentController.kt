@@ -82,6 +82,23 @@ enum class AgentPlanStatus {
     Cancelled
 }
 
+/**
+ * 一次请求当前处在哪个阶段。
+ *
+ * 面板上那一行"正在思考"是用户等待时唯一盯着的东西，
+ * 只给一句"正在…"的话，用户分不清它是在跑还是已经卡住了。
+ * 把阶段暴露出来，界面才能说出它此刻真正在做的事。
+ */
+enum class AgentPhase(val label: String) {
+    Reading("正在读取页面"),
+    Local("正在本机处理"),
+    Cloud("正在与云端模型对话"),
+    Planning("正在生成执行计划"),
+    Acting("正在与页面交互"),
+    Researching("正在调研多个页面"),
+    Creating("正在整理创作素材")
+}
+
 enum class AgentPlanCommand {
     Approve,
     Pause,
@@ -181,6 +198,13 @@ class AgentController(
     var busy by mutableStateOf(false)
         private set
 
+    /**
+     * 当前请求所处的阶段，供面板显示"此刻在做什么"。
+     * 为空表示没有进行中的请求。
+     */
+    var currentPhase by mutableStateOf<AgentPhase?>(null)
+        private set
+
     /** 最近一次云端规划或验证失败的原因，供设置页展示。 */
     var lastCloudFailure by mutableStateOf<String?>(null)
         private set
@@ -212,7 +236,34 @@ class AgentController(
         plan = null
         pauseRequested = false
         busy = false
+        currentPhase = null
         lastCloudFailure = null
+    }
+
+    /**
+     * 中止当前这次请求，但保留已有的对话。
+     *
+     * 此前只有两条路：等它跑完，或者清空整段对话重来。
+     * 后者代价太大（已生成的回答与引用全没了），
+     * 用户遇到一个卡住的问题时没有中间选项。
+     *
+     * 中止后补一条说明，让用户知道是"被停下的"而不是"出错了"。
+     */
+    fun cancelCurrent() {
+        if (!busy) return
+        // 正在跑计划时走计划自己的取消路径：
+        // 它会把计划状态改成"已取消"并记一条审计，
+        // 直接掐协程的话，计划卡会永远停在"执行中"。
+        val runningPlan = plan?.takeIf { it.status == AgentPlanStatus.Running }
+        if (runningPlan != null) {
+            cancelPlan()
+            return
+        }
+        job?.cancel()
+        job = null
+        busy = false
+        currentPhase = null
+        addReply("已停止本次请求。", AgentMode.Local)
     }
 
     /** 当前页面的站点策略，供 Agent 面板展示。 */
@@ -249,6 +300,7 @@ class AgentController(
         cancelPendingProposals()
         messages.add(AgentMessage(nextId++, AgentMessageRole.User, input))
         busy = true
+        currentPhase = AgentPhase.Reading
         job = scope.launch {
             try {
                 val view = webView
@@ -295,6 +347,7 @@ class AgentController(
                 }
                 // P4.1 调研是只读任务：只收集已加载标签页的正文，不点击、不跳转。
                 if (isResearchRequest(input)) {
+                    currentPhase = AgentPhase.Researching
                     runResearch(
                         goal = input,
                         activeSnapshot = snapshot,
@@ -316,6 +369,7 @@ class AgentController(
                 addReply("Agent 处理时遇到问题：${error.message ?: "未知错误"}", AgentMode.Local)
             } finally {
                 busy = false
+                currentPhase = null
             }
         }
     }
@@ -368,6 +422,7 @@ class AgentController(
         messages[index] = message.copy(actionStatus = AgentActionStatus.Running)
         cancelPendingProposals()
         busy = true
+        currentPhase = AgentPhase.Acting
         job = scope.launch {
             try {
                 val result = withTimeoutOrNull(ACTION_TIMEOUT_MS) {
@@ -423,6 +478,7 @@ class AgentController(
                 addReply("执行失败：${error.message ?: "未知错误"}", AgentMode.Local)
             } finally {
                 busy = false
+                currentPhase = null
             }
         }
     }
@@ -556,6 +612,7 @@ class AgentController(
         )
         addReply("任务已取消，后续步骤不会再执行。", AgentMode.Local)
         busy = false
+        currentPhase = null
     }
 
     private fun startPlan(webView: WebView, tabId: Long) {
@@ -598,12 +655,14 @@ class AgentController(
                 failPlan("任务执行异常：${error.message ?: "未知错误"}")
             } finally {
                 busy = false
+                currentPhase = null
             }
         }
     }
 
     private suspend fun runPlan(webView: WebView, tabId: Long) {
         var current = plan ?: return
+        currentPhase = AgentPhase.Acting
         while (current.currentStep < current.steps.size) {
             if (pauseRequested) {
                 plan = current.copy(status = AgentPlanStatus.Paused)
@@ -898,6 +957,7 @@ class AgentController(
 
         if (settings.agentActionsEnabled) {
             if (cloudReady(isPrivate) && (looksLikePlanRequest(input) || looksLikeTaskRequest(input))) {
+                currentPhase = AgentPhase.Planning
                 val cloudResult = runCatching { requestCloudPlan(snapshot, input) }
                 val cloudPlan = cloudResult.getOrNull()
                 if (cloudPlan != null) {
@@ -931,6 +991,7 @@ class AgentController(
         if (isPrivate && settings.agentCloudEnabled) {
             note = "隐私标签仅在本机处理，本次回答没有离开设备。"
         } else if (cloudReady(isPrivate)) {
+            currentPhase = AgentPhase.Cloud
             val result = runCatching { requestCloud(snapshot, instruction) }
             val answer = result.getOrNull()
             if (!answer.isNullOrBlank()) {
@@ -981,6 +1042,7 @@ class AgentController(
         val host = hostOf(snapshot.url)
         var note: String? = null
         if (cloudReady(isPrivate)) {
+            currentPhase = AgentPhase.Creating
             val result = runCatching { requestCloudCreation(request) }
             val cloud = result.getOrNull()
             if (cloud != null) {
@@ -1553,6 +1615,7 @@ class AgentController(
         val host = hostOf(snapshot.url)
         when {
             isAuditRequest(input) -> {
+                currentPhase = AgentPhase.Local
                 runAudit(host, activePage)
                 return true
             }
