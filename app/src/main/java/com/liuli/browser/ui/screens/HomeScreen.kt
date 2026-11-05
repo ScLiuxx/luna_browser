@@ -349,12 +349,13 @@ fun HomeScreen(
                         // 其余三档的入口本来就摆在明处（右上角的按钮、底栏、侧栏），
                         // 菜单只是个快捷方式，为它常年挂一行提示是 clutter。
                         //
-                        // 隐私模式更要写清楚：空白样式没有别处标着它是隐私的，
-                        // 球的下面总得有一句话说明这是什么。
+                        // 隐私模式写在这一行里而不是另起一行：
+                        // 空白样式下没有别处标着它是隐私的，
+                        // 但两行字会把头部撑高，与其它三档对不齐。
                         if (!showHeaderText) {
                             Spacer(Modifier.height(Space.xxs))
                             BasicText(
-                                text = if (isPrivate) "隐私标签" else "长按打开菜单",
+                                text = if (isPrivate) "隐私标签 · 长按打开菜单" else "长按打开菜单",
                                 style = Type.caption.copy(
                                     color = if (isPrivate) colors.accentSecondary else colors.textTertiary
                                 ),

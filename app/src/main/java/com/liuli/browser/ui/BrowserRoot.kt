@@ -466,6 +466,12 @@ fun BrowserRoot(
     // 中间会隔一帧：菜单刚展开的那一帧底栏还在原地，用户一点就跳走。
     var homeGlobalMenuOpen by remember { mutableStateOf(false) }
     val globalMenuAnchor = remember { GlassPopupAnchor() }
+    // 菜单项按下后要执行的动作。
+    //
+    // 不在点击时直接切屏：面板这时还在缩回锚点的路上，
+    // 切过去的话它会浮在新屏上再缩回去，看着像两块玻璃叠在一起。
+    // 改成等浮层彻底收起再执行。
+    var pendingMenuAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     // 离开首页时顺手复位：菜单里点"标签页"会直接切屏，
     // 回到首页时不该还记着上一次开着菜单。
     LaunchedEffect(screen) {
@@ -1002,30 +1008,38 @@ fun BrowserRoot(
             visible = homeGlobalMenuOpen,
             onDismissRequest = { homeGlobalMenuOpen = false },
             backdrop = auroraBackdrop,
-            shape = GlassShape.squircle(Radius.lg)
+            shape = GlassShape.squircle(Radius.lg),
+            // 面板缩回锚点之后才执行菜单项：
+            // 两者同时发生的话，面板会浮在新屏上再缩回去。
+            onExitFinished = {
+                pendingMenuAction?.let { action ->
+                    pendingMenuAction = null
+                    action()
+                }
+            }
         ) {
             GlassPopupItem(
                 glyph = Glyph.Tabs,
                 label = "标签页",
                 onClick = {
+                    pendingMenuAction = { openTabs() }
                     homeGlobalMenuOpen = false
-                    openTabs()
                 }
             )
             GlassPopupItem(
                 glyph = Glyph.Bookmark,
                 label = "书签与历史",
                 onClick = {
+                    pendingMenuAction = { openLibrary() }
                     homeGlobalMenuOpen = false
-                    openLibrary()
                 }
             )
             GlassPopupItem(
                 glyph = Glyph.Settings,
                 label = "设置",
                 onClick = {
+                    pendingMenuAction = { openSettings() }
                     homeGlobalMenuOpen = false
-                    openSettings()
                 }
             )
         }

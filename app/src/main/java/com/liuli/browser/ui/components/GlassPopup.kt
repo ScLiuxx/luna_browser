@@ -32,6 +32,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -116,6 +117,9 @@ fun Modifier.glassPopupAnchor(anchor: GlassPopupAnchor): Modifier =
  *   坐标没登记上之前浮层不会展开：不知道该从哪儿长出来，展开也只是凭空一坨。
  * @param visible 是否展开。
  * @param onDismissRequest 点浮层外部或按返回键时回调。
+ * @param onExitFinished 退场动画走完时回调。
+ *   菜单项要在"浮层收起之后"才切屏：两者同时发生的话，
+ *   面板会缩回锚点的这几百毫秒里浮在新屏上。
  * @param backdrop 采样的图层。必须传**调用方所在窗口**的那份 LayerBackdrop
  *   （例如 `LiuliApp` 里 `rememberLayerBackdrop()` 出来、传给各页面的 `auroraBackdrop`）。
  *   这里不自己 `rememberLayerBackdrop()`：自建的那份只能录到浮层自己画的东西，
@@ -133,11 +137,14 @@ fun GlassPopup(
     shape: Shape = GlassShape.squircle(Radius.lg),
     minWidth: Dp = 220.dp,
     maxWidth: Dp = 320.dp,
+    onExitFinished: () -> Unit = {},
     content: @Composable ColumnScope.() -> Unit
 ) {
     val colors = LocalLiuliColors.current
     val reduced = reduceMotion
     val density = LocalDensity.current
+    // 回调每次重组都是新的一份，直接捕获会把第一帧的那个永远记着。
+    val exitCallback = rememberUpdatedState(onExitFinished)
 
     // 浮层内容区在窗口里的原点：锚点给的是窗口坐标，
     // 这里也要换算成窗口坐标，两者相减才是内容区内的偏移量。
@@ -168,9 +175,15 @@ fun GlassPopup(
         } else {
             // 退场用补间而不是弹簧：弹簧在消失时会回弹一下，像是不舍得走，
             // 关闭动作要干脆。
+            // 首次组合时 visible 本来就是 false，这一支也会走：
+            // 那时面板从没展开过，不该通知外面"退场结束了"。
+            val wasShowing = showing
             progress.animateTo(0f, animationSpec = exitSpec)
             showing = false
             panelSize = null
+            // 面板彻底收起之后才通知外面：
+            // 外面若在这之前切屏，面板会浮在新屏上再缩回去。
+            if (wasShowing) exitCallback.value()
         }
     }
 
