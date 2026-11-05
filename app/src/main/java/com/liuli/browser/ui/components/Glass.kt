@@ -37,6 +37,7 @@ import com.kyant.backdrop.isRenderEffectSupported
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.RoundedRectangularShape
+import com.liuli.browser.ui.liquid.GlassEdgeStyle
 import com.liuli.browser.ui.liquid.InteractiveHighlight
 import com.liuli.browser.ui.liquid.LiquidIconButton
 import com.liuli.browser.ui.liquid.LiquidTextAction
@@ -77,6 +78,15 @@ fun GlassSurface(
     onClick: (() -> Unit)? = null,
     /** 是否描出边缘。玻璃件没有轮廓会整个融进背景，深色下尤其明显。 */
     edgeStroke: Boolean = true,
+    /**
+     * 边缘光的样式。
+     *
+     * 玻璃的边不该是一圈等宽的线：等宽描边看上去像贴了一条边，
+     * 而玻璃是有厚度的，边缘应当被光照出方向。
+     * 这里用对向双光源——一侧主光、一侧弱副光——
+     * 玻璃于是有了"哪边朝光"的知觉。
+     */
+    edgeStyle: GlassEdgeStyle = GlassEdgeStyle(),
     /** 是否画内阴影。有内阴影的玻璃才像一块有厚度的板，而不是一层贴图。 */
     innerShadow: Boolean = false,
     content: @Composable BoxScope.() -> Unit = {}
@@ -175,7 +185,10 @@ fun GlassSurface(
                     null
                 },
                 highlight = if (highlight) {
-                    { Highlight.Default.copy(alpha = if (colors.isDark) 0.72f else 0.9f) }
+                    // 边缘光取代等宽描边：描边每一处都一样亮，
+                    // 玻璃看上去是平的；换成对向双光源后，
+                    // 朝光的一侧亮、背光的一侧暗，边缘才有厚度和方向。
+                    { edgeStyle.toHighlight(alpha = if (colors.isDark) 0.72f else 0.9f) }
                 } else {
                     null
                 },

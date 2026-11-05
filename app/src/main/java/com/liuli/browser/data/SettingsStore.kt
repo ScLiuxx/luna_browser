@@ -45,6 +45,95 @@ enum class SearchEngine(
     }
 }
 
+/**
+ * 地址栏位置。
+ *
+ * 浏览器最个人化的一条轴：地址栏是浏览器的入口，
+ * 放在顶部（传统）、底部（拇指区）、还是与工具栏分离（各占一头），
+ * 差别比主题色大得多。
+ */
+enum class AddressBarPosition(val id: String, val label: String) {
+    Top("top", "顶部"),
+    Bottom("bottom", "底部"),
+    Split("split", "分离");
+
+    companion object {
+        fun fromId(id: String?): AddressBarPosition =
+            entries.firstOrNull { it.id == id } ?: Top
+    }
+}
+
+/**
+ * 起始页样式。
+ *
+ * 空白页这一档把功能全藏进手势后面（配合长按 logo 的全局菜单），
+ * 首屏只剩地址栏——适合把浏览器当纯工具用的人。
+ */
+enum class StartPageStyle(val id: String, val label: String) {
+    Brand("brand", "品牌"),
+    Shortcuts("shortcuts", "快捷"),
+    Classic("classic", "经典"),
+    Blank("blank", "空白");
+
+    companion object {
+        fun fromId(id: String?): StartPageStyle =
+            entries.firstOrNull { it.id == id } ?: Brand
+    }
+}
+
+/**
+ * 思考等级。
+ *
+ * 对应模型侧"要不要先想再答"：关掉时直答，适合查个术语；
+ * 调高时模型会先规划再回答，慢但更准。
+ */
+enum class AgentThinkingLevel(val id: String, val label: String) {
+    Off("off", "关闭"),
+    Low("low", "低"),
+    Medium("medium", "中"),
+    High("high", "高");
+
+    companion object {
+        fun fromId(id: String?): AgentThinkingLevel =
+            entries.firstOrNull { it.id == id } ?: Medium
+    }
+}
+
+/**
+ * 计划模式。
+ *
+ * 关闭时单步直做；总是时任何多步任务都先出计划再执行；
+ * 自动时由模型自己判断该不该出计划。
+ */
+enum class AgentPlanMode(val id: String, val label: String) {
+    Off("off", "关闭"),
+    Auto("auto", "自动"),
+    Always("always", "总是");
+
+    companion object {
+        fun fromId(id: String?): AgentPlanMode =
+            entries.firstOrNull { it.id == id } ?: Auto
+    }
+}
+
+/**
+ * 权限模式。
+ *
+ * 只读：Agent 只能看，不能碰页面；
+ * 逐次确认：每个有副作用的动作都要用户点头；
+ * 低风险自动：滚动、翻页这类动作不再逐条问。
+ */
+enum class AgentPermissionMode(val id: String, val label: String) {
+    ReadOnly("readonly", "只读"),
+    Ask("ask", "逐次确认"),
+    LowRiskAuto("low_risk_auto", "低风险自动");
+
+    companion object {
+        fun fromId(id: String?): AgentPermissionMode =
+            entries.firstOrNull { it.id == id } ?: Ask
+    }
+}
+
 class SettingsStore(context: Context) {
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -114,6 +203,40 @@ class SettingsStore(context: Context) {
     var agentApiKey by mutableStateOf("")
         private set
 
+    var addressBarPosition by mutableStateOf(
+        AddressBarPosition.fromId(prefs.getString(KEY_ADDRESS_BAR_POSITION, null))
+    )
+        private set
+
+    var startPageStyle by mutableStateOf(
+        StartPageStyle.fromId(prefs.getString(KEY_START_PAGE, null))
+    )
+        private set
+
+    var agentThinkingLevel by mutableStateOf(
+        AgentThinkingLevel.fromId(prefs.getString(KEY_AGENT_THINKING, null))
+    )
+        private set
+
+    var agentPlanMode by mutableStateOf(
+        AgentPlanMode.fromId(prefs.getString(KEY_AGENT_PLAN_MODE, null))
+    )
+        private set
+
+    var agentPermissionMode by mutableStateOf(
+        AgentPermissionMode.fromId(prefs.getString(KEY_AGENT_PERMISSION, null))
+    )
+        private set
+
+    /**
+     * 长对话自动压缩历史。
+     *
+     * 关掉时对话会一直涨，模型上下文迟早溢出；
+     * 开着则超过阈值时把早期消息压成一段摘要。
+     */
+    var agentAutoCompact by mutableStateOf(prefs.getBoolean(KEY_AGENT_COMPACT, true))
+        private set
+
     val darkModeOption: DarkModeOption
         get() = when (darkMode) {
             1 -> DarkModeOption.Light
@@ -153,6 +276,12 @@ class SettingsStore(context: Context) {
         agentEndpoint = DEFAULT_AGENT_ENDPOINT
         agentModel = DEFAULT_AGENT_MODEL
         agentApiKey = ""
+        addressBarPosition = AddressBarPosition.Top
+        startPageStyle = StartPageStyle.Brand
+        agentThinkingLevel = AgentThinkingLevel.Medium
+        agentPlanMode = AgentPlanMode.Auto
+        agentPermissionMode = AgentPermissionMode.Ask
+        agentAutoCompact = true
     }
 
     fun updateDarkMode(value: Int) {
@@ -249,6 +378,36 @@ class SettingsStore(context: Context) {
         agentApiKey = value.trim().take(300)
     }
 
+    fun updateAddressBarPosition(value: AddressBarPosition) {
+        addressBarPosition = value
+        prefs.edit().putString(KEY_ADDRESS_BAR_POSITION, value.id).apply()
+    }
+
+    fun updateStartPageStyle(value: StartPageStyle) {
+        startPageStyle = value
+        prefs.edit().putString(KEY_START_PAGE, value.id).apply()
+    }
+
+    fun updateAgentThinkingLevel(value: AgentThinkingLevel) {
+        agentThinkingLevel = value
+        prefs.edit().putString(KEY_AGENT_THINKING, value.id).apply()
+    }
+
+    fun updateAgentPlanMode(value: AgentPlanMode) {
+        agentPlanMode = value
+        prefs.edit().putString(KEY_AGENT_PLAN_MODE, value.id).apply()
+    }
+
+    fun updateAgentPermissionMode(value: AgentPermissionMode) {
+        agentPermissionMode = value
+        prefs.edit().putString(KEY_AGENT_PERMISSION, value.id).apply()
+    }
+
+    fun updateAgentAutoCompact(value: Boolean) {
+        agentAutoCompact = value
+        prefs.edit().putBoolean(KEY_AGENT_COMPACT, agentAutoCompact).apply()
+    }
+
     private fun defaultMaxTabs(context: Context): Int {
         val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
         return if (manager?.isLowRamDevice == true) 4 else 8
@@ -275,6 +434,12 @@ class SettingsStore(context: Context) {
         private const val KEY_AGENT_CLOUD = "agent_cloud_enabled"
         private const val KEY_AGENT_ENDPOINT = "agent_endpoint"
         private const val KEY_AGENT_MODEL = "agent_model"
+        private const val KEY_ADDRESS_BAR_POSITION = "address_bar_position"
+        private const val KEY_START_PAGE = "start_page_style"
+        private const val KEY_AGENT_THINKING = "agent_thinking_level"
+        private const val KEY_AGENT_PLAN_MODE = "agent_plan_mode"
+        private const val KEY_AGENT_PERMISSION = "agent_permission_mode"
+        private const val KEY_AGENT_COMPACT = "agent_auto_compact"
 
         const val DEFAULT_AGENT_ENDPOINT = "https://api.openai.com/v1"
         const val DEFAULT_AGENT_MODEL = "gpt-4o-mini"
