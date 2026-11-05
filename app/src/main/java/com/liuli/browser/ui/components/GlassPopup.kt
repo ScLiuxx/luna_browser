@@ -257,7 +257,7 @@ fun GlassPopup(
                 if (showing && anchorRect != null) {
                     // 量尺寸之前没有完整落位，就先贴着锚点放。
                     // 反正那一帧是透明的，位置对不对都看不出来。
-                    val placement = layout ?: fallbackPlacement(anchorRect, contentOrigin)
+                    val placement = layout ?: fallbackPlacement(anchorRect, contentOrigin, gap)
                     GlassSurface(
                         backdrop = backdrop,
                         shape = shape,
@@ -268,9 +268,28 @@ fun GlassPopup(
                                 val p = progress.value
                                 alpha = p.coerceIn(0f, 1f)
                                 if (!reduced) {
-                                    // 缩放原点落在锚点上：面板从按钮那里"长出来"，
-                                    // 而不是从自己的中心缩放。
-                                    transformOrigin = TransformOrigin(placement.originX, placement.originY)
+                                    // 缩放原点落在锚点与面板相接的那一点：
+                                    // 面板看上去是从按钮里长出来的，而不是从自己的中心缩放。
+                                    //
+                                    // 原点按**实际量到的尺寸**实时算，不写死在落位结果里：
+                                    // 量尺寸那一帧的临时落位与最终落位差一道缝，
+                                    // 写死的原点会在两帧之间跳一下，面板"弹"出来。
+                                    val connectX = (anchorRect.left + anchorRect.right) / 2f
+                                    val connectY = if (placement.above) anchorRect.top else anchorRect.bottom
+                                    val panelLeft = contentOrigin.x + placement.left
+                                    val panelTop = contentOrigin.y + placement.top
+                                    transformOrigin = TransformOrigin(
+                                        if (size.width > 0f) {
+                                            ((connectX - panelLeft) / size.width).coerceIn(0f, 1f)
+                                        } else {
+                                            0.5f
+                                        },
+                                        if (size.height > 0f) {
+                                            ((connectY - panelTop) / size.height).coerceIn(0f, 1f)
+                                        } else {
+                                            0f
+                                        }
+                                    )
                                     val scale = 0.88f + 0.12f * p
                                     scaleX = scale
                                     scaleY = scale
@@ -377,33 +396,31 @@ fun GlassPopupItem(
 /**
  * 浮层的落位结果。
  *
+ * 缩放原点不在这里给：它要按面板**实际量到的尺寸**算，
+ * 而落位算出来时尺寸还不知道。放在绘制时算才准。
+ *
  * @param left 面板左边缘相对浮层内容区左边缘的偏移（px）。
  * @param top 面板上边缘相对浮层内容区上边缘的偏移（px）。
- * @param originX 锚点在面板内的归一化横坐标，用作缩放原点。
- * @param originY 锚点在面板内的归一化纵坐标，用作缩放原点。
  * @param above 面板是否翻到了锚点上方。
  */
 private class PopupLayout(
     val left: Float,
     val top: Float,
-    val originX: Float,
-    val originY: Float,
     val above: Boolean
 )
 
 /**
- * 量尺寸之前的临时落位：贴着锚点左下角。
+ * 量尺寸之前的临时落位：贴着锚点下方。
  *
  * 面板要先被组合上才量得到自己的尺寸，而落位又依赖尺寸——
- * 这一帧只有等式的一头。临时位置随便给一个就行：
- * 那一帧面板是透明的（展开进度还是 0），用户看不见它在哪儿。
+ * 这一帧只有等式的一头。临时位置按最终落位的规则给：
+ * 同样的锚点、同样的缝隙，这样缩放原点在两帧之间不会跳，
+ * 面板不会在展开时"弹"一下。
  */
-private fun fallbackPlacement(anchorRect: Rect, contentOrigin: Offset): PopupLayout =
+private fun fallbackPlacement(anchorRect: Rect, contentOrigin: Offset, gap: Float): PopupLayout =
     PopupLayout(
         left = anchorRect.left - contentOrigin.x,
-        top = anchorRect.bottom - contentOrigin.y,
-        originX = 0f,
-        originY = 0f,
+        top = anchorRect.bottom + gap - contentOrigin.y,
         above = false
     )
 
@@ -450,13 +467,5 @@ private fun computePopupLayout(
         else -> anchorLeft
     }.coerceIn(0f, (areaWidth - panelWidth).coerceAtLeast(0f))
 
-    // 缩放原点取锚点与面板相接的那条边：面板看上去是从按钮里长出来的。
-    val connectX = (anchorRect.left + anchorRect.right) / 2f
-    val connectY = if (above) anchorRect.top else anchorRect.bottom
-    val panelLeft = contentOrigin.x + left
-    val panelTop = contentOrigin.y + top
-    val originX = if (panelWidth > 0f) (connectX - panelLeft) / panelWidth else 0.5f
-    val originY = if (panelHeight > 0f) (connectY - panelTop) / panelHeight else 0f
-
-    return PopupLayout(left, top, originX, originY, above)
+    return PopupLayout(left, top, above)
 }

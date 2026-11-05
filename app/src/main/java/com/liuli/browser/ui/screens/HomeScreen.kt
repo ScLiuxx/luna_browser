@@ -319,26 +319,49 @@ fun HomeScreen(
                     // 把标签页、书签、设置这些不常按但需要够到的入口收在一处。
                     // 轻按不做任何事——球只是标记，抢走它的单击会让人误以为它能点。
                     //
-                    // 球单独占一个 Box，不与提示文字同列：
-                    // "长按打开菜单"比球宽得多，两者同在一列里，
-                    // 列宽就会被文字撑开、球被推到中间去，与下方的搜索框左缘错开。
-                    Box(
-                        Modifier
-                            .size(if (isTablet) 42.dp else 36.dp)
-                            .clip(CircleShape)
-                            .combinedClickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onLongClickLabel = "打开全局菜单",
-                                onLongClick = {
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    onOpenGlobalMenu()
-                                },
-                                onClick = { }
+                    // 球与提示文字同处一列，但这一列**左对齐**：
+                    // "长按打开菜单"比球宽得多，列宽由文字决定，
+                    // 若居中对齐球就会被推到中间去，与下方的搜索框左缘错开；
+                    // 左对齐则球始终贴着内容的左缘，文字从球的左边起排。
+                    val orbSize = if (isTablet) 42.dp else 36.dp
+                    Column(horizontalAlignment = Alignment.Start) {
+                        Box(
+                            Modifier
+                                .size(orbSize)
+                                .clip(CircleShape)
+                                .combinedClickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onLongClickLabel = "打开全局菜单",
+                                    onLongClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onOpenGlobalMenu()
+                                    },
+                                    onClick = { }
+                                )
+                                .glassPopupAnchor(globalMenuAnchor)
+                        ) {
+                            BrandOrb(size = orbSize)
+                        }
+                        // 只有空白样式需要这一行。
+                        // 那一档的卖点就是"功能都藏在手势后面"，
+                        // 入口在屏幕上完全看不见，长按球能唤出菜单就得说出来。
+                        // 其余三档的入口本来就摆在明处（右上角的按钮、底栏、侧栏），
+                        // 菜单只是个快捷方式，为它常年挂一行提示是 clutter。
+                        //
+                        // 隐私模式更要写清楚：空白样式没有别处标着它是隐私的，
+                        // 球的下面总得有一句话说明这是什么。
+                        if (!showHeaderText) {
+                            Spacer(Modifier.height(Space.xxs))
+                            BasicText(
+                                text = if (isPrivate) "隐私标签" else "长按打开菜单",
+                                style = Type.caption.copy(
+                                    color = if (isPrivate) colors.accentSecondary else colors.textTertiary
+                                ),
+                                maxLines = 1,
+                                softWrap = false
                             )
-                            .glassPopupAnchor(globalMenuAnchor)
-                    ) {
-                        BrandOrb(size = if (isTablet) 42.dp else 36.dp)
+                        }
                     }
                     Spacer(Modifier.width(Space.md))
                     if (showHeaderText) {
@@ -366,15 +389,6 @@ fun HomeScreen(
                     } else {
                         // 空白样式下没有标题行，重量要靠品牌球自己撑住，
                         // 否则整个头部会向左塌陷，球紧贴屏幕边缘。
-                        //
-                        // 顺带给一句提示：这一档没有书签与设置按钮，
-                        // 全局菜单成了唯一的入口，不说用户根本想不到长按这个球。
-                        // 提示放在球的右侧而不是下方——
-                        // 它比球宽得多，放下方会把球挤得与搜索框左缘错开。
-                        BasicText(
-                            text = "长按打开菜单",
-                            style = Type.micro.copy(color = colors.textTertiary)
-                        )
                         Spacer(Modifier.weight(1f))
                     }
                     if (!isTablet && showHeaderButtons) {

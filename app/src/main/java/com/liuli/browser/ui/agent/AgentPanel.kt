@@ -1361,7 +1361,10 @@ private fun PermissionConfirmRow(
     ) {
         BasicText(
             text = "切到「${target.label}」后，滚动这类动作不再逐次确认；点击、填写与表单提交仍需你点头。",
-            style = Type.caption.copy(color = colors.textSecondary)
+            // 用次要正文而不是 10sp 的角标字号：
+            // 角标字号读一整句话太吃力，而这句话是安全边界说明，
+            // 恰恰是用户最该看清的一行。
+            style = Type.bodySmall.copy(color = colors.textSecondary)
         )
         Spacer(Modifier.height(Space.sm))
         Row(
