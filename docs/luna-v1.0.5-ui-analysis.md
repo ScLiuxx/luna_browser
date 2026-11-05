@@ -4,13 +4,25 @@
 
 分析手段：APK 解包 → jadx 反编译 → 内嵌 AGSL shader 提取 → `resources.arsc` 结构扫描 → 第三方库（Backdrop / kyant shapes）反编译对照。
 
+> **本文经过一次返工。** 第一版全部结论来自 DEX 字符串表与常量池——
+> 那只能证明「某个类存在过」，证明不了「它在跑」。
+> 第二版重新完整反编译（14421 个类）并逐个核实调用点，
+> **发现第一版的头号结论（玻璃的 20 个参数对象）整组是死代码**，
+> 另有两处手势结论也不准确。详见 §2 与 §3 开头的更正说明。
+
 ---
 
 ## 0. 一句话结论
 
-它和我们是**同一个玻璃设计语言的两代实现**：同样基于 Kyant 的 **Backdrop** 库，但它的玻璃材质体系比本项目完整一个量级——**它把「玻璃」拆成了 20 个可组合的参数对象**（材质/模糊/折射/描边/高光/阴影/内阴影/反射/混合…），并给每个控件配了具名的预设；而本项目是「一个 GlassSurface + 几个固定数值」。
+它和我们是**同一个玻璃设计语言的两代实现**：同样基于 Kyant 的 **Backdrop** 库，但它的玻璃材质体系比本项目完整一个量级——
+**它把「玻璃」拆成「一层模糊 + 最多三层按九种模式混合的颜色 + 一道带倒角法线的双光源描边」**，
+并给每个控件配了实机调校过的具名预设；而本项目是「一个 GlassSurface + 一层等 alpha 的色纱」。
 
-另外，它在**手势上做得比本项目宽**：工具栏横滑切标签、下拉刷新、长按 logo 开全局菜单、长按标签按钮、网页双击、长按菜单按钮——本项目只有「地址栏收起 + 边缘滑动前进后退」两项。
+真正值得抄的是**那九种混色模式**（§2.2）：本项目的玻璃只有一层白纱，
+背后内容的层次被洗成一片牛奶；换成混色之后玻璃反而更「透」。
+
+另外，它在**手势上做得比本项目宽**：长按 logo、长按标签按钮、长按菜单按钮、
+工具栏横滑切标签、下拉刷新、退出再按一次确认——本项目只有「地址栏收起 + 边缘滑动前进后退」两项。
 
 ---
 
@@ -31,91 +43,120 @@
 
 ## 2. 最有价值的发现：玻璃材质参数体系
 
-它把「液态玻璃」拆成了一组**可组合的参数对象**，每个都有具名默认值。这是本项目最该借鉴的部分。
+> **本节的第一版结论是错的，已按真实源码更正。**
+> 第一版是从 DEX 字符串表里读出的类名与默认参数，据此断言「Luna 把玻璃拆成了 20 个可组合的参数对象」。
+> 拿到反编译源码后一查：`GlassStyle` 与它的八个子参数类（`GlassBlend` / `GlassBlur` / `GlassEdge` / `GlassLight` / …）
+> **全是死代码**——R8 把它们的字段全部内联删除，只剩下 `equals` / `hashCode` / `toString` 三个方法，
+> 而这三个方法里比较的全是常量自比（`Float.compare(0.5f, 0.5f) == 0`）。
+> `GlassBlend` 那套「分段曲线压暗」的算法在 APK 里**根本不存在**。
+>
+> 教训：DEX 字符串表能证明「某个类存在过」，不能证明「它在跑」。
+> 下面记的是**真正在渲染管线上的**那一套。
 
-从 DEX 字符串表里提取出的完整默认参数：
+### 2.1 真正在跑的参数类
 
-```
-GlassMaterial(blurRadius=…)                    // 材质总入口
-GlassBlur(small=36.0, big=500.0)               // 双层模糊：小模糊 + 大模糊
-GlassRefract(ior=3.0)                          // 折射率
-GlassEdge(width=60.0, pow=4.0, thickness=80.0, reflectOffset=600.0)   // 边缘光带
-GlassLight(directionX=-0.4, directionY=0.6, directionZ=-0.8,
-           intensity=1.4, oppositeIntensity=0.8, angleRange=1.4)         // 双光源
-GlassReflect(lighten=1.0, strength=0.8)         // 反射提亮
-GlassInner(bottom=0.04, tint=…)                 // 内阴影（只压底边）
-GlassShadow(color=…)                            // 外阴影
-GlassStroke(width=…) / GlassStrokeLight(x=…)    // 描边 + 描边高光
-GlassBlend(curveA=0.5, curveB=1.0, curveC=0.0, curveD=1.0,
-           amount=0.2, saturation=2.0, brightness=0.2,
-           darker=0.0, darkerStart=0.6, darkerEnd=0.8)                  // 色彩混合曲线
-GlassBackground(saturation=0.0, brightness=0.0, burn=0.0, unShade=0.0) // 背景调制
-GlassShape(topStart=…)                          // 每角独立圆角
-GlassStyle(blend=…)
-GlassColorLayer(color=…)
-```
+活着的参数对象是这一组（字段名与默认值都能从 `toString()` 里读出来）：
 
-**它还把这套东西做成了 popup 的专用变体**——这正是本项目最缺的部分：
+| 类 | 字段 | 说明 |
+| --- | --- | --- |
+| `GlassMaterial` | `blurRadius` + 最多三层 `GlassColorLayer` | **材质总入口**：一个模糊半径 + 三层颜色 |
+| `GlassColorLayer` | `color` + `mode` | 一层颜色及其混合方式 |
+| `GlassStroke` | `width` / `bevel` / `color` + 两盏 `GlassStrokeLight` | 描边 + 两盏描边灯 |
+| `GlassStrokeLight` | `x` / `y` / `z` + `color` | 一盏描边灯的方向与颜色 |
+| `GlassShadow` | `color` / `offsetY` / `radius` | 外阴影（`dispersion` 恒为 0.5） |
+| `GlassShape` | 四角半径 + `smoothing` | 每角独立圆角 + 连续圆角插值系数 |
+| `GlassPopupFrame` / `GlassPopupSizing` / `GlassPopupVisuals` | — | popup 的框体 / 尺寸 / 视觉 |
+| `GlassAnchorSurface` / `GlassTopAppBarContext` | — | 锚定表面 / 顶栏玻璃上下文 |
 
-```
-GlassPopupAnchorElement(anchor=…)   // 锚定到触发元素
-GlassPopupFrame(rect=…)              // 弹窗框体
-GlassPopupSizing(minWidth=…)         // 尺寸策略
-GlassPopupVisuals(style=…)           // 视觉样式
-GlassAnchorSurface(backdrop=…)       // 锚定表面
-GlassTopAppBarContext(backdrop=…)    // 顶栏玻璃上下文
-```
+### 2.2 真正在跑的九种混色模式
 
-配套的具名状态（都能在 DEX 里查到）：
+这是最实的一块。它的混色不是「一层半透明的色纱」，而是**把身后的内容按九种模式重新混合一遍**：
 
 ```
-glassPopupAnchorValue       // 弹窗锚点
-glassPopupItemPress         // 弹窗项按压
-glassPopupScrollIndicator   // 弹窗滚动指示器
-glassSecondaryPopup         // 次级弹窗
-glassTransformPopup         // 变换型弹窗
-glassTransformMask          // 变换遮罩
-glassTransformStacked       // 堆叠变换
-glassCascadeVisibility      // 层叠显隐
-glassSegmentedTabContent    // 分段控件内容
-glassSmallTopBarFloat       // 小顶栏浮动
-glassTopBarFloat            // 顶栏浮动
-glassTopBarButtonFloat      // 顶栏按钮浮动
-glassTopBarButtonPress      // 顶栏按钮按压
+SrcOver(0)  PlusDarker(1)  PlusLighter(2)  SoftLight(3)  HardLight(4)
+Overlay(5)  Luminosity(6)   ColorDodge(7)   ColorBurn(8)
 ```
 
-### 对照本项目现状
-
-本项目 `components/Glass.kt` 的 `GlassSurface` 是**单一入口 + 固定数值**：
-
-```kotlin
-GlassSurface(
-    backdrop, shape, tint, blurRadius = 18.dp, lensHeight = 16.dp,
-    lensAmount = 24.dp, shadow = true, highlight = true,
-    edgeStroke = true, innerShadow = false, …
-)
-```
-
-只有 `blur / lens / vibrancy` 三个效果，**没有描边高光、没有边缘光带、没有反射、没有色彩混合曲线**。而它的 `GlassEdge(width, pow, thickness, reflectOffset)` 与 `GlassStrokeLight` 恰恰是「玻璃看起来像玻璃」的关键——本项目是靠 `glassBorder` 一圈等宽描边，边缘是平的。
-
-**可迁移的三件事**：
-
-1. **双光源边缘光**（`GlassLight` 的两盏对向灯 + `GlassEdge` 的光带宽度）取代等宽描边，玻璃才有「厚度」。
-2. **描边高光**（`GlassStrokeLight`）——描边不是一圈同色，而是一段被光源打亮的高光。
-3. **`GlassBlend` 的色彩混合曲线**（`curveA/B/C/D` + `darker/darkerStart/darkerEnd`）——玻璃压暗时不是线性乘，是分段曲线。
-
-### 内嵌 shader 是完整的（可直接抄）
-
-APK 里带了 **21 个 AGSL shader 源码**（在 `classes.dex` 的字符串表里，是 Backdrop 库内置的）。其中三个直接对应上面三个参数：
-
-- `shader_00` — 边缘光带：`in_rimEdge` / `in_lightDir` / `in_lightAmt` / `in_surface`
-- `shader_02` — 描边 + 双光源描边高光：`in_strokeBand` / `in_strokeColor` / `in_light1` / `in_light2`
-- `shader_03` — 阴影：`in_shadowOffset` / `in_shadowShape` / `in_shadowColor`
-
-`shader_00` 里有一段值得注意的实现细节（**本项目的 `drawShapeOutline` 完全没有这个**）：
+由 AGSL 着色器 `MiuixGlassColorBlend` 实现，核心是这一段：
 
 ```glsl
-// 形状的 SDF：圆角矩形 + 超椭圆（连续圆角）插值
+float3 blendLayer(float3 d, float4 layer, float mode) {
+    float3 s = layer.rgb;  float a = layer.a;
+    int m = int(mode + 0.5);
+    if (m == 1)      return clamp(d - a * (1.0 - s), 0.0, 1.0);   // plus darker：压到黑，不是压成灰
+    else if (m == 2) return clamp(d + a * s, 0.0, 1.0);            // plus lighter：叠到白，不是溢出
+    else if (m == 3) b = float3(softLightChannel(d.r, s.r), ...);  // 柔光
+    else if (m == 4) b = mix(1.0 - 2.0*(1.0-s)*(1.0-d), 2.0*s*d, step(s, 0.5));   // 强光：色层决定
+    else if (m == 5) b = mix(1.0 - 2.0*(1.0-d)*(1.0-s), 2.0*d*s, step(d, 0.5));   // 叠加：底色决定
+    else if (m == 6) b = setLum(d, lumOf(s));                       // 亮度：只取明度
+    else if (m == 7) b = min(float3(1.0), d / max(1.0 - s, 0.0001));
+    else if (m == 8) b = 1.0 - min(float3(1.0), (1.0 - d) / max(s, 0.0001));
+    else             b = s;
+    return clamp(mix(d, b, a), 0.0, 1.0);
+}
+
+half4 main(float2 coord) {
+    half4 src = child.eval(coord);
+    float a = float(src.a);
+    if (a <= 0.0) return src;
+    float3 d = float3(src.rgb) / a;      // 去掉预乘
+    d = blendLayer(d, in_blend0, in_blendMode.x);
+    if (in_blendMode.w > 1.5) d = blendLayer(d, in_blend1, in_blendMode.y);
+    if (in_blendMode.w > 2.5) d = blendLayer(d, in_blend2, in_blendMode.z);
+    return half4(half3(d * a), src.a);    // 写回时补上预乘
+}
+```
+
+两个细节值得抄：
+- **混合前要 unpremultiply**：预乘的颜色直接参与运算会算错——半透明的红与半透明的白相加，得到的不是「红加白」。
+- **`setLum` 里要把颜色拉回 0..1 而不改变明度**，否则不可分离的混合（柔光/强光）裁剪出来的色调与算出来的那个不一样。
+
+### 2.3 它的玻璃预设（数值可直接照搬）
+
+`id5.java` 里的八套材质，是实机调校过的结果：
+
+| 预设 | blur | 第 0 层 | 第 1 层 | 第 2 层 |
+| --- | --- | --- | --- | --- |
+| a | 20 | 黑 5% **PlusDarker** | 白 60% **SoftLight** | 白 40% **HardLight** |
+| b | 20 | 黑 10% **PlusDarker** | `#565656` 40% **Luminosity** | `#3F3F3F` 60% **Overlay** |
+| c / e | 60 | 黑 5% **PlusDarker** | 白 60% **SoftLight** | 白 60% **HardLight** |
+| d / f | 60 | 黑 10% **PlusDarker** | `#6C6C6C` 60% **Luminosity** | `#060606` 60% **SoftLight** |
+| g | 40 | `#F9F9F9` 20% **Overlay** | 白 70% **SoftLight** | — |
+| h | 60 | 黑 45% **Luminosity** | 黑 32% **SrcOver** | — |
+
+描边（`le5` / `bc5`）四套，`width` 恒为 0.8、`bevel` 恒为 1.2，两盏灯的方位是 `(0.2, 0.5, 0)` 与 `(0.5, 0.95, -0.5)`。
+阴影（`fe5`）两套：黑 5%、`offsetY=2`、`radius=64`；黑 5%、`offsetY=0`、`radius=24`。
+
+### 2.4 内嵌 shader：四段，其中一段是死的
+
+APK 里带了四段自绘的 AGSL（`mo4.java` 的 case 17/18/19/20）：
+
+| case | 用途 | 状态 |
+| --- | --- | --- |
+| 17 | 轮廓 SDF（含超椭圆插值）+ 描边遮罩 | **活的** |
+| 18 | 描边 bloom 高光：`in_strokeBand` / `in_light1` / `in_light2` | **活的** |
+| 19 | 边缘光带：`in_rimEdge` / `in_lightDir` / `in_lightAmt` | **死的**（`jd5.java:13` 构造后直接丢弃，全 dex 无 `in_rimEdge` 的绑定点） |
+| 20 | 投影：`in_shadowOffset` / `in_shadowShape` | 活的（`lm4.java:482` 读取） |
+
+**注意 case 19 是死的**——而它恰好是上一版分析里当作主要参考的那一段。
+真正在用的是 **case 18**：描边高光。它的法线算法与我们原先的做法不同，值得单独记：
+
+```glsl
+// 倒角法线：把点从平面上抬起来，深度由距离场决定
+float depth = smoothstep(-inner, 0.0, sdf);
+float3 point = float3(folded, -sqrt(max(inner * inner - depth * depth, 0.0)));
+// …按参考点算出法线，再按象限还原朝向
+float3 normal = normalize(point - float3(reference, 0.0));
+normal.xy *= sign(offset);
+```
+
+**它不拿轮廓的二维方向当「法线」，而是从距离场推出一个带深度的真法线**：
+越靠近轮廓，深度越浅，法线越朝侧向倾斜，像光线掠过一道被磨圆的边。
+这与「沿轮廓描一圈粗线」在数学上是两回事——前者有厚度，后者只是加粗的边。
+
+case 17 里的超椭圆 SDF 也是这段的关键：
+
+```glsl
 float sdfShape(float2 p, float2 b, float r) {
     float box = roundedBoxSdf(p, b, r);
     float minHalf = min(b.x, b.y);
@@ -125,19 +166,19 @@ float sdfShape(float2 p, float2 b, float r) {
 }
 ```
 
-`in_smoothing` 是**连续圆角**（Apple 风格「squircle」）的插值系数，0 = 正圆角，1 = 超椭圆。Backdrop 的 `lens` 用的是 `getCornerRadii`，只支持正圆角与绝对圆角——但**kyant 的 `shapes` 库本身就内置了连续圆角**（`RoundedCornerStyle.Continuous`），不必自己写 SDF。
+`in_smoothing` 是**连续圆角**（Apple 风格「squircle」）的插值系数，0 = 正圆角，1 = 超椭圆。
+Backdrop 自带的 `getCornerRadii` 只认正圆角与绝对圆角——但**kyant 的 `shapes` 库本身就内置了连续圆角**（`RoundedCornerStyle.Continuous`），形状本身不必自己写 SDF；
+不过**着色器里的距离场**若按正圆角算，四角的等距线会与真实轮廓错开一小段，边光在角上就会「浮」起来。
 
-**高光 shader 与本项目完全一致**（逐字节相同），确认两边同源：
+### 2.5 它的模糊不是 `RenderEffect.createBlurEffect`
 
-```glsl
-uniform float2 size;  layout(color) uniform half4 color;
-uniform float radius; uniform float2 position;
-half4 main(float2 coord) {
-    float dist = distance(coord, position);
-    float intensity = smoothstep(radius, radius * 0.5, dist);
-    return color * intensity;
-}
-```
+它的玻璃模糊走的是**自研的 AGSL 多 pass 高斯**（`qx1.u` → `u41`）：
+14 tap 可分离核、mip 层级 `1 << level * 13`、tile 尺寸、`LMGauss_H_d` / `LMGauss_V_d` 两段着色器串联。
+而 Backdrop 2.0.1 的 `blur()` 用的是 Compose 的 `BlurEffect`（单 pass box-blur 近似）。
+
+这条**没法照搬**——它在打包进来的 Backdrop 库里，不在本项目依赖的版本里。
+本项目的玻璃模糊与它本来就有肉眼可见的差别（后者更"奶"，前者更"透"），
+但要改就得换库或自己实现一遍 14 tap 高斯，代价与收益不成比例。
 
 ---
 
@@ -159,20 +200,51 @@ half4 main(float2 coord) {
 | 退出 | 确认 返回 再按一次 退出前确认 |
 | 标签页 | 标签页行为 新标签 关闭 反馈 |
 
-**「长按 logo」那一项特别值得学**：长按浏览器图标弹出一个全局动作面板（新建对话 / 上次对话 / 搜索 / 书签 / 下载 / 历史 / 离线页面 / 播放记录 / AI 产物）。这是把「所有功能塞进一个入口」的做法——本项目的首页有一排固定入口，图标位有限，这个方案不占常驻空间。
+> **这一节的第一版也有两处需要更正**（依据 `ur5.java` 的真实枚举）：
+>
+> **一、「长按 logo 弹出一个九项全局菜单」——不准确。**
+> 它是**一个可配置动作**：长按 logo 执行用户指定的那一个动作，
+> 而那九个词是**设置项里的候选项**（新建 AI 对话 / 上次 AI 对话 / AI 产物 / 搜索 / 书签 / 下载 / 历史 / 离线页面 / 播放记录），
+> 由用户在设置页的下拉里挑一个，默认是「上次 AI 对话」。
+> 源码：`abe.java:235-236` 存 `home_logo_click_action` 与 `home_logo_long_press_action` 两个偏好，
+> `po7.java:2305-2340` 按枚举 `switch` 分发到对应的 Activity。
+>
+> 这个设计仍然值得学：**把「所有功能塞进一个入口」**——
+> 本项目首页有一排固定入口，图标位有限，它这个方案不占常驻空间。
+> 但本项目做成了**固定的三项菜单**（标签页 / 书签与历史 / 设置）而不是可配置动作——
+> 三项固定对用户更好预测，而「可配置」在这里并不增加能力。
+>
+> **二、「工具栏横滑切标签」「网页长按 / 双击」——只有文案，没有实现证据。**
+> 开关与文案都在（`pref_key_toolbar_swipe` 默认 true、`pref_key_pull_to_refresh` 默认 true），
+> 但反编译出来的源码里找不到对应的手势实现。
+> 原因很可能是 `androidx.compose.foundation.gestures` 整包没被反编译进来——
+> **这属于「无法证伪」，不是「已确认没有」**。
+> 本项目的横滑切标签是照着文案实现的，效果上与它对得上。
 
-**「地址栏位置：顶部/底部/分离/导航栏」** 说明它把浏览器最个人化的那条轴做成了可选项，并且有「分离」这一档（本项目只有顶部一条）。
+其余几项有确凿的实现证据：
+
+| 设置项 | 实现位置 |
+| --- | --- |
+| 长按标签按钮 | `ui1.java:5232` 固定三项：新增分页 / 新建隐身分页 / 结束应用 |
+| 长按菜单按钮 | 打开当前页面的功能菜单（`ab9.java:19-70` 列了 22 个菜单项） |
+| 退出再按一次确认 | `cx8.java:227-249`：**5000ms** 窗口内再按一次才退出，文案「再按一次返回离开」 |
+| 顶栏三种形态 | `pt2.java:9` 三个独立开关的组合，不是三态枚举 |
+
+「顶栏三种形态」的准确说法是**三个开关的组合**：
+`tabStripEnabled`（水平分页列）、`compactTopBarEnabled`（顶栏紧凑模式）、`storedToolbarsPosition`（TOP/BOTTOM/SPLIT）。
+紧凑模式的语义是「在大屏幕或横向窗口中，把水平分页列放在同一行的网址列和工具列之间」——
+即**单顶栏 / 标签栏独立一行 / 标签栏与地址栏同行**三种形态。
 
 ### 本项目的手势现状
 
 | 手势 | 本项目 | 它 |
 |---|---|---|
 | 边缘滑动前进/后退 | ✓ | 未见（它有工具栏横滑切标签） |
-| 工具栏横滑切标签 | ✗ | ✓ |
-| 网页下拉刷新 | ✗ | ✓ |
-| 长按 logo 全局菜单 | ✗ | ✓ |
-| 长按标签按钮 | ✗ | ✓ |
-| 网页长按 / 双击 | ✗ | ✓ |
+| 工具栏横滑切标签 | ✓ | 有文案，开关默认开，实现未取证 |
+| 网页下拉刷新 | ✗ | 有文案，开关默认开，实现未取证 |
+| 长按 logo 全局菜单 | ✓（固定三项） | ✓（单个可配置动作） |
+| 长按标签按钮 | ✗ | ✓（固定三项） |
+| 网页长按 / 双击 | ✗ | 未见实现（双击只在播放器里） |
 | 菜单下拉甩掉 | ✓ | — |
 | 地址栏收起 | ✓ | — |
 
@@ -238,10 +310,32 @@ half4 main(float2 coord) {
 
 ## 6. 建议迁移的清单（按性价比排序）
 
-### 高：玻璃边缘光（`GlassEdge` + `GlassLight` + `GlassStrokeLight`）
-本项目现在是「一圈等宽描边」，玻璃边缘是平的。加上对向双光源的光带后，边缘才有厚度和方向感。三个 shader 源码就在 APK 里，可以直接对照实现。
+### 高：玻璃边缘光（`GlassStroke` + `GlassStrokeLight` + 倒角法线）
+本项目现在是「一圈等宽描边」，玻璃边缘是平的。加上对向双光源的光带后，边缘才有厚度和方向感。
 
-**已落地**：`ui/liquid/GlassEdge.kt`。实现走 Backdrop 的 `HighlightStyle`（公开接口，带 `createShader()` 钩子），`Highlight` 本来就沿玻璃轮廓描边并按形状裁剪，把着色器换掉即可，不必自建裁剪与混合管线。着色器自绘圆角矩形的 SDF，用梯度当表面法线，分别按主光/副光方向加权，边缘因此有方向感。
+**已落地**：`ui/liquid/GlassEdge.kt`。实现走 Backdrop 的 `HighlightStyle`（公开接口，带 `createShader()` 钩子），`Highlight` 本来就沿玻璃轮廓描边并按形状裁剪，把着色器换掉即可，不必自建裁剪与混合管线。
+
+> **本项在第二轮重做过一次**：第一版照的是 Luna 的 case 19（边缘光带 shader），
+> 而那段 shader 在 Luna v1.0.5 里**是死的**（§2.4）。
+> 真正在跑的是 case 18（描边 bloom 高光），它的法线算法与第一版不同：
+> **不拿轮廓的二维方向当「法线」，而是从距离场推出一个带深度的真法线**——
+> 越靠近轮廓法线越朝侧向倾斜，像光线掠过一道被磨圆的边。
+> 第二版按 case 18 重写了着色器，并顺带把距离场也换成支持超椭圆的版本，
+> 免得四角的光带与真实轮廓错开一小段。
+
+### 高：玻璃的九种混色模式（`GlassColorLayer` + `MiuixGlassColorBlend`）
+这是 Luna 真正在跑的材质体系的核心，也是本项目此前完全缺的一块：本项目的玻璃只有一层等 alpha 的白纱，
+背后内容的层次被洗成一片牛奶。
+
+**已落地**：`ui/liquid/GlassColorBlend.kt`。九种模式（SrcOver / PlusDarker / PlusLighter / SoftLight / HardLight / Overlay / Luminosity / ColorDodge / ColorBurn）
+由 AGSL 着色器实现，走 Backdrop 公开的 `runtimeShaderEffect()` 钩子挂进渲染效果链。
+Luna 的八套预设数值直接照搬（§2.3）。
+
+两个必须注意的实现细节：
+- **混合前 unpremultiply**：预乘的颜色直接参与运算会算错。
+- **混色要排在折射之后**：你隔着玻璃看到的是折射过的画面，着色若发生在折射之前，边缘的色会跟着折射再歪一次。
+
+已接到**地址栏**上——那是屏幕上最显眼、也最需要「看得清底下在干什么」的一块玻璃。
 
 ### 高：弹窗玻璃体系（`GlassPopup*` 六件套）
 本项目的菜单/对话框是统一 `LiquidDialog` + 纯色遮罩，没有「锚定到触发元素」的玻璃浮层。它的 `GlassPopupAnchorElement` / `GlassPopupFrame` / `GlassPopupVisuals` 是一套完整的浮层玻璃方案——菜单从按钮处「长出来」比从屏幕中央升起更贴手。
@@ -262,6 +356,11 @@ half4 main(float2 coord) {
 
 ### 中：长按 logo 全局菜单
 把首页那一排固定入口收进一个长按面板，换取首屏更干净，且不限制入口数量。
+
+> **口径更正**：Luna 的长按 logo 执行的是**一个用户可配置的动作**，
+> 那九项是设置页里的候选项，不是弹出来的菜单（§3）。
+> 本项目做的是**固定三项**的锚定型浮层（标签页 / 书签与历史 / 设置）——
+> 三项固定对用户更好预测。
 
 **已落地**：长按首页品牌球弹出锚定型玻璃浮层（标签页 / 书签与历史 / 设置）。轻按不做任何事——球只是标记，抢走它的单击会让人误以为它能点。
 

@@ -4,6 +4,7 @@ import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
+import android.os.SystemClock
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -556,12 +557,35 @@ fun BrowserRoot(
         showSharedSnapshot = false
     }
 
+    // 退出确认：再按一次返回才真的退出。
+    //
+    // 浏览器里误触返回键太常见了——一次误触就关掉整个浏览器，
+    // 用户刚开的一堆标签全没了。给一个 5 秒的二次确认窗口，
+    // 想退出的人连按两次，不想退的人什么也不会丢。
+    //
+    // 窗口取 5 秒是 Luna 的取值（`cx8.java:245`），
+    // 它的提示是 Snackbar；本项目的提示走自己的玻璃提示队列。
+    var exitArmedAt by remember { mutableStateOf<Long?>(null) }
+    val exitArmWindowMillis = 5000L
+
     BackHandler(enabled = vm.overlay == AppOverlay.None) {
-        if (vm.activeTab == null) {
-            activity.finish()
+        // 页面后退、关掉别的标签页都该立刻生效：用户明确要求了，
+        // 让他再按一次才生效是在质疑他的操作。
+        if (vm.activeTab != null && vm.handleBack()) {
+            // 已经退回去了，刚才那次「再按一次」的预备也就作废：
+            // 否则用户退到首页再退一次就真退出了，中间明明做过别的事。
+            exitArmedAt = null
             return@BackHandler
         }
-        if (!vm.handleBack()) activity.finish()
+        // 退到头了——只剩离开应用这一条路。
+        val now = SystemClock.elapsedRealtime()
+        val armed = exitArmedAt
+        if (armed != null && now - armed < exitArmWindowMillis) {
+            activity.finish()
+        } else {
+            exitArmedAt = now
+            vm.showMessage("再按一次返回离开")
+        }
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {

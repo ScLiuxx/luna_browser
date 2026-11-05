@@ -16,8 +16,10 @@ import com.kyant.backdrop.RuntimeShaderCache
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.highlight.HighlightStyle
 import com.kyant.backdrop.isRuntimeShaderSupported
+import com.kyant.shapes.RoundedCornerStyle
 import com.kyant.shapes.RoundedRectangularShape
 import kotlin.math.min
+import kotlin.math.sqrt
 
 /**
  * 玻璃边缘光。
@@ -32,14 +34,20 @@ import kotlin.math.min
  * - 边光不是一条等宽的线，而是贴着边缘、由外向内渐隐的一带，
  *   像玻璃被磨出的斜面。
  *
- * 实现走 Backdrop 的 `HighlightStyle`：`Highlight` 本来就在玻璃轮廓上
- * 描边、并按形状裁剪，把着色器换掉即可，不必自己搭一套裁剪与混合。
+ * 着色器算法来自 Luna 的 `MiBloomStrokeFilter`（描边高光那一支）：
+ * 它不直接用形状的轮廓方向当"法线"，而是**从轮廓的距离场推出一个真正的斜面法线**——
+ * 越靠近轮廓，法线越朝着侧向倾斜，像光线掠过一道被磨圆的边。
+ * 这与"沿轮廓描一圈线"在数学上是两回事：前者有厚度，后者只是加粗的边。
+ *
+ * 距离场用的是连续圆角（超椭圆）版本：形状本身是连续圆角，
+ * 而距离场若按正圆角算，四角的等距线会与真实轮廓错开一小段，
+ * 边光在角上就会"浮"起来。
  */
 @Immutable
 data class GlassEdgeStyle(
     /** 边缘光带的宽度（dp）。带越宽，玻璃的斜面越厚。 */
     val width: Dp = 3.dp,
-    /** 边缘光的柔化半径（dp）。 */
+    /** 边缘光的柔化半径（dp）。它同时决定斜面的进深。 */
     val blurRadius: Dp = 1.5.dp,
     /** 主光方向（度）。0 = 正右方，90 = 正下方（屏幕坐标，y 向下）。 */
     val lightAngle: Float = 235f,
@@ -49,10 +57,33 @@ data class GlassEdgeStyle(
     val oppositeAngle: Float = 55f,
     /** 副光强度。 */
     val oppositeIntensity: Float = 0.45f,
-    /** 光照的集中程度。越大越锐，越小越散。 */
-    val falloff: Float = 1.5f,
-    /** 边光颜色。 */
+    /**
+     * 光照的集中程度。越大越锐，越小越散。
+     *
+     * 这是指数：亮度按"光与面的夹角"的这个次方衰减。
+     */
+    val falloff: Float = 2f,
+    /**
+     * 光的进深（z 分量）。
+     *
+     * 垂直于屏幕的深度决定光"从哪个高度斜切下来"：
+     * 为 0 时光完全平行于屏幕，只照到正对着的边；
+     * 负值则光偏向观众一侧，斜面朝上的那一段会被整片照亮。
+     */
+    val lightDepth: Float = -0.4f,
+    /**
+     * 底光强度。
+     *
+     * 底光是不分方向的淡反射，只负责把玻璃的边从背景里勾出来；
+     * 方向感由两盏灯给。底光给满了，边就成了一条均匀的白线。
+     */
+    val baseIntensity: Float = 0.35f,
+    /** 底色：整条边共有的那一份底光。 */
     override val color: Color = Color.White,
+    /** 主光的颜色。 */
+    val lightColor: Color = Color.White,
+    /** 副光的颜色。 */
+    val oppositeColor: Color = Color.White,
     /** 混合方式。叠加（Plus）才是"加光"，否则只是盖一层颜色。 */
     override val blendMode: BlendMode = BlendMode.Plus
 ) : HighlightStyle {
@@ -82,19 +113,41 @@ data class GlassEdgeStyle(
         val radii = shape.edgeCornerRadii(size, layoutDirection, this)
         shader.setFloatUniform("size", size.width, size.height)
         shader.setFloatUniform("cornerRadii", radii[0], radii[1], radii[2], radii[3])
+        // 连续圆角是形状自己的属性：形状是连续圆角而距离场按正圆角算，
+        // 四角的等距线会与真实轮廓错开，边光在角上会浮起来。
+        shader.setFloatUniform("smoothing", shape.edgeSmoothing())
         // 着色器用 alpha 表达亮度，颜色本身保持不透明，
         // 否则叠加时颜色会被自己的 alpha 二次衰减。
         shader.setColorUniform("color", color.copy(alpha = 1f))
-        shader.setFloatUniform("angle1", lightAngle * DEG_TO_RAD)
-        shader.setFloatUniform("angle2", oppositeAngle * DEG_TO_RAD)
-        shader.setFloatUniform("intensity1", lightIntensity)
-        shader.setFloatUniform("intensity2", oppositeIntensity)
+        shader.setFloatUniform("baseIntensity", baseIntensity)
+        shader.setFloatUniform("light1", lightDirection(lightAngle, lightIntensity))
+        shader.setFloatUniform("light1Color", lightColor.red, lightColor.green, lightColor.blue)
+        shader.setFloatUniform("light2", lightDirection(oppositeAngle, oppositeIntensity))
+        shader.setFloatUniform("light2Color", oppositeColor.red, oppositeColor.green, oppositeColor.blue)
         shader.setFloatUniform("falloff", falloff)
         // 描边以轮廓为中心向两侧各铺一半，又被形状裁掉外侧那一半，
         // 所以形状内实际能看到的深度就是描边宽度本身。
         val visibleDepth = min(with(this) { width.toPx() }, min(size.width, size.height) / 2f)
         shader.setFloatUniform("bandWidth", visibleDepth)
+        // 斜面进深：柔化半径越大，边越"软"，法线倾斜得越缓。
+        shader.setFloatUniform("innerDepth", maxOf(with(this) { blurRadius.toPx() }, 0.5f))
         return shader
+    }
+
+    /**
+     * 光的方向向量与强度。
+     *
+     * 屏幕平面内的方位角 + 垂直于屏幕的进深。
+     * 屏幕坐标 y 向下，而 z 朝向观众，因此进深为负表示"光偏向观众一侧"。
+     * 第四个分量是强度。
+     */
+    private fun lightDirection(angle: Float, intensity: Float): FloatArray {
+        val radians = angle * DEG_TO_RAD
+        val x = kotlin.math.cos(radians)
+        val y = kotlin.math.sin(radians)
+        val length = sqrt(x * x + y * y + lightDepth * lightDepth)
+        if (length < 1e-6f) return floatArrayOf(0f, 0f, 1f, intensity)
+        return floatArrayOf(x / length, y / length, lightDepth / length, intensity)
     }
 
     companion object {
@@ -103,72 +156,135 @@ data class GlassEdgeStyle(
         /**
          * 边缘光着色器。
          *
-         * 轮廓的有向距离场（SDF）用圆角矩形求：形状是矩形加四角半径，
-         * 距离场可以解析求出，不必逐像素描边取样。
-         * 有了距离场就能同时得到两样东西：
-         * - 梯度方向 = 该点的表面法线，用来判断这一段边朝向哪盏灯；
-         * - 距离本身 = 该点离边缘多远，用来让光带从边缘往里渐隐。
-         *
-         * SDF 的辅助函数与 Backdrop 自带的高光着色器保持一致，
-         * 免得另写一套带来偏差。
+         * 三段算法：
+         * 1. **距离场**：形状的有向距离场（SDF）。
+         *    形状是矩形加四角半径，距离场可以解析求出，不必逐像素描边取样。
+         *    连续圆角则要用超椭圆插值——形状本身是连续圆角，
+         *    距离场若按正圆角算，四角会错开一小段。
+         * 2. **斜面法线**：由距离场推出一个带深度的法线。
+         *    越靠近轮廓，深度越浅，法线越朝侧向倾斜；
+         *    往里走深度变大，法线渐渐立起来正对观众。
+         *    这一步是"边缘有厚度"与"边缘只是一条粗线"的分界。
+         * 3. **两盏灯**：各自按法线与光向的夹角加权，再按次方衰减。
+         *    背光的那一段仍然看得见，只是明显更暗。
          */
         private val SHADER_SOURCE = """
             uniform float2 size;
-            uniform float4 cornerRadii;
+            uniform float4 cornerRadii;   // 左上, 右上, 右下, 左下
+            uniform float smoothing;      // 0 = 正圆角, 1 = 连续圆角
             layout(color) uniform half4 color;
-            uniform float angle1;
-            uniform float angle2;
-            uniform float intensity1;
-            uniform float intensity2;
+            uniform float4 light1;        // 方向 xyz, 强度 w
+            uniform float3 light1Color;
+            uniform float4 light2;
+            uniform float3 light2Color;
             uniform float falloff;
-            uniform float bandWidth;
+            uniform float baseIntensity;  // 底光强度
+            uniform float bandWidth;      // 光带深度（像素）
+            uniform float innerDepth;     // 斜面进深（像素）
 
-            float radiusAt(float2 coord, float4 radii) {
-                if (coord.x >= 0.0) {
-                    if (coord.y <= 0.0) return radii.y;
-                    else return radii.z;
-                } else {
-                    if (coord.y <= 0.0) return radii.x;
-                    else return radii.w;
-                }
+            // 圆角矩形的距离场，形状跨在以原点为中心的 [-b, b] 上。
+            float roundedBoxSdf(float2 p, float2 b, float r) {
+                float2 d = p - b + r;
+                return min(max(d.x, d.y), 0.0) + length(max(d, float2(0.0))) - r;
             }
 
-            float sdRoundedRect(float2 coord, float2 halfSize, float radius) {
-                float2 cornerCoord = abs(coord) - (halfSize - float2(radius));
-                float outside = length(max(cornerCoord, 0.0)) - radius;
-                float inside = min(max(cornerCoord.x, cornerCoord.y), 0.0);
-                return outside + inside;
+            // 超椭圆（连续圆角）的距离场。
+            // tile 是超椭圆的"半轴"，取自圆角半径；
+            // fit 是超椭圆在 45 度方向上的拟合系数。
+            float supercircleSdf(float2 off, float tile) {
+                float2 q = max(float2(0.0), (float2(tile) + off) / tile);
+                float hi = max(q.x, q.y);
+                float ratio = (hi == 0.0) ? 0.0 : clamp(min(q.x, q.y) / hi, 0.0, 1.0);
+                float fit = ((((-0.7391197 * ratio + 2.4034927) * ratio + -2.490732) * ratio + 0.4768709) * ratio + 0.47478476);
+                float len = length(q);
+                float distBase = (len + 1.0) - 1.0 / (1.0 - ratio * ratio * clamp(len, 0.0, 1.0) * fit);
+                return min(max(tile + off.x, tile + off.y), 0.0) + tile * (distBase - 1.0);
             }
 
-            float2 gradSdRoundedRect(float2 coord, float2 halfSize, float radius) {
-                float2 cornerCoord = abs(coord) - (halfSize - float2(radius));
-                if (cornerCoord.x >= 0.0 || cornerCoord.y >= 0.0) {
-                    return sign(coord) * normalize(max(cornerCoord, 0.0));
-                } else {
-                    float gradX = step(cornerCoord.y, cornerCoord.x);
-                    return sign(coord) * float2(gradX, 1.0 - gradX);
+            // 四角各自的半径：按所在象限取。
+            float pickRadius(float2 local, float2 b) {
+                float top = (local.x < b.x) ? cornerRadii.x : cornerRadii.y;
+                float bottom = (local.x < b.x) ? cornerRadii.w : cornerRadii.z;
+                return min((local.y < b.y) ? top : bottom, min(b.x, b.y));
+            }
+
+            float sdfShape(float2 p, float2 b, float r) {
+                float box = roundedBoxSdf(p, b, r);
+                float minHalf = min(b.x, b.y);
+                if (smoothing <= 0.001 || r < 0.5 || (minHalf - r) <= 1.0) {
+                    return box;
                 }
+                float tile = min(1.528665 * r, minHalf);
+                return mix(box, supercircleSdf(p - b, tile), smoothing);
+            }
+
+            // 轮廓的有向距离场：内部为负。
+            float silhouetteSdf(float2 local) {
+                float2 b = size * 0.5;
+                return sdfShape(abs(local - b), b, pickRadius(local, b));
+            }
+
+            // 斜面法线。
+            //
+            // 深度由距离场决定：贴着轮廓处深度最大，往里逐渐变小。
+            // 把点从平面上抬起来，抬升高度取自深度，法线就是"抬起点"与
+            // 斜面参考点之间的方向——于是轮廓附近法线朝侧向倾斜，
+            // 往里则渐渐立起来。
+            //
+            // 折叠中心取 floor(size/2)：折线落在像素边界上，
+            // 否则法线在两半之间的接缝处会跳一下。
+            float3 bevelNormal(float2 local, float2 b, float sdf, float radius, float inner) {
+                float2 offset = local - floor(b);
+                float2 folded = abs(offset);
+                float depth = smoothstep(-inner, 0.0, sdf);
+                float3 point = float3(folded, -sqrt(max(inner * inner - depth * depth, 0.0)));
+
+                float bevel = max(radius, inner);
+                float2 reference = b - bevel;
+                reference.x = min(reference.x, folded.x);
+                reference.y = min(reference.y, folded.y);
+                float2 toPoint = point.xy - reference;
+                float len = length(toPoint);
+                reference += ((len > 0.0001) ? toPoint / len : float2(0.0, 1.0)) * (bevel - inner);
+
+                // 参考点之外是平的：那里法线正对观众。
+                if (folded.x < reference.x || folded.y < reference.y) {
+                    return float3(0.0, 0.0, -1.0);
+                }
+
+                float3 normal = normalize(point - float3(reference, 0.0));
+                // 折到象限里的法线要按原象限还原朝向。
+                normal.xy *= sign(offset);
+                return normal;
+            }
+
+            // 一盏灯：按法线与光向的夹角加权，再按 falloff 次方衰减。
+            float3 rimLight(float3 normal, float4 light, float3 lightColor) {
+                float lit = clamp(dot(normal, light.xyz), 0.0, 1.0);
+                float shaped = pow(lit, falloff);
+                return lightColor * (shaped * light.w);
             }
 
             half4 main(float2 coord) {
-                float2 halfSize = size * 0.5;
-                float2 centeredCoord = coord - halfSize;
-                float radius = radiusAt(centeredCoord, cornerRadii);
-                float gradRadius = min(radius * 1.5, min(halfSize.x, halfSize.y));
-                float2 grad = gradSdRoundedRect(centeredCoord, halfSize, gradRadius);
+                float2 b = size * 0.5;
+                float radius = pickRadius(coord, b);
+                float sdf = silhouetteSdf(coord);
+                float inner = max(innerDepth, 0.5);
 
-                // 两盏灯分别从两个方向照过来，各自按法线朝向加权。
-                float2 n1 = float2(cos(angle1), sin(angle1));
-                float2 n2 = float2(cos(angle2), sin(angle2));
-                float d1 = max(dot(grad, n1), 0.0);
-                float d2 = max(dot(grad, n2), 0.0);
-                float lit = pow(d1, falloff) * intensity1 + pow(d2, falloff) * intensity2;
+                // 光带：由外向内渐隐，贴着轮廓最亮。
+                float band = smoothstep(-bandWidth, 0.0, sdf);
 
-                // 越往里越暗：这条带是玻璃的斜面，不是一条等宽的线。
-                float sd = sdRoundedRect(centeredCoord, halfSize, radius);
-                float band = smoothstep(-bandWidth, 0.0, sd);
+                float3 normal = bevelNormal(coord, b, sdf, radius, inner);
+                // 底光：一圈不分方向的淡反射，给玻璃一个"有厚度"的底子。
+                float3 rgb = color.rgb * (baseIntensity * band * band);
+                // 两盏灯：方向感由它们给，底光只负责把边勾出来。
+                rgb += rimLight(normal, light1, light1Color) * band;
+                rgb += rimLight(normal, light2, light2Color) * band;
 
-                return color * (lit * band);
+                // 着色器返回的是预乘颜色：alpha 必须与颜色同量级，
+                // 否则叠加时颜色会被自己的 alpha 裁掉。
+                float alpha = clamp(max(max(rgb.r, rgb.g), rgb.b), 0.0, 1.0);
+                return half4(half3(rgb), half(alpha));
             }
         """.trimIndent()
     }
@@ -212,4 +328,19 @@ internal fun Shape.edgeCornerRadii(
     }
     val fallback = min(size.width, size.height) / 2f
     return floatArrayOf(fallback, fallback, fallback, fallback)
+}
+
+/**
+ * 形状的连续圆角程度：0 = 正圆角，1 = 连续圆角。
+ *
+ * 距离场要按形状自己的圆角方式算，否则边光在角上会与轮廓错开。
+ * kyant 的 `RoundedCornerStyle` 只有两种取值，没有中间档，
+ * 所以这里也只有 0 与 1。
+ */
+internal fun Shape.edgeSmoothing(): Float = when {
+    this is RoundedRectangularShape -> when (style) {
+        RoundedCornerStyle.Continuous -> 1f
+        else -> 0f
+    }
+    else -> 0f
 }

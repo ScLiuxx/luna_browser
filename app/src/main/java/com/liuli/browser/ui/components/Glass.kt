@@ -36,7 +36,9 @@ import com.kyant.backdrop.isRenderEffectSupported
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.RoundedRectangularShape
+import com.liuli.browser.ui.liquid.GlassColorLayer
 import com.liuli.browser.ui.liquid.GlassEdgeStyle
+import com.liuli.browser.ui.liquid.colorBlend
 import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.liquid.InteractiveHighlight
 import com.liuli.browser.ui.liquid.LiquidIconButton
@@ -89,6 +91,17 @@ fun GlassSurface(
     edgeStyle: GlassEdgeStyle = GlassEdgeStyle(),
     /** 是否画内阴影。有内阴影的玻璃才像一块有厚度的板，而不是一层贴图。 */
     innerShadow: Boolean = false,
+    /**
+     * 混色层。
+     *
+     * 空列表时玻璃只有模糊与折射；给了层数，身后的内容会被按这些模式重新混合一遍，
+     * 亮处更亮、暗处更暗，内容的层次得以保留——
+     * 只铺一层等 alpha 的色纱会把背后的一切都洗成牛奶。
+     *
+     * 混色在折射与模糊**之后**进行：你看到的是折射后的画面，
+     * 着色得作用在那个画面上，否则边缘的色会歪掉。
+     */
+    blendLayers: List<GlassColorLayer> = emptyList(),
     content: @Composable BoxScope.() -> Unit = {}
 ) {
     val colors = LocalLiuliColors.current
@@ -143,6 +156,10 @@ fun GlassSurface(
                 effects = {
                     vibrancy()
                     if (isRenderEffectSupported()) {
+                        // 这里的**书写顺序就是生效顺序**：每加一个效果，
+                        // 它都套在已有效果的外面（Backdrop 的 chain 是"新的在外层"）。
+                        // 于是最后写的那个看到的是前面所有处理完的画面。
+                        //
                         // 模糊不能无限盖过玻璃本身的大小：模糊会把背后的图层向外撑开，
                         // 小玻璃上就会露出一圈被拉散的边，也白费一份显存。
                         // 这里只做兜底，正常尺寸的玻璃件不受影响。
@@ -154,6 +171,12 @@ fun GlassSurface(
                                 refractionAmount = lensAmount.toPx(),
                                 chromaticAberration = true
                             )
+                        }
+                        // 混色排在最后：它要作用在**折射与模糊之后**的画面上。
+                        // 你隔着玻璃看到的是被折射、被模糊过的内容，
+                        // 着色若发生在那之前，边缘的色会跟着折射再歪一次。
+                        if (blendLayers.isNotEmpty()) {
+                            colorBlend(blendLayers)
                         }
                     }
                 },
@@ -218,7 +241,12 @@ fun GlassSurface(
                     null
                 },
                 onDrawSurface = {
-                    drawRect(effectiveTint)
+                    // 混色层已经把颜色算进画面里了，这里再铺一层色纱就成了双重着色：
+                    // 背后内容的层次被洗掉，混色带来的那点对比也一并没了。
+                    // 两者只能选一个——有混色就不铺纱。
+                    if (blendLayers.isEmpty()) {
+                        drawRect(effectiveTint)
+                    }
                     // 均匀描边：没有它，深色背景上的玻璃会整个"融"进去，
                     // 轮廓消失，只剩一团模糊的色块。
                     // 描边必须跟着形状走：玻璃是圆角矩形、边框却是直角矩形的话，

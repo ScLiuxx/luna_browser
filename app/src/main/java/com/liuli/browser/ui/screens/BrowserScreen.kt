@@ -141,6 +141,7 @@ import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.liquid.GlassMaterials
 import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
@@ -701,6 +702,11 @@ fun BrowserScreen(
                 blurRadius = 22.dp,
                 lensHeight = 18.dp,
                 lensAmount = 26.dp,
+                // 地址栏是屏幕上最显眼的一块玻璃，也是最需要"看得清底下在干什么"的地方：
+                // 铺一层半透明白纱会把网页内容洗成一片奶白，
+                // 换成混色层之后，内容的明暗层次被保留下来，
+                // 玻璃反而比之前更"透"。
+                blendLayers = if (colors.isDark) GlassMaterials.Dark else GlassMaterials.Light,
                 contentPadding = PaddingValues(
                     horizontal = barPaddingH,
                     vertical = barPaddingV
