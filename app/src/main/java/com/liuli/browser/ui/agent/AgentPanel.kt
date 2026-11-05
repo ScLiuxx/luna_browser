@@ -545,6 +545,7 @@ fun AgentPanel(
                     thinkingLevel = agent.thinkingLevel,
                     planMode = agent.planMode,
                     permissionMode = agent.permissionMode,
+                    backdrop = backdrop,
                     onThinkingLevelChange = agent::updateThinkingLevel,
                     onPlanModeChange = agent::updatePlanMode,
                     onPermissionModeChange = agent::updatePermissionMode
@@ -1227,66 +1228,158 @@ private fun QuickChip(
  * 收进下拉的话，用户每次调一个维度都要先打开菜单再选，
  * 而这三个恰好是最常调的东西（尤其是权限模式）。
  *
- * 换档一律"点一下就换到下一档"而不是弹出选择列表：
- * 三个维度的档位都很少（2-4 档），循环切换比开菜单快，
+ * 思考与计划两档都是"点一下就换到下一档"：
+ * 它们的档位都很少（2-4 档），循环切换比开菜单快，
  * 而当前档位一直显示在面上，不存在"选错了看不出来"的问题。
+ *
+ * 权限不一样：**放宽到自动执行要用户点头**。
+ * 一次随手的点击不该悄悄把 Agent 的自主度调高——
+ * 权限是三个维度里唯一带安全含义的一档。
  */
 @Composable
 private fun AgentCapabilityBar(
     thinkingLevel: AgentThinkingLevel,
     planMode: AgentPlanMode,
     permissionMode: AgentPermissionMode,
+    backdrop: Backdrop,
     onThinkingLevelChange: (AgentThinkingLevel) -> Unit,
     onPlanModeChange: (AgentPlanMode) -> Unit,
     onPermissionModeChange: (AgentPermissionMode) -> Unit
 ) {
-    val colors = LocalLiuliColors.current
     val haptics = LocalHapticFeedback.current
-    Row(
+    // 待确认的权限档位：用户点了"低风险自动"但还没点头确认。
+    var pendingPermission by remember { mutableStateOf<AgentPermissionMode?>(null) }
+
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(Space.sm)
+        ) {
+            CapabilityDial(
+                title = "思考",
+                value = thinkingLevel.label,
+                // 偏离默认档（中等）就标出来：用户要能一眼看出"这一项我动过"。
+                emphasis = thinkingLevel != AgentThinkingLevel.Medium,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    val next = AgentThinkingLevel.entries[
+                        (thinkingLevel.ordinal + 1) % AgentThinkingLevel.entries.size
+                    ]
+                    onThinkingLevelChange(next)
+                }
+            )
+            CapabilityDial(
+                title = "计划",
+                value = planMode.label,
+                emphasis = planMode != AgentPlanMode.Auto,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    val next = AgentPlanMode.entries[
+                        (planMode.ordinal + 1) % AgentPlanMode.entries.size
+                    ]
+                    onPlanModeChange(next)
+                }
+            )
+            CapabilityDial(
+                title = "权限",
+                // 显示的永远是**真正生效**的那一档：
+                // 待确认的档位还没生效，显示它会让用户以为权限已经放开了。
+                value = permissionMode.label,
+                // 权限模式换到哪一档都会改变安全边界，颜色上要分得出来。
+                emphasis = permissionMode != AgentPermissionMode.Ask,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    // 确认条已经挂着的时候，这一格再点一下就是撤销这次请求：
+                    // 否则按下去毫无变化，用户会以为这格坏了。
+                    // 撤销比"再算下一档"好——用户想撤销时，
+                    // 不该被塞给他一个自己没点的档位。
+                    if (pendingPermission != null) {
+                        pendingPermission = null
+                        return@CapabilityDial
+                    }
+                    // 下一档始终从**生效中**的那一档算起：
+                    // 若从待确认的那档算，确认条一出现再点一下就会跳到"只读"，
+                    // 待确认的状态也被顺手抹掉了。
+                    val next = AgentPermissionMode.entries[
+                        (permissionMode.ordinal + 1) % AgentPermissionMode.entries.size
+                    ]
+                    if (next == AgentPermissionMode.LowRiskAuto) {
+                        // 只有"低风险自动"要确认：它是唯一一档会让 Agent
+                        // 在用户不知情时自己动手的档位。
+                        // 其余两档之间切换——哪怕是从只读放宽到逐次确认——
+                        // 每一步都还要用户点头，Agent 不会自己动。
+                        pendingPermission = next
+                    } else {
+                        onPermissionModeChange(next)
+                    }
+                }
+            )
+        }
+
+        val pending = pendingPermission
+        if (pending != null) {
+            PermissionConfirmRow(
+                target = pending,
+                backdrop = backdrop,
+                onConfirm = {
+                    pendingPermission = null
+                    onPermissionModeChange(pending)
+                },
+                onCancel = { pendingPermission = null }
+            )
+        }
+    }
+}
+
+/**
+ * 放宽权限前的确认条。
+ *
+ * 不用对话框：确认条就贴在能力条下面，用户看得见自己刚点的是哪一档，
+ * 而对话框会把整个面板盖住，反而看不清上下文。
+ *
+ * 说明文字单独一行，按钮另起一行靠右：
+ * 两者挤在同一行时，窄屏上文字会被压成三四行，
+ * 整条确认条比消息本身还高，面板被它撑得变形。
+ */
+@Composable
+private fun PermissionConfirmRow(
+    target: AgentPermissionMode,
+    backdrop: Backdrop,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val colors = LocalLiuliColors.current
+    Column(
         Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(Space.sm)
+            .padding(top = Space.sm)
+            .clip(GlassShape.squircle(Radius.sm))
+            .background(colors.accent.copy(alpha = 0.12f))
+            .padding(start = Space.md, end = Space.sm, top = Space.sm, bottom = Space.sm)
     ) {
-        CapabilityDial(
-            title = "思考",
-            value = thinkingLevel.label,
-            // 只读是最保守的一档，也是最该被看见的一档。
-            // 它一旦生效，页面上的写操作就全停了。
-            emphasis = permissionMode == AgentPermissionMode.ReadOnly,
-            onClick = {
-                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                val next = AgentThinkingLevel.entries[
-                    (thinkingLevel.ordinal + 1) % AgentThinkingLevel.entries.size
-                ]
-                onThinkingLevelChange(next)
-            }
+        BasicText(
+            text = "切到「${target.label}」后，滚动这类动作不再逐次确认；点击、填写与表单提交仍需你点头。",
+            style = Type.caption.copy(color = colors.textSecondary)
         )
-        CapabilityDial(
-            title = "计划",
-            value = planMode.label,
-            emphasis = false,
-            onClick = {
-                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                val next = AgentPlanMode.entries[
-                    (planMode.ordinal + 1) % AgentPlanMode.entries.size
-                ]
-                onPlanModeChange(next)
-            }
-        )
-        CapabilityDial(
-            title = "权限",
-            value = permissionMode.label,
-            // 权限模式换到哪一档都会改变安全边界，颜色上要分得出来。
-            emphasis = permissionMode != AgentPermissionMode.Ask,
-            onClick = {
-                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                val next = AgentPermissionMode.entries[
-                    (permissionMode.ordinal + 1) % AgentPermissionMode.entries.size
-                ]
-                onPermissionModeChange(next)
-            }
-        )
+        Spacer(Modifier.height(Space.sm))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 两个按钮都用现成的组件：它们各自会震一次，
+            // 这里不再手动补触感，否则同一次点击会震两下。
+            ActionButton(label = "取消", accent = false, onClick = onCancel)
+            Spacer(Modifier.width(Space.xs))
+            GlassPillButton(
+                label = "开启",
+                onClick = onConfirm,
+                backdrop = backdrop,
+                accent = true
+            )
+        }
     }
 }
 

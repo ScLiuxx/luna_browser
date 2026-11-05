@@ -82,6 +82,9 @@ import com.liuli.browser.data.LibraryStore
 import com.liuli.browser.data.SettingsStore
 import com.liuli.browser.ui.agent.AgentShareCard
 import com.liuli.browser.ui.components.GlassNavigationRail
+import com.liuli.browser.ui.components.GlassPopup
+import com.liuli.browser.ui.components.GlassPopupAnchor
+import com.liuli.browser.ui.components.GlassPopupItem
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.NavItem
@@ -97,6 +100,7 @@ import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Motion
 import com.liuli.browser.ui.theme.MotionSpec
+import com.liuli.browser.ui.theme.Radius
 import com.liuli.browser.web.AppOverlay
 import com.liuli.browser.web.BrowserTab
 import com.liuli.browser.web.BrowserViewModel
@@ -452,6 +456,22 @@ fun BrowserRoot(
         else -> MainScreen.Browser
     }
 
+    // 首页长按品牌球弹出的全局菜单。
+    //
+    // 浮层画在这里而不是首页里：底栏与提示都画在首页内容之上，
+    // 浮层若画在首页里，它的遮罩就盖不住它们——
+    // 遮罩铺满整屏却盖不住底栏，底栏浮在遮罩之上还会被误点跳走。
+    //
+    // 状态也只存在这一处。分成两处（首页一份、外层一份）再靠回调同步，
+    // 中间会隔一帧：菜单刚展开的那一帧底栏还在原地，用户一点就跳走。
+    var homeGlobalMenuOpen by remember { mutableStateOf(false) }
+    val globalMenuAnchor = remember { GlassPopupAnchor() }
+    // 离开首页时顺手复位：菜单里点"标签页"会直接切屏，
+    // 回到首页时不该还记着上一次开着菜单。
+    LaunchedEffect(screen) {
+        if (screen != MainScreen.Home) homeGlobalMenuOpen = false
+    }
+
     LaunchedEffect(screen) {
         onBackgroundActiveChanged(screen != MainScreen.Browser)
     }
@@ -681,7 +701,8 @@ fun BrowserRoot(
                                     onOpenTab = { id -> vm.selectTab(id) },
                                     onOpenLibrary = { openLibrary() },
                                     onOpenSettings = { openSettings() },
-                                    onOpenTabs = { openTabs() }
+                                    globalMenuAnchor = globalMenuAnchor,
+                                    onOpenGlobalMenu = { homeGlobalMenuOpen = true }
                                 )
                             }
                             MainScreen.Browser -> {
@@ -859,7 +880,12 @@ fun BrowserRoot(
 
                 Box(Modifier.align(Alignment.BottomCenter)) {
                     Visibility(
-                        visible = !isTablet && screen == MainScreen.Home,
+                        // 全局菜单开着的时候底栏退场：
+                        // 它是首页最显眼的一块玻璃，菜单展开时还杵在那里，
+                        // 菜单像是浮在底栏上面而不是接管了整屏。
+                        // 遮罩也画在底栏之后（整层的最后），
+                        // 因此底栏退场动画期间它仍被遮罩挡住，不会被误点。
+                        visible = !isTablet && screen == MainScreen.Home && !homeGlobalMenuOpen,
                         enter = dockEnter,
                         exit = dockExit
                     ) {
@@ -965,6 +991,43 @@ fun BrowserRoot(
                     }
                 }
             }
+        }
+
+        // 全局菜单：整层画在最后，遮罩才盖得住整屏——
+        // 底栏、提示与平板上的侧栏都在这一层之下，
+        // 浮层若画在内容列里，遮罩只盖住内容列，侧栏仍亮着还能点。
+        // 面板的位置跟着锚点走——锚点由首页的品牌球登记位置。
+        GlassPopup(
+            anchor = globalMenuAnchor,
+            visible = homeGlobalMenuOpen,
+            onDismissRequest = { homeGlobalMenuOpen = false },
+            backdrop = auroraBackdrop,
+            shape = GlassShape.squircle(Radius.lg)
+        ) {
+            GlassPopupItem(
+                glyph = Glyph.Tabs,
+                label = "标签页",
+                onClick = {
+                    homeGlobalMenuOpen = false
+                    openTabs()
+                }
+            )
+            GlassPopupItem(
+                glyph = Glyph.Bookmark,
+                label = "书签与历史",
+                onClick = {
+                    homeGlobalMenuOpen = false
+                    openLibrary()
+                }
+            )
+            GlassPopupItem(
+                glyph = Glyph.Settings,
+                label = "设置",
+                onClick = {
+                    homeGlobalMenuOpen = false
+                    openSettings()
+                }
+            )
         }
     }
 }

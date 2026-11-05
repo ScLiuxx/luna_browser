@@ -88,9 +88,7 @@ import com.liuli.browser.data.StartPageStyle
 import com.liuli.browser.ui.components.BrandOrb
 import com.liuli.browser.ui.components.GlassIconButton
 import com.liuli.browser.ui.components.GlassPillButton
-import com.liuli.browser.ui.components.GlassPopup
 import com.liuli.browser.ui.components.GlassPopupAnchor
-import com.liuli.browser.ui.components.GlassPopupItem
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
@@ -213,7 +211,17 @@ fun HomeScreen(
     onOpenTab: (Long) -> Unit,
     onOpenLibrary: () -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenTabs: () -> Unit
+    /**
+     * 全局菜单的锚点。
+     *
+     * 浮层画在 BrowserRoot 里（底栏与提示都画在首页内容之上，
+     * 浮层若画在首页里，它的遮罩就盖不住它们），
+     * 因此锚点由外面持有：首页把品牌球的位置登记进来，
+     * BrowserRoot 拿同一个锚点定位浮层。
+     */
+    globalMenuAnchor: GlassPopupAnchor,
+    /** 长按品牌球：请求打开全局菜单。 */
+    onOpenGlobalMenu: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
     // 起始页有四种样式，它们不是四套皮肤，而是四组"留什么"的选择：
@@ -225,6 +233,10 @@ fun HomeScreen(
     val showRecent = startPageStyle == StartPageStyle.Brand ||
         startPageStyle == StartPageStyle.Classic
     val showPrivacy = startPageStyle == StartPageStyle.Brand
+    // 空白样式下右上角不摆书签与设置：
+    // 那一档的卖点就是"首屏只剩地址栏，功能全藏在手势后面"，
+    // 要是右上角还杵着两个按钮，这档就白设了。
+    val showHeaderButtons = startPageStyle != StartPageStyle.Blank
     // sharedBounds 的 boundsTransform 不是组合上下文，规格要在外面先算好。
     val addressBoundsSpec = MotionSpec.sharedSpring(reduceMotion, Rect(0f, 0f, 0f, 0f))
     val addressSharedModifier = with(sharedScope) {
@@ -237,9 +249,8 @@ fun HomeScreen(
     }
     var query by rememberSaveable { mutableStateOf("") }
     val haptics = LocalHapticFeedback.current
-    // 长按品牌球弹出的全局菜单。
-    var globalMenuOpen by remember { mutableStateOf(false) }
-    val globalAnchor = remember { GlassPopupAnchor() }
+    // 长按品牌球弹出的全局菜单。浮层本身画在外层（BrowserRoot），
+    // 这里只负责把品牌球的位置登记成锚点，并把开合请求递出去。
 
     val recentTabs = tabs.filter { !it.isPrivate && it.url.isNotBlank() }
         .sortedByDescending { it.lastUsedAt }
@@ -307,6 +318,10 @@ fun HomeScreen(
                     // 品牌球同时是全局菜单的入口：长按它弹出一份"全局动作"面板，
                     // 把标签页、书签、设置这些不常按但需要够到的入口收在一处。
                     // 轻按不做任何事——球只是标记，抢走它的单击会让人误以为它能点。
+                    //
+                    // 球单独占一个 Box，不与提示文字同列：
+                    // "长按打开菜单"比球宽得多，两者同在一列里，
+                    // 列宽就会被文字撑开、球被推到中间去，与下方的搜索框左缘错开。
                     Box(
                         Modifier
                             .size(if (isTablet) 42.dp else 36.dp)
@@ -317,11 +332,11 @@ fun HomeScreen(
                                 onLongClickLabel = "打开全局菜单",
                                 onLongClick = {
                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    globalMenuOpen = true
+                                    onOpenGlobalMenu()
                                 },
                                 onClick = { }
                             )
-                            .glassPopupAnchor(globalAnchor)
+                            .glassPopupAnchor(globalMenuAnchor)
                     ) {
                         BrandOrb(size = if (isTablet) 42.dp else 36.dp)
                     }
@@ -351,12 +366,24 @@ fun HomeScreen(
                     } else {
                         // 空白样式下没有标题行，重量要靠品牌球自己撑住，
                         // 否则整个头部会向左塌陷，球紧贴屏幕边缘。
+                        //
+                        // 顺带给一句提示：这一档没有书签与设置按钮，
+                        // 全局菜单成了唯一的入口，不说用户根本想不到长按这个球。
+                        // 提示放在球的右侧而不是下方——
+                        // 它比球宽得多，放下方会把球挤得与搜索框左缘错开。
+                        BasicText(
+                            text = "长按打开菜单",
+                            style = Type.micro.copy(color = colors.textTertiary)
+                        )
                         Spacer(Modifier.weight(1f))
                     }
-                    if (!isTablet) {
+                    if (!isTablet && showHeaderButtons) {
                         // 书签与设置并排放在右上角：
                         // 此前只有设置一个按钮，书签要翻到导航栏才够得着，
                         // 而书签恰恰是起始页上最高频的去处。
+                        //
+                        // 空白样式下不摆它们：那一档要的就是"只剩地址栏"，
+                        // 这两个入口改由长按品牌球的全局菜单接住。
                         GlassIconButton(
                             glyph = Glyph.Bookmark,
                             contentDescription = "书签",
@@ -494,41 +521,6 @@ fun HomeScreen(
 
                 Spacer(Modifier.height(bottomSpace + Space.lg))
             }
-        }
-
-        // 全局菜单：浮层要盖住整屏，所以放在这一层的最末尾——
-        // 放在滚动内容里会被内容的裁剪切掉一半。
-        GlassPopup(
-            anchor = globalAnchor,
-            visible = globalMenuOpen,
-            onDismissRequest = { globalMenuOpen = false },
-            backdrop = backdrop,
-            shape = GlassShape.squircle(Radius.lg)
-        ) {
-            GlassPopupItem(
-                glyph = Glyph.Tabs,
-                label = "标签页",
-                onClick = {
-                    globalMenuOpen = false
-                    onOpenTabs()
-                }
-            )
-            GlassPopupItem(
-                glyph = Glyph.Bookmark,
-                label = "书签与历史",
-                onClick = {
-                    globalMenuOpen = false
-                    onOpenLibrary()
-                }
-            )
-            GlassPopupItem(
-                glyph = Glyph.Settings,
-                label = "设置",
-                onClick = {
-                    globalMenuOpen = false
-                    onOpenSettings()
-                }
-            )
         }
     }
 }

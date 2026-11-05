@@ -157,7 +157,13 @@ fun GlassPopup(
             showing = true
             // 面板要先量出尺寸，才知道该落在哪儿、该从哪儿长出来；
             // 提前起手会先闪在左上角再跳到位。
-            snapshotFlow { panelSize != null }.first { it }
+            //
+            // 等两件事都成立：锚点已登记（面板被组合的前提），且尺寸已量到。
+            // 只等尺寸的话，锚点迟迟不来时这个协程会永远挂着——
+            // 面板压根没被组合过，谁也量不到尺寸。
+            // 锚点后来登记上，面板量到尺寸，展开动画自己接上。
+            // 协程在 visible 翻回 false 时会被取消，不会一直占着。
+            snapshotFlow { anchor.boundsInWindow != null && panelSize != null }.first { it }
             progress.animateTo(1f, animationSpec = enterSpec)
         } else {
             // 退场用补间而不是弹簧：弹簧在消失时会回弹一下，像是不舍得走，
@@ -169,7 +175,11 @@ fun GlassPopup(
     }
 
     // 返回键此前只认浮层外部的点按：用户按返回毫无反应，只能在屏幕上乱点。
-    BackHandler(enabled = showing) {
+    //
+    // 退场期间也要继续吞掉返回键：面板还在淡出时返回键就失效的话，
+    // 这一下会穿透到下面的页面，用户明明只想关掉菜单，却把整页也退掉了。
+    // 这与 LiquidDialog 的 exiting 守卫是同一件事。
+    BackHandler(enabled = visible || showing) {
         if (visible) onDismissRequest()
     }
 
@@ -210,9 +220,14 @@ fun GlassPopup(
             ) {
                 // 遮罩取调色板里的 scrim，并且压得很轻：浮层是"贴着按钮长出来"的东西，
                 // 盖太厚会让人以为整屏被接管了。
-                // 锚点还没就位时不挂遮罩：盖住整屏却什么也不显示，用户只会被困住。
+                //
+                // 只要锚点就位就挂上，不等面板算出落位：
+                // 面板在量到尺寸之前是透明的（展开进度还是 0），
+                // 那几帧里若没有遮罩，点击会穿透到下面的页面内容上。
+                //
+                // 锚点还没就位时不挂：盖住整屏却什么也不显示，用户只会被困住。
                 AnimatedVisibility(
-                    visible = visible && layout != null,
+                    visible = visible && anchorRect != null,
                     enter = fadeIn(animationSpec = MotionSpec.enter()),
                     exit = fadeOut(animationSpec = exitSpec)
                 ) {
@@ -227,9 +242,22 @@ fun GlassPopup(
                     )
                 }
 
-                // 锚点没登记上就不展开：不知道该从哪儿长出来，展开也只是凭空一坨。
-                if (showing && layout != null) {
-                    val placement = layout
+                // 面板一展开就要先被量出尺寸，才知道该落在哪儿。
+                // 所以它必须在 layout 算出来之前就先组合上：
+                // 若等 layout != null 才画，面板就永远量不到自己，
+                // panelSize 永远为空，展开动画也就永远不会开始——死锁。
+                //
+                // 锚点没登记上就不组合：不知道该从哪儿长出来，
+                // 展开只是一坨凭空出现的东西。
+                // 这时展开进度停在 0，面板不可见；
+                // 锚点稍后登记上（触发元素滚进视口之类），它自己就长出来了。
+                //
+                // 量尺寸那一帧面板是透明的（progress 仍是 0），
+                // 用户看不见它，只是不在正确的位置上而已。
+                if (showing && anchorRect != null) {
+                    // 量尺寸之前没有完整落位，就先贴着锚点放。
+                    // 反正那一帧是透明的，位置对不对都看不出来。
+                    val placement = layout ?: fallbackPlacement(anchorRect, contentOrigin)
                     GlassSurface(
                         backdrop = backdrop,
                         shape = shape,
@@ -362,6 +390,22 @@ private class PopupLayout(
     val originY: Float,
     val above: Boolean
 )
+
+/**
+ * 量尺寸之前的临时落位：贴着锚点左下角。
+ *
+ * 面板要先被组合上才量得到自己的尺寸，而落位又依赖尺寸——
+ * 这一帧只有等式的一头。临时位置随便给一个就行：
+ * 那一帧面板是透明的（展开进度还是 0），用户看不见它在哪儿。
+ */
+private fun fallbackPlacement(anchorRect: Rect, contentOrigin: Offset): PopupLayout =
+    PopupLayout(
+        left = anchorRect.left - contentOrigin.x,
+        top = anchorRect.bottom - contentOrigin.y,
+        originX = 0f,
+        originY = 0f,
+        above = false
+    )
 
 /**
  * 算面板落在哪儿。

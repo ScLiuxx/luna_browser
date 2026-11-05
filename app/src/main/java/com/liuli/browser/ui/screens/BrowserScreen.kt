@@ -324,6 +324,8 @@ fun BrowserScreen(
         bottomBlend
     )
     // 收起后的小把手：顶部档留在屏幕底部，底部档挪到地址栏上方（工具栏原来的位置）。
+    // 这是把手**底边**的绝对纵坐标（从容器顶算起），
+    // 与 addressTop / dockTop 同一套口径，换档时才能连续插值。
     val handlePillBottom = lerpDp(
         rootHeight - navInset - 6.dp,
         addressTop - chromeGap,
@@ -884,10 +886,16 @@ fun BrowserScreen(
             ),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                // handlePillBottom 是把手底边距容器底的距离：
-                // 把手本来就贴着容器底，往上挪这么多就落在该在的地方了。
-                // 不用再叠 navigationBarsPadding，导航栏厚度已经算进这个距离里。
-                .offset { IntOffset(0, -handlePillBottom.toPx().roundToInt()) }
+                // align(BottomCenter) 把把手底边放在容器底，
+                // 而 handlePillBottom 定的是把手底边该在的绝对纵坐标，
+                // 差值就是它要往上挪多少。
+                // 不用 navigationBarsPadding：导航栏厚度已经算进这个坐标里。
+                .offset {
+                    IntOffset(
+                        0,
+                        (handlePillBottom.toPx() - rootHeightPx).roundToInt()
+                    )
+                }
         ) {
             CollapsedToolbarHandle(
                 backdrop = backdrop,
