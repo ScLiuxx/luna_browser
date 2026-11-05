@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -58,6 +57,7 @@ import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.components.PrivacyPolicyDialog
+import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
@@ -177,7 +177,7 @@ fun PrivacyGate(
                                     .graphicsLayer { alpha = cardAlpha },
                                 // 圆角走 Radius 阶梯：此前单独写 34dp，
                                 // 与其它玻璃面板（Radius.xl）不是同一档。
-                                shape = RoundedCornerShape(Radius.xl),
+                                shape = GlassShape.squircle(Radius.xl),
                                 tint = colors.glassTintStrong,
                                 blurRadius = 26.dp,
                                 lensHeight = 22.dp,
@@ -435,7 +435,7 @@ private fun GateBadge(label: String, glyph: Glyph, delayMillis: Int) {
     Row(
         Modifier
             .gateReveal(delayMillis)
-            .clip(RoundedCornerShape(Radius.pill))
+            .clip(GlassShape.capsule())
             .background(colors.textPrimary.copy(alpha = 0.05f))
             .padding(horizontal = Space.sm, vertical = Space.xs),
         horizontalArrangement = Arrangement.spacedBy(GateBadgeIconGap),
@@ -463,7 +463,7 @@ private fun GateSectionTitle() {
     Row(
         Modifier
             .gateReveal(gateDelay(tier = 2, item = 0))
-            .clip(RoundedCornerShape(Radius.pill))
+            .clip(GlassShape.capsule())
             .background(colors.success.copy(alpha = 0.12f))
             .padding(horizontal = Space.sm, vertical = Space.xs),
         verticalAlignment = Alignment.CenterVertically,
@@ -590,7 +590,7 @@ private fun GateTextAction(
     Row(
         modifier
             .heightIn(min = Dimens.minTouch)
-            .clip(RoundedCornerShape(Radius.pill))
+            .clip(GlassShape.capsule())
             .background(chip)
             .clickable(
                 interactionSource = interaction,

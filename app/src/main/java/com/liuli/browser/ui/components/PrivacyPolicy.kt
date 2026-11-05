@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -32,6 +31,7 @@ import com.liuli.browser.ui.theme.LocalLiuliColors
 import com.liuli.browser.ui.theme.Radius
 import com.liuli.browser.ui.theme.Space
 import com.liuli.browser.ui.theme.Type
+import com.liuli.browser.ui.liquid.GlassShape
 
 const val PRIVACY_POLICY_TEXT = """琉璃浏览器如何保护你的隐私
 
@@ -166,7 +166,7 @@ fun PrivacyPolicyDialog(visible: Boolean, onDismiss: () -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = maxPanelHeight),
-                shape = RoundedCornerShape(Radius.xl),
+                shape = GlassShape.squircle(Radius.xl),
                 tint = colors.glassTintStrong.copy(alpha = 0.96f),
                 blurRadius = 0.dp,
                 lensHeight = 0.dp,
@@ -286,7 +286,7 @@ private fun PolicySectionHeader(number: Int?, heading: String) {
             Box(
                 Modifier
                     .size(22.dp)
-                    .clip(RoundedCornerShape(Radius.xs))
+                    .clip(GlassShape.squircle(Radius.xs))
                     .background(colors.accent.copy(alpha = 0.16f)),
                 contentAlignment = Alignment.Center
             ) {

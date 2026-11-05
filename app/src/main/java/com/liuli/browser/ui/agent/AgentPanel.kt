@@ -55,7 +55,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -105,12 +104,16 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
+import com.liuli.browser.data.AgentPermissionMode
+import com.liuli.browser.data.AgentPlanMode
+import com.liuli.browser.data.AgentThinkingLevel
 import com.liuli.browser.ui.components.EmptyState
 import com.liuli.browser.ui.components.GlassIconButton
 import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
@@ -122,6 +125,7 @@ import com.liuli.browser.ui.theme.Space
 import com.liuli.browser.ui.theme.Type
 import com.liuli.browser.ui.theme.reduceMotion
 import com.liuli.browser.web.agent.AgentActionStatus
+import com.liuli.browser.web.agent.AgentCompactStatus
 import com.liuli.browser.web.agent.AgentController
 import com.liuli.browser.web.agent.AgentCreation
 import com.liuli.browser.web.agent.AgentCreationFormat
@@ -413,12 +417,12 @@ fun AgentPanel(
         GlassSurface(
             backdrop = backdrop,
             modifier = panelModifier
-                .clip(RoundedCornerShape(Radius.xl))
+                .clip(GlassShape.squircle(Radius.xl))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
                 ) { },
-            shape = RoundedCornerShape(Radius.xl),
+            shape = GlassShape.squircle(Radius.xl),
             tint = colors.glassTintStrong,
             blurRadius = 26.dp,
             lensHeight = 20.dp,
@@ -484,7 +488,7 @@ fun AgentPanel(
                     )
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(Radius.pill))
+                            .clip(GlassShape.capsule())
                             .background(modeBadgeBg)
                             .padding(horizontal = Space.sm, vertical = Space.xs)
                     ) {
@@ -534,6 +538,30 @@ fun AgentPanel(
                 }
 
                 Spacer(Modifier.height(Space.md))
+                // 能力条：三个正交维度的当前档位，点一下就换档。
+                // 放在快捷标签之前——快捷标签是"做什么"，能力条是"怎么做"，
+                // 后者决定前者的边界，用户先看到它才知道快捷标签会怎样执行。
+                AgentCapabilityBar(
+                    thinkingLevel = agent.thinkingLevel,
+                    planMode = agent.planMode,
+                    permissionMode = agent.permissionMode,
+                    onThinkingLevelChange = agent::updateThinkingLevel,
+                    onPlanModeChange = agent::updatePlanMode,
+                    onPermissionModeChange = agent::updatePermissionMode
+                )
+
+                Spacer(Modifier.height(Space.sm))
+                // 上下文占用与压缩状态：长对话会一直涨，
+                // 用户需要看见"它快满了"以及"已经压过了"，否则只会觉得 Agent 忘事。
+                AgentContextMeter(
+                    tokens = agent.contextTokens,
+                    status = agent.compactStatus,
+                    compactedCount = agent.compactedCount,
+                    threshold = agent.contextCompactThreshold,
+                    onCompactNow = agent::compactNow
+                )
+
+                Spacer(Modifier.height(Space.sm))
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -917,9 +945,9 @@ fun AgentPanel(
                         Modifier
                             .weight(1f)
                             .heightIn(min = 44.dp)
-                            .clip(RoundedCornerShape(Radius.md))
+                            .clip(GlassShape.squircle(Radius.md))
                             .background(inputBackground)
-                            .border(1.dp, inputBorder, RoundedCornerShape(Radius.md))
+                            .border(1.dp, inputBorder, GlassShape.squircle(Radius.md))
                             .padding(horizontal = Space.md, vertical = Space.xxs),
                         contentAlignment = Alignment.CenterStart
                     ) {
@@ -1160,7 +1188,7 @@ private fun QuickChip(
     )
     Box(
         Modifier
-            .clip(RoundedCornerShape(Radius.pill))
+            .clip(GlassShape.capsule())
             .background(background)
             .clickable(
                 interactionSource = interaction,
@@ -1190,6 +1218,211 @@ private fun QuickChip(
             )
         }
     }
+}
+
+/**
+ * 能力条：思考等级 / 计划模式 / 权限模式三个正交维度。
+ *
+ * 三者互不耦合，所以并排摆着，而不是收进一个下拉里：
+ * 收进下拉的话，用户每次调一个维度都要先打开菜单再选，
+ * 而这三个恰好是最常调的东西（尤其是权限模式）。
+ *
+ * 换档一律"点一下就换到下一档"而不是弹出选择列表：
+ * 三个维度的档位都很少（2-4 档），循环切换比开菜单快，
+ * 而当前档位一直显示在面上，不存在"选错了看不出来"的问题。
+ */
+@Composable
+private fun AgentCapabilityBar(
+    thinkingLevel: AgentThinkingLevel,
+    planMode: AgentPlanMode,
+    permissionMode: AgentPermissionMode,
+    onThinkingLevelChange: (AgentThinkingLevel) -> Unit,
+    onPlanModeChange: (AgentPlanMode) -> Unit,
+    onPermissionModeChange: (AgentPermissionMode) -> Unit
+) {
+    val colors = LocalLiuliColors.current
+    val haptics = LocalHapticFeedback.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(Space.sm)
+    ) {
+        CapabilityDial(
+            title = "思考",
+            value = thinkingLevel.label,
+            // 只读是最保守的一档，也是最该被看见的一档。
+            // 它一旦生效，页面上的写操作就全停了。
+            emphasis = permissionMode == AgentPermissionMode.ReadOnly,
+            onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                val next = AgentThinkingLevel.entries[
+                    (thinkingLevel.ordinal + 1) % AgentThinkingLevel.entries.size
+                ]
+                onThinkingLevelChange(next)
+            }
+        )
+        CapabilityDial(
+            title = "计划",
+            value = planMode.label,
+            emphasis = false,
+            onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                val next = AgentPlanMode.entries[
+                    (planMode.ordinal + 1) % AgentPlanMode.entries.size
+                ]
+                onPlanModeChange(next)
+            }
+        )
+        CapabilityDial(
+            title = "权限",
+            value = permissionMode.label,
+            // 权限模式换到哪一档都会改变安全边界，颜色上要分得出来。
+            emphasis = permissionMode != AgentPermissionMode.Ask,
+            onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                val next = AgentPermissionMode.entries[
+                    (permissionMode.ordinal + 1) % AgentPermissionMode.entries.size
+                ]
+                onPermissionModeChange(next)
+            }
+        )
+    }
+}
+
+/**
+ * 能力条上的一格：一个维度名 + 当前档位。
+ *
+ * 点一下换到下一档，所以格子里必须始终写着当前档位——
+ * 用户要能一眼看出"现在是什么"，而不是靠试。
+ */
+@Composable
+private fun CapabilityDial(
+    title: String,
+    value: String,
+    emphasis: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = LocalLiuliColors.current
+    val interaction = remember { MutableInteractionSource() }
+    val tint = if (emphasis) colors.accent else colors.textSecondary
+    Row(
+        Modifier
+            .clip(GlassShape.capsule())
+            .background(
+                if (emphasis) {
+                    colors.accent.copy(alpha = 0.14f)
+                } else {
+                    colors.textPrimary.copy(alpha = 0.06f)
+                }
+            )
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onClickLabel = "$title：$value，点一下换档",
+                onClick = onClick
+            )
+            .pressScale(pressedScale = 0.92f, interactionSource = interaction)
+            .padding(horizontal = Space.md, vertical = Space.sm),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        BasicText(
+            text = title,
+            style = Type.label.copy(color = colors.textTertiary)
+        )
+        Spacer(Modifier.width(Space.xs))
+        BasicText(
+            text = value,
+            style = Type.label.copy(
+                color = tint,
+                fontWeight = FontWeight.SemiBold
+            )
+        )
+    }
+}
+
+/**
+ * 上下文占用与压缩状态。
+ *
+ * 数字是**估算值**，所以文案里写"约"：
+ * 本机没有分词器，报一个精确到个位的 token 数反而会误导人。
+ *
+ * 压缩状态必须露出来：压缩之后早期的对话细节没了，
+ * 用户若看不见"已压缩"这几个字，只会觉得 Agent 突然变傻了。
+ */
+@Composable
+private fun AgentContextMeter(
+    tokens: Int,
+    status: AgentCompactStatus,
+    compactedCount: Int,
+    threshold: Int,
+    onCompactNow: () -> Unit
+) {
+    val colors = LocalLiuliColors.current
+    val haptics = LocalHapticFeedback.current
+    val statusText = when (status) {
+        AgentCompactStatus.Idle -> null
+        AgentCompactStatus.Running -> "正在压缩…"
+        AgentCompactStatus.Completed -> "已压缩 $compactedCount 条早期消息"
+        AgentCompactStatus.Failed -> "压缩失败"
+    }
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        BasicText(
+            text = "上下文：约 ${formatTokenCount(tokens)}",
+            style = Type.caption.copy(color = colors.textTertiary)
+        )
+        if (statusText != null) {
+            Spacer(Modifier.width(Space.sm))
+            BasicText(
+                text = statusText,
+                style = Type.caption.copy(
+                    color = if (status == AgentCompactStatus.Failed) colors.danger else colors.accent
+                )
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        // 压缩是用户能直接触发的动作，但只在长对话里才有意义：
+        // 短对话点了无事发生，按钮就成了一直在骗人的摆设。
+        if (tokens >= threshold) {
+            val interaction = remember { MutableInteractionSource() }
+            Box(
+                Modifier
+                    .clip(GlassShape.capsule())
+                    .background(colors.accent.copy(alpha = 0.14f))
+                    .clickable(
+                        interactionSource = interaction,
+                        indication = null,
+                        role = Role.Button,
+                        onClickLabel = "立即压缩上下文",
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onCompactNow()
+                        }
+                    )
+                    .pressScale(pressedScale = 0.90f, interactionSource = interaction)
+                    .padding(horizontal = Space.md, vertical = Space.xs),
+                contentAlignment = Alignment.Center
+            ) {
+                BasicText(
+                    text = "立即压缩",
+                    style = Type.label.copy(
+                        color = colors.accent,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+            }
+        }
+    }
+}
+
+/** token 数太长了读着别扭：按千分位缩一档。 */
+private fun formatTokenCount(tokens: Int): String = when {
+    tokens >= 10_000 -> "${tokens / 1000}k"
+    else -> tokens.toString()
 }
 
 @Composable
@@ -1309,7 +1542,7 @@ private fun PlanCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.md))
+            .clip(GlassShape.squircle(Radius.md))
             .background(colors.accent.copy(alpha = if (colors.isDark) 0.12f else 0.07f))
             // 待批准时描一圈主色：这份计划正等着用户点头，
             // 卡片本身要主动从一长串回答里"探出头"来。
@@ -1320,7 +1553,7 @@ private fun PlanCard(
                 } else {
                     Color.Transparent
                 },
-                shape = RoundedCornerShape(Radius.md)
+                shape = GlassShape.squircle(Radius.md)
             )
             .padding(Space.md)
     ) {
@@ -1348,7 +1581,7 @@ private fun PlanCard(
             )
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(Radius.pill))
+                    .clip(GlassShape.capsule())
                     .background(badgeTint.copy(alpha = 0.14f))
                     .padding(horizontal = Space.sm, vertical = Space.xs)
             ) {
@@ -1422,7 +1655,7 @@ private fun PlanCard(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(Radius.xs))
+                    .clip(GlassShape.squircle(Radius.xs))
                     // 当前步整行提亮：只靠一个箭头，用户得在十几行步骤里
                     // 一行行找，漏看就等于不知道它停在哪。
                     .background(
@@ -1630,14 +1863,14 @@ private fun PlanProgress(
             Modifier
                 .fillMaxWidth()
                 .height(3.dp)
-                .clip(RoundedCornerShape(Radius.pill))
+                .clip(GlassShape.capsule())
                 .background(colors.textPrimary.copy(alpha = 0.08f))
         ) {
             Box(
                 Modifier
                     .fillMaxWidth(animated)
                     .fillMaxHeight()
-                    .clip(RoundedCornerShape(Radius.pill))
+                    .clip(GlassShape.capsule())
                     .background(tint)
             )
         }
@@ -1692,7 +1925,7 @@ private fun ReportCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.md))
+            .clip(GlassShape.squircle(Radius.md))
             .background(colors.success.copy(alpha = if (colors.isDark) 0.12f else 0.07f))
             .padding(Space.md)
     ) {
@@ -1711,7 +1944,7 @@ private fun ReportCard(
             }
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(Radius.pill))
+                    .clip(GlassShape.capsule())
                     .background(colors.success.copy(alpha = 0.14f))
                     .padding(horizontal = Space.sm, vertical = Space.xs)
             ) {
@@ -1815,7 +2048,7 @@ private fun ReportCard(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(Radius.xs))
+                    .clip(GlassShape.squircle(Radius.xs))
                     .clickable(
                         interactionSource = sourceInteraction,
                         // 不用系统水波纹：来源行坐在玻璃卡上，
@@ -1955,7 +2188,7 @@ private fun CreationCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.md))
+            .clip(GlassShape.squircle(Radius.md))
             .background(colors.accentSecondary.copy(alpha = if (colors.isDark) 0.12f else 0.07f))
             .padding(Space.md)
     ) {
@@ -1980,7 +2213,7 @@ private fun CreationCard(
             }
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(Radius.pill))
+                    .clip(GlassShape.capsule())
                     .background(colors.accentSecondary.copy(alpha = 0.14f))
                     .padding(horizontal = Space.sm, vertical = Space.xs)
             ) {
@@ -2137,12 +2370,12 @@ private fun MessageBubble(
                         .widthIn(max = maxWidth * if (isUser) 0.86f else 0.94f)
                         .wrapContentWidth()
                         .clip(
-                            RoundedCornerShape(
+                            GlassShape.uneven(
                                 // 气泡主体用小圆角，尾巴那一角再收小一档。
                                 topStart = Radius.sm,
                                 topEnd = Radius.sm,
-                                bottomStart = if (isUser) Radius.sm else Radius.xs,
-                                bottomEnd = if (isUser) Radius.xs else Radius.sm
+                                bottomEnd = if (isUser) Radius.xs else Radius.sm,
+                                bottomStart = if (isUser) Radius.sm else Radius.xs
                             )
                         )
                         .background(
@@ -2244,7 +2477,7 @@ private fun ActionCard(
         Box(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(Radius.md))
+                .clip(GlassShape.squircle(Radius.md))
                 .background(cardBackground)
                 .padding(Space.md)
         ) {
@@ -2273,7 +2506,7 @@ private fun ActionCard(
                     )
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(Radius.pill))
+                            .clip(GlassShape.capsule())
                             .background(riskBadgeTint.copy(alpha = 0.14f))
                             .padding(horizontal = Space.sm, vertical = Space.xs)
                     ) {
@@ -2420,7 +2653,7 @@ private fun ActionButton(
     Box(
         Modifier
             .heightIn(min = Dimens.minTouch)
-            .clip(RoundedCornerShape(Radius.pill))
+            .clip(GlassShape.capsule())
             .background(background)
             .clickable(
                 interactionSource = interaction,
@@ -2557,7 +2790,7 @@ private fun ThinkingRow(
         Row(
             Modifier
                 .heightIn(min = Dimens.minTouch)
-                .clip(RoundedCornerShape(Radius.pill))
+                .clip(GlassShape.capsule())
                 .clickable(
                     interactionSource = stopInteraction,
                     indication = null,

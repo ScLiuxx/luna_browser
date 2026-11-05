@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -59,6 +58,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
@@ -401,7 +401,7 @@ fun GlassNavigationRail(
         modifier = modifier
             .width(railWidth)
             .fillMaxHeight(),
-        shape = RoundedCornerShape(Radius.xl),
+        shape = GlassShape.squircle(Radius.xl),
         tint = colors.dockTint,
         blurRadius = 26.dp,
         lensHeight = 22.dp,
@@ -436,7 +436,7 @@ fun GlassNavigationRail(
                                 .width(itemWidth)
                                 .height(indicatorHeight)
                                 .graphicsLayer { alpha = indicatorAlpha },
-                            shape = RoundedCornerShape(Radius.md),
+                            shape = GlassShape.squircle(Radius.md),
                             tint = colors.accent.copy(alpha = if (colors.isDark) 0.22f else 0.13f),
                             blurRadius = 14.dp,
                             lensHeight = 12.dp,
@@ -480,7 +480,7 @@ fun GlassNavigationRail(
                             Column(
                                 modifier = Modifier
                                     .width(itemWidth)
-                                    .clip(RoundedCornerShape(Radius.md))
+                                    .clip(GlassShape.squircle(Radius.md))
                                     .onGloballyPositioned { coordinates ->
                                         itemBounds[index] = coordinates.boundsInParent()
                                     }
@@ -578,7 +578,7 @@ fun GlassNavigationRail(
                                                 }
                                                 .width(badgeWidth)
                                                 .height(15.dp)
-                                                .clip(RoundedCornerShape(50))
+                                                .clip(GlassShape.capsule())
                                                 .background(colors.accent),
                                             contentAlignment = Alignment.Center
                                         ) {
@@ -634,7 +634,7 @@ fun GlassNavigationRail(
                         },
                     // 50 表示短边的一半，圆形玻璃件；用圆角形状而不是 CircleShape，
                     // 折射着色器只认圆角形状。
-                    shape = RoundedCornerShape(50),
+                    shape = GlassShape.capsule(),
                     tint = colors.accent.copy(alpha = if (colors.isDark) 0.24f else 0.14f),
                     blurRadius = 12.dp,
                     lensHeight = 10.dp,

@@ -35,7 +35,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -87,8 +86,13 @@ import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.liuli.browser.BuildConfig
+import com.liuli.browser.data.AddressBarPosition
+import com.liuli.browser.data.AgentPermissionMode
+import com.liuli.browser.data.AgentPlanMode
+import com.liuli.browser.data.AgentThinkingLevel
 import com.liuli.browser.data.SearchEngine
 import com.liuli.browser.data.SettingsStore
+import com.liuli.browser.data.StartPageStyle
 import com.liuli.browser.ui.components.DangerConfirmDialog
 import com.liuli.browser.ui.components.GlassIconButton
 import com.liuli.browser.ui.components.GlassPillButton
@@ -102,6 +106,7 @@ import com.liuli.browser.ui.liquid.LiquidSlider
 import com.liuli.browser.ui.liquid.LiquidToggle
 import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
+import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.theme.AccentPalettes
 import com.liuli.browser.ui.theme.DarkModeOption
 import com.liuli.browser.ui.theme.Dimens
@@ -328,6 +333,30 @@ fun SettingsScreen(
                     onSelect = { settings.updateDarkMode(it) }
                 )
                 Spacer(Modifier.height(Space.md))
+                SettingsLabel(
+                    title = "地址栏位置",
+                    subtitle = "地址栏放在哪一档。放到底部单手更好够到，分离则让地址栏与工具栏各占一行。"
+                )
+                Spacer(Modifier.height(Space.sm))
+                SegmentedRow(
+                    options = AddressBarPosition.entries,
+                    selected = settings.addressBarPosition,
+                    onSelect = { settings.updateAddressBarPosition(it) },
+                    labelOf = { it.label }
+                )
+                Spacer(Modifier.height(Space.md))
+                SettingsLabel(
+                    title = "起始页样式",
+                    subtitle = "新标签页打开时的样子。空白页只留地址栏，所有入口收在长按图标里。"
+                )
+                Spacer(Modifier.height(Space.sm))
+                SegmentedRow(
+                    options = StartPageStyle.entries,
+                    selected = settings.startPageStyle,
+                    onSelect = { settings.updateStartPageStyle(it) },
+                    labelOf = { it.label }
+                )
+                Spacer(Modifier.height(Space.md))
                 ToggleRow(
                     title = "动态流光背景",
                     // 说明跟着状态走：写死一句"关闭后保持静态"，
@@ -399,7 +428,7 @@ fun SettingsScreen(
                             Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = Dimens.minTouch)
-                                .clip(RoundedCornerShape(Radius.sm))
+                                .clip(GlassShape.squircle(Radius.sm))
                                 .background(highlight)
                                 .clickable(
                                     interactionSource = interaction,
@@ -556,6 +585,50 @@ fun SettingsScreen(
                     subtitle = "单步操作逐条确认；多步任务需批准计划后执行，可暂停或取消",
                     checked = settings.agentActionsEnabled,
                     onCheckedChange = { settings.updateAgentActionsEnabled(it) },
+                    backdrop = backdrop
+                )
+                Divider()
+                SettingsLabel(
+                    title = "思考等级",
+                    subtitle = "越高则 Agent 拆解越细、步骤越多，耗时长但更稳"
+                )
+                Spacer(Modifier.height(Space.sm))
+                SegmentedRow(
+                    options = AgentThinkingLevel.entries,
+                    selected = settings.agentThinkingLevel,
+                    onSelect = { settings.updateAgentThinkingLevel(it) },
+                    labelOf = { it.label }
+                )
+                Divider()
+                SettingsLabel(
+                    title = "计划模式",
+                    subtitle = "多步任务要不要先出计划再执行。关闭时单步直做，自动时由 Agent 自行判断"
+                )
+                Spacer(Modifier.height(Space.sm))
+                SegmentedRow(
+                    options = AgentPlanMode.entries,
+                    selected = settings.agentPlanMode,
+                    onSelect = { settings.updateAgentPlanMode(it) },
+                    labelOf = { it.label }
+                )
+                Divider()
+                SettingsLabel(
+                    title = "权限模式",
+                    subtitle = "只读模式下 Agent 不会操作页面；低风险自动只放行滚动这类不改变数据的动作"
+                )
+                Spacer(Modifier.height(Space.sm))
+                SegmentedRow(
+                    options = AgentPermissionMode.entries,
+                    selected = settings.agentPermissionMode,
+                    onSelect = { settings.updateAgentPermissionMode(it) },
+                    labelOf = { it.label }
+                )
+                Divider()
+                ToggleRow(
+                    title = "Agent 上下文自动压缩",
+                    subtitle = "对话过长时自动压缩早期内容：把最早的上下文折成摘要，为后续提问留住余量",
+                    checked = settings.agentAutoCompact,
+                    onCheckedChange = { settings.updateAgentAutoCompact(it) },
                     backdrop = backdrop
                 )
                 Divider()
@@ -1000,7 +1073,7 @@ private fun SettingsSection(
         GlassSurface(
             backdrop = backdrop,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(Radius.lg),
+            shape = GlassShape.squircle(Radius.lg),
             tint = colors.glassTint,
             blurRadius = 20.dp,
             lensHeight = 16.dp,
@@ -1015,45 +1088,50 @@ private fun SettingsSection(
 }
 
 /**
- * 深色模式分段控件。
+ * 通用分段控件：单选一组互斥选项。
  *
  * 指示器是一块独立底色，位置与宽度按分段实测值滑动：
  * 每段各自带底色、靠淡入淡出换人，看上去是"闪"而不是"滑"。
  */
 @Composable
-private fun DarkModeSegmented(
-    selected: Int,
-    onSelect: (Int) -> Unit
+private fun <T> SegmentedRow(
+    options: List<T>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    labelOf: (T) -> String
 ) {
     val colors = LocalLiuliColors.current
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
+    // 选中项在列表里的序号：指示器按序号找实测位置，
+    // 选项本身只用来判断哪一段亮着。
+    val selectedIndex = options.indexOf(selected)
     // 每个分段的真实位置：指示器按实际尺寸滑过去，不能靠估算。
     val segmentBounds = remember { mutableStateMapOf<Int, Rect>() }
-    val selectedBounds = segmentBounds[selected]
+    val selectedBounds = segmentBounds[selectedIndex]
     val indicatorLeft by animateDpAsState(
         targetValue = selectedBounds?.left?.let { with(density) { it.toDp() } } ?: 0.dp,
         animationSpec = MotionSpec.pageSpring(0.01.dp),
-        label = "dark-indicator-left"
+        label = "segment-indicator-left"
     )
     val indicatorTop by animateDpAsState(
         targetValue = selectedBounds?.top?.let { with(density) { it.toDp() } } ?: 0.dp,
         animationSpec = MotionSpec.pageSpring(0.01.dp),
-        label = "dark-indicator-top"
+        label = "segment-indicator-top"
     )
     val indicatorWidth by animateDpAsState(
         targetValue = selectedBounds?.width?.let { with(density) { it.toDp() } } ?: 0.dp,
         animationSpec = MotionSpec.pageSpring(0.01.dp),
-        label = "dark-indicator-width"
+        label = "segment-indicator-width"
     )
     val indicatorHeight by animateDpAsState(
         targetValue = selectedBounds?.height?.let { with(density) { it.toDp() } } ?: 0.dp,
         animationSpec = MotionSpec.pageSpring(0.01.dp),
-        label = "dark-indicator-height"
+        label = "segment-indicator-height"
     )
     Box(
         Modifier
-            .clip(RoundedCornerShape(Radius.pill))
+            .clip(GlassShape.capsule())
             // 深色下 6% 的白几乎看不见轨道：与书签页的分段控件取同一档，
             // 浅色主题仍保持轻一点的分量。
             .background(
@@ -1067,33 +1145,33 @@ private fun DarkModeSegmented(
                     .offset(x = indicatorLeft, y = indicatorTop)
                     .width(indicatorWidth)
                     .height(indicatorHeight)
-                    .clip(RoundedCornerShape(Radius.pill))
+                    .clip(GlassShape.capsule())
                     .background(colors.glassTintStrong)
             )
         }
         Row(
-            // 三段平分整条宽度：内容宽度的分段在字体放大后会顶出卡片，
+            // 各段平分整条宽度：内容宽度的分段在字体放大后会顶出卡片，
             // 均分之后每段各自省略，控件始终是满宽的一条。
             Modifier.fillMaxWidth().padding(Space.xs),
             horizontalArrangement = Arrangement.spacedBy(Space.xs)
         ) {
-            DarkModeOption.entries.forEachIndexed { index, option ->
-                val isSelected = index == selected
+            options.forEachIndexed { index, option ->
+                val isSelected = option == selected
                 val interaction = remember { MutableInteractionSource() }
                 val labelColor by animateColorAsState(
                     targetValue = if (isSelected) colors.textPrimary else colors.textSecondary,
                     animationSpec = MotionSpec.color(),
-                    label = "dark-mode-label"
+                    label = "segment-label"
                 )
                 // 字重也平滑过渡：选中瞬间换字重，文字会明显"跳"一下。
                 val weight by animateFloatAsState(
                     targetValue = if (isSelected) 600f else 400f,
                     animationSpec = MotionSpec.value(Motion.Quick),
-                    label = "dark-mode-weight"
+                    label = "segment-weight"
                 )
                 Box(
                     Modifier
-                        // 三段各占一份：均分之后字体放大也不会把
+                        // 每段各占一份：均分之后字体放大也不会把
                         // 控件从卡片里挤出去。
                         .weight(1f)
                         .onGloballyPositioned {
@@ -1108,17 +1186,17 @@ private fun DarkModeSegmented(
                             indication = null,
                             role = Role.RadioButton
                         ) {
-                            // 换主题会立刻重染整屏，给一次轻触反馈确认改动生效了。
+                            // 换档是一次离散操作，给一次轻触反馈确认改动生效了。
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onSelect(index)
+                            onSelect(option)
                         }
                         // 读屏要能听出当前选中的是哪一项：
                         // 光有 Role.RadioButton 不够，选中状态也得报上去。
                         .semantics(mergeDescendants = true) {
                             contentDescription = if (isSelected) {
-                                "${option.label}，已选中"
+                                "${labelOf(option)}，已选中"
                             } else {
-                                option.label
+                                labelOf(option)
                             }
                         }
                         .pressScale(pressedScale = 0.92f, interactionSource = interaction)
@@ -1128,12 +1206,12 @@ private fun DarkModeSegmented(
                     contentAlignment = Alignment.Center
                 ) {
                     BasicText(
-                        text = option.label,
+                        text = labelOf(option),
                         style = Type.bodySmall.copy(
                             color = labelColor,
                             fontWeight = FontWeight(weight.toInt())
                         ),
-                        // 字体放大到 1.3 以上时"跟随系统"会顶出一段：
+                        // 字体放大到 1.3 以上时长标签会顶出一段：
                         // 限一行并省略，不让文字压到邻段上。
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -1142,6 +1220,25 @@ private fun DarkModeSegmented(
             }
         }
     }
+}
+
+/**
+ * 深色模式分段控件。
+ *
+ * 深色模式在设置里存的是 0/1/2 的序号，这里换算成选项再交给通用分段控件。
+ */
+@Composable
+private fun DarkModeSegmented(
+    selected: Int,
+    onSelect: (Int) -> Unit
+) {
+    val options = DarkModeOption.entries
+    SegmentedRow(
+        options = options,
+        selected = options.getOrElse(selected) { DarkModeOption.System },
+        onSelect = { option -> onSelect(options.indexOf(option)) },
+        labelOf = { it.label }
+    )
 }
 
 @Composable
@@ -1227,7 +1324,7 @@ private fun ToggleRow(
             Modifier
                 .weight(1f)
                 .heightIn(min = Dimens.minTouch)
-                .clip(RoundedCornerShape(Radius.sm))
+                .clip(GlassShape.squircle(Radius.sm))
                 .background(highlight)
                 // 标题与说明并成一个语义节点：读屏不会把同一行念两遍，
                 // 开关的开合状态与它的说明一起报出来。
@@ -1420,9 +1517,9 @@ private fun SettingsField(
                     .fillMaxWidth()
                     .onFocusChanged { focused = it.isFocused }
                     .semantics { contentDescription = label }
-                    .clip(RoundedCornerShape(Radius.sm))
+                    .clip(GlassShape.squircle(Radius.sm))
                     .background(fieldBackground)
-                    .border(1.dp, fieldBorder, RoundedCornerShape(Radius.sm))
+                    .border(1.dp, fieldBorder, GlassShape.squircle(Radius.sm))
                     .padding(horizontal = Space.md, vertical = Space.sm),
                 textStyle = Type.body.copy(color = colors.textPrimary),
                 cursorBrush = SolidColor(colors.accent),

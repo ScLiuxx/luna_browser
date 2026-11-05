@@ -18,7 +18,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
@@ -38,6 +37,7 @@ import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.RoundedRectangularShape
 import com.liuli.browser.ui.liquid.GlassEdgeStyle
+import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.liquid.InteractiveHighlight
 import com.liuli.browser.ui.liquid.LiquidIconButton
 import com.liuli.browser.ui.liquid.LiquidTextAction
@@ -65,7 +65,7 @@ import kotlin.math.tanh
 fun GlassSurface(
     backdrop: Backdrop,
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(Dimens.cardRadius),
+    shape: Shape = GlassShape.squircle(Dimens.cardRadius),
     tint: Color? = null,
     blurRadius: Dp = 18.dp,
     lensHeight: Dp = 16.dp,
@@ -188,7 +188,9 @@ fun GlassSurface(
                     // 边缘光取代等宽描边：描边每一处都一样亮，
                     // 玻璃看上去是平的；换成对向双光源后，
                     // 朝光的一侧亮、背光的一侧暗，边缘才有厚度和方向。
-                    { edgeStyle.toHighlight(alpha = if (colors.isDark) 0.72f else 0.9f) }
+                    // 亮度不能给满：边缘光下方还压着一圈很淡的均匀描边
+                    // （玻璃在暗处也有反射，只是弱），两者相加会把迎光侧烧成一片白。
+                    { edgeStyle.toHighlight(alpha = if (colors.isDark) 0.5f else 0.62f) }
                 } else {
                     null
                 },
@@ -217,12 +219,20 @@ fun GlassSurface(
                 },
                 onDrawSurface = {
                     drawRect(effectiveTint)
-                    // 边缘描边：没有它，深色背景上的玻璃会整个"融"进去，
+                    // 均匀描边：没有它，深色背景上的玻璃会整个"融"进去，
                     // 轮廓消失，只剩一团模糊的色块。
                     // 描边必须跟着形状走：玻璃是圆角矩形、边框却是直角矩形的话，
                     // 四个角会露出不属于玻璃的直角。
+                    //
+                    // 它现在只是一层很淡的"环境反射"：迎光侧的方向感由边缘光给，
+                    // 这圈描边只负责把背光侧的那段边从背景里勾出来。
+                    // 两边都画满的话，迎光侧会烧成一条纯白线，方向感反而没了。
                     if (edgeStroke) {
-                        drawShapeOutline(shape, colors.glassBorder, 1.dp.toPx())
+                        drawShapeOutline(
+                            shape,
+                            colors.glassBorder.copy(alpha = colors.glassBorder.alpha * 0.45f),
+                            1.dp.toPx()
+                        )
                     }
                 }
             )

@@ -40,7 +40,6 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -86,6 +85,7 @@ import com.liuli.browser.ui.components.GlassNavigationRail
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.NavItem
+import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.liquid.LiquidDock
 import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.screens.BrowserScreen
@@ -673,13 +673,15 @@ fun BrowserRoot(
                                     isTablet = isTablet,
                                     bottomSpace = bottomSpace,
                                     reduceMotion = reduced,
+                                    startPageStyle = settings.startPageStyle,
                                     sharedScope = shared,
                                     animatedScope = animated,
                                     onSearchSubmit = { submitSearch(it) },
                                     onOpenUrl = { url -> vm.navigate(url, settings.searchEngine) },
                                     onOpenTab = { id -> vm.selectTab(id) },
                                     onOpenLibrary = { openLibrary() },
-                                    onOpenSettings = { openSettings() }
+                                    onOpenSettings = { openSettings() },
+                                    onOpenTabs = { openTabs() }
                                 )
                             }
                             MainScreen.Browser -> {
@@ -932,7 +934,7 @@ fun BrowserRoot(
                     GlassSurface(
                         backdrop = chromeBackdrop,
                         modifier = Modifier.widthIn(max = 420.dp),
-                        shape = RoundedCornerShape(24.dp),
+                        shape = GlassShape.squircle(24.dp),
                         tint = colors.glassTintStrong,
                         blurRadius = 18.dp,
                         lensHeight = 14.dp,

@@ -45,7 +45,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -87,6 +86,7 @@ import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.components.HeaderSubtitle
 import com.liuli.browser.ui.components.ScreenHeader
+import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
@@ -381,7 +381,7 @@ fun TabSwitcherScreen(
             GlassSurface(
                 backdrop = backdrop,
                 modifier = Modifier.widthIn(max = 460.dp),
-                shape = RoundedCornerShape(Radius.xl),
+                shape = GlassShape.squircle(Radius.xl),
                 tint = colors.glassTintStrong,
                 blurRadius = 20.dp,
                 lensHeight = 14.dp,
@@ -530,7 +530,7 @@ private fun TabCard(
                 scaleY = scale * enterScale
                 alpha = cardAlpha * enterAlpha
             }
-            .clip(RoundedCornerShape(Radius.lg))
+            .clip(GlassShape.squircle(Radius.lg))
             .background(colors.glassTintStrong)
             // 一句话把卡片说清楚：标题、域名、是不是当前页、是不是隐私页。
             // 卡片内的标题与徽标随后清掉语义，读屏才不会把同一句话念两遍。
@@ -546,7 +546,7 @@ private fun TabCard(
             .border(
                 width = borderWidth,
                 color = borderColor,
-                shape = RoundedCornerShape(Radius.lg)
+                shape = GlassShape.squircle(Radius.lg)
             )
             // 长按直接关掉这张卡：标签页一多，逐个去够右上角的小叉很费事，
             // 长按是浏览器里最通用的"关掉这张卡"手势。
@@ -746,7 +746,7 @@ private fun TabBadge(
 ) {
     Row(
         Modifier
-            .clip(RoundedCornerShape(Radius.pill))
+            .clip(GlassShape.capsule())
             .background(if (filled) tint else Color.Black.copy(alpha = 0.34f))
             .padding(horizontal = Space.sm, vertical = Space.xs)
             // 徽标文字已并入卡片的描述，这里清掉避免读两遍。

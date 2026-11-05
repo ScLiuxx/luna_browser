@@ -38,7 +38,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -80,6 +79,7 @@ import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.components.HeaderSubtitle
 import com.liuli.browser.ui.components.ScreenHeader
+import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
@@ -340,7 +340,7 @@ private fun LibrarySegments(
     Box(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.pill))
+            .clip(GlassShape.capsule())
             .background(
                 colors.textPrimary.copy(alpha = if (colors.isDark) 0.10f else 0.06f)
             )
@@ -352,7 +352,7 @@ private fun LibrarySegments(
                     .offset(x = indicatorLeft, y = indicatorTop)
                     .width(indicatorWidth)
                     .height(indicatorHeight)
-                    .clip(RoundedCornerShape(Radius.pill))
+                    .clip(GlassShape.capsule())
                     .background(colors.glassTintStrong)
             )
         }
@@ -576,14 +576,14 @@ private fun LibraryRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.sm))
+            .clip(GlassShape.squircle(Radius.sm))
             .background(rowBackground)
             // 行要有一圈细边：深色下玻璃底色几乎融进背景，
             // 没有轮廓时整列看着像贴上去的一摊色块。
             .border(
                 1.dp,
                 colors.textPrimary.copy(alpha = if (colors.isDark) 0.10f else 0.05f),
-                RoundedCornerShape(Radius.sm)
+                GlassShape.squircle(Radius.sm)
             )
             .clickable(
                 interactionSource = rowInteraction,
@@ -601,7 +601,7 @@ private fun LibraryRow(
         Box(
             Modifier
                 .size(38.dp)
-                .clip(RoundedCornerShape(Radius.xs))
+                .clip(GlassShape.squircle(Radius.xs))
                 .background(colors.accent.copy(alpha = if (colors.isDark) 0.22f else 0.12f)),
             contentAlignment = Alignment.Center
         ) {

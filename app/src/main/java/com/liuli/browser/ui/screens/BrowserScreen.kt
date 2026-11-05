@@ -43,21 +43,22 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -74,6 +75,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -85,6 +87,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -94,13 +97,13 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -123,10 +126,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastFirstOrNull
 import com.kyant.backdrop.Backdrop
+import com.liuli.browser.data.AddressBarPosition
 import com.liuli.browser.data.SearchEngine
 import com.liuli.browser.data.SettingsStore
 import com.liuli.browser.ui.agent.AgentOrb
@@ -136,6 +141,7 @@ import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
@@ -241,6 +247,155 @@ fun BrowserScreen(
     // ViewModel 在跳转与切换标签时都会把 toolbarCollapsed 复位，
     // 手动收起不会一直赖着不走。
     val collapsed = vm.toolbarCollapsed && !editing && !menuOpen && !shieldOpen
+
+    // ── 地址栏的三档位置 ────────────────────────────────
+    // 顶部：地址栏贴顶、工具栏贴底。
+    // 底部：地址栏沉到屏幕下缘、工具栏叠在它上方——底部这一摞全在拇指够得到的范围里。
+    // 分离：地址栏在顶、工具栏行紧跟在其下，两块玻璃各占一行。
+    //
+    // barHeight 必须先算出来：下面这套几何全靠它定位，
+    // 而它自己只依赖 editing / collapsed / idleBarHeight，都在这一段之前。
+    val barHeight by animateDpAsState(
+        targetValue = when {
+            editing -> 136.dp
+            collapsed -> 42.dp
+            else -> idleBarHeight
+        },
+        animationSpec = MotionSpec.pageSpring(0.01.dp),
+        label = "address-morph"
+    )
+    val addressPosition = settings.addressBarPosition
+    val isAddressAtBottom = addressPosition == AddressBarPosition.Bottom
+    val isAddressSplit = addressPosition == AddressBarPosition.Split
+
+    // 容器高度要实测：编辑态、折叠态、分屏都会改变它。
+    var rootHeightPx by remember { mutableIntStateOf(0) }
+    val rootHeight = with(density) { rootHeightPx.toDp() }
+    // 根容器在窗口里的原点：地址栏的实测位置要从它这里换算回根容器坐标。
+    var rootOriginInWindow by remember { mutableStateOf(Offset.Zero) }
+    // 地址栏自己在窗口里的位置。
+    var addressBarBoundsInWindow by remember { mutableStateOf<Rect?>(null) }
+    // 系统栏厚度：顶部档让开状态栏，底部档让开导航栏。
+    val statusInset = with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+    val navInset = with(density) { WindowInsets.navigationBars.getBottom(density).toDp() }
+    // 两块玻璃件并排时留出的呼吸位。
+    val chromeGap = Space.sm
+    // 地址栏上方那 6dp 留白，与进度条那一行的净高（2.5dp 线 + 上下各 4dp）。
+    val addressTopPadding = 6.dp
+    val progressSlot = 10.5.dp
+    // 工具栏胶囊自身上下的留白：排位按胶囊算，不按它的容器算。
+    val dockGlassInset = 8.dp
+
+    // 位置过渡用两个 0→1 的比例量表示：
+    // bottomBlend 把地址栏从顶部搬到屏幕下缘，
+    // splitBlend 把工具栏从屏幕底部搬到地址栏下面。
+    // 用比例量而不是直接动画坐标：两个档位之间来回切时位置才是连续的。
+    val bottomBlend by animateFloatAsState(
+        targetValue = if (isAddressAtBottom) 1f else 0f,
+        animationSpec = MotionSpec.pageSpring(),
+        label = "address-bottom-blend"
+    )
+    val splitBlend by animateFloatAsState(
+        targetValue = if (isAddressSplit) 1f else 0f,
+        animationSpec = MotionSpec.pageSpring(),
+        label = "address-split-blend"
+    )
+
+    // 地址栏胶囊的上沿：顶部档贴状态栏下方，底部档贴导航栏上方。
+    val addressTop = lerpDp(
+        statusInset + addressTopPadding,
+        rootHeight - navInset - barHeight,
+        bottomBlend
+    )
+    // 进度条那一行：顶部档在胶囊下方，底部档在胶囊上方。
+    val progressTop = lerpDp(
+        addressTop + barHeight,
+        addressTop - progressSlot,
+        bottomBlend
+    )
+    // 工具栏胶囊的上沿：顶部档在屏幕底部，分离档在地址栏下面，底部档在地址栏上面。
+    val dockTop = lerpDp(
+        lerpDp(
+            rootHeight - navInset - dockGlassInset - Dimens.dockHeight,
+            addressTop + barHeight + progressSlot + chromeGap,
+            splitBlend
+        ),
+        addressTop - chromeGap - Dimens.dockHeight,
+        bottomBlend
+    )
+    // 收起后的小把手：顶部档留在屏幕底部，底部档挪到地址栏上方（工具栏原来的位置）。
+    val handlePillBottom = lerpDp(
+        rootHeight - navInset - 6.dp,
+        addressTop - chromeGap,
+        bottomBlend
+    )
+
+    // 地址栏在根容器里的范围：
+    // 边缘手势要把落在它上面的起手让给地址栏——
+    // 地址栏上的横滑是切标签，那一带本来就容易被边缘手势误触。
+    //
+    // 位置直接实测，不推算：地址栏列居中摆放但两侧有内边距，
+    // 平板上列还会被 1000dp 的上限截断再居中，
+    // 按公式推出来的左边距与真实位置对不上，边缘手势就会在错的地方让开。
+    // 两者都取窗口坐标，相减即得根容器内的偏移。
+    val addressBarBounds = rememberUpdatedState(
+        addressBarBoundsInWindow?.let { barWindow ->
+            Rect(
+                left = barWindow.left - rootOriginInWindow.x,
+                top = barWindow.top - rootOriginInWindow.y,
+                right = barWindow.right - rootOriginInWindow.x,
+                bottom = barWindow.bottom - rootOriginInWindow.y
+            )
+        } ?: Rect.Zero
+    )
+
+    // ── 地址栏横滑切标签 ────────────────────────────────
+    // 地址栏横跨整个宽度，两端与边缘手势区重叠：
+    // 在地址栏上横滑的意图很明确是切标签，而边缘手势在那一带本来就容易误触，
+    // 所以这里优先，边缘手势那边要把落在地址栏里的起手让开。
+    // 位移用普通状态而不是 Animatable：
+    // Animatable.snapTo() 是挂起函数，一次横滑能产生上百个指针事件，
+    // 上百个协程互相打断，地址栏会明显滞后于手指——"液态"的质感恰恰丢在这里。
+    // 跟手期间直接写状态，松手后的归位才交给弹簧。
+    val tabSwipeOffset = remember { mutableFloatStateOf(0f) }
+    // 横滑划过之后，这一下点击不算数：
+    // 手指划过去的落点也在地址栏里，不拦一下就会在切标签的同时把键盘弹出来。
+    var tabSwipeAteClick by remember { mutableStateOf(false) }
+    // 手势协程里读到的必须是最新值：
+    // 面板开关与换标签都该立刻生效，但它们不该把手势重启。
+    val swipeGuard = rememberUpdatedState(
+        editing || menuOpen || shieldOpen || agentOpen || tab.isFullscreen
+    )
+    val swipeTabId = rememberUpdatedState(tab.id)
+    val swipeScope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    // 归位用液态阻尼：切标签是离散操作，回弹要收得住又要有一点弹性。
+    val tabSwipeSettleSpec = MotionSpec.liquidSpring()
+
+    // 边缘手势只在浏览器自己的控件之外接管：
+    // 上界是顶部这一摞（地址栏，分离档还有工具栏行）的下沿，
+    // 下界是底部这一摞（工具栏，底部档还有地址栏）的上沿。
+    // 边界随档位变化，用 rememberUpdatedState 传进手势协程：
+    // 它每次读到的是最新值，手势不会因为换档而被重开。
+    val edgeRegion = rememberUpdatedState(
+        with(density) {
+            val top = lerpDp(
+                lerpDp(
+                    addressTop + barHeight + progressSlot,
+                    dockTop + Dimens.dockHeight + dockGlassInset,
+                    splitBlend
+                ),
+                statusInset,
+                bottomBlend
+            )
+            val bottom = lerpDp(
+                lerpDp(dockTop - dockGlassInset, rootHeight - 140.dp, splitBlend),
+                dockTop - dockGlassInset,
+                bottomBlend
+            )
+            top.toPx() to bottom.toPx()
+        }
+    )
     // sharedBounds 的 boundsTransform 不是 Composable 上下文，规格要在外面先算好。
     val addressBoundsSpec = MotionSpec.sharedSpring(Rect(0f, 0f, 0f, 0f))
     val snapshotBoundsSpec = MotionSpec.pageSpring(Rect(0f, 0f, 0f, 0f))
@@ -256,15 +411,6 @@ fun BrowserScreen(
         targetValue = if (showSharedSnapshot) 1f else 0f,
         animationSpec = MotionSpec.value(Motion.Normal),
         label = "shared-snapshot-alpha"
-    )
-    val barHeight by animateDpAsState(
-        targetValue = when {
-            editing -> 136.dp
-            collapsed -> 42.dp
-            else -> idleBarHeight
-        },
-        animationSpec = MotionSpec.pageSpring(0.01.dp),
-        label = "address-morph"
     )
     // 全屏时顶部控件让位给视频：淡出并稍稍上移，
     // 硬切会让地址栏"啪"地消失，和视频的切换撞在一起。
@@ -290,9 +436,6 @@ fun BrowserScreen(
     val swipeActive = remember { mutableStateOf(false) }
     val swipeDirection = remember { mutableIntStateOf(0) }
     val swipeProgress = remember { mutableFloatStateOf(0f) }
-    // 地址栏底边的位置：手势起点落在它下面才接管，
-    // 否则在地址栏上横划会跟地址栏抢手势。
-    val chromeBottom = remember { mutableFloatStateOf(0f) }
     val swipeHintAlpha by animateFloatAsState(
         targetValue = if (swipeActive.value) 1f else 0f,
         animationSpec = MotionSpec.value(Motion.Quick),
@@ -302,14 +445,17 @@ fun BrowserScreen(
     Box(
         Modifier
             .fillMaxSize()
+            // 容器尺寸要实测：底部档与分离档的排位全靠它算。
+            .onGloballyPositioned {
+                rootHeightPx = it.size.height
+                rootOriginInWindow = it.boundsInWindow().topLeft
+            }
             .pointerInput(canNavigateBack, tab.canGoForward, tab.isFullscreen, menuOpen, shieldOpen, agentOpen, editing) {
                 val edge = 26.dp.toPx()
                 val trigger = 72.dp.toPx()
                 // 甩动的速度阈值：600dp/s 已经是"明确的一划"，
                 // 再高就只剩位移判定起作用，甩一下反而常常不生效。
                 val fling = 600.dp.toPx()
-                // 底部控件所在的区域不接管：横划按钮会误触发点击。
-                val bottomGuard = 140.dp.toPx()
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val width = size.width.toFloat()
@@ -318,8 +464,15 @@ fun BrowserScreen(
                     // 只认屏幕左右边缘的起手：页面中间的横向滑动留给网页自己，
                     // 纵向滚动更是完全不受这条手势影响。
                     if (!fromLeft && !fromRight) return@awaitEachGesture
-                    if (down.position.y < chromeBottom.floatValue) return@awaitEachGesture
-                    if (down.position.y > size.height - bottomGuard) return@awaitEachGesture
+                    // 上下界随地址栏档位变化：
+                    // 顶部这一摞（地址栏、分离档还有工具栏行）之下、
+                    // 底部这一摞（工具栏、底部档还有地址栏）之上才接管。
+                    val region = edgeRegion.value
+                    if (down.position.y < region.first) return@awaitEachGesture
+                    if (down.position.y > region.second) return@awaitEachGesture
+                    // 落在地址栏上的起手不接管：
+                    // 地址栏那一带的横滑是切标签，边缘手势在那一带本来就容易误触。
+                    if (addressBarBounds.value.contains(down.position)) return@awaitEachGesture
                     // 面板、全屏与编辑态各有各的手势，这里不去抢。
                     if (menuOpen || shieldOpen || agentOpen || editing || tab.isFullscreen) {
                         return@awaitEachGesture
@@ -410,24 +563,138 @@ fun BrowserScreen(
                 .align(Alignment.TopCenter)
                 // 全屏时整块淡出，而不是硬切。
                 .graphicsLayer { alpha = chromeAlpha }
-                // 记下地址栏的底边位置，边缘手势只在它下面接管。
-                .onGloballyPositioned {
-                    chromeBottom.floatValue = it.positionInParent().y + it.size.height
-                }
-                .statusBarsPadding()
-                .padding(top = 6.dp, start = if (isTablet) 18.dp else 10.dp, end = if (isTablet) 18.dp else 10.dp)
+                // 按算好的位置绝对定位：
+                // 三档之间换挡时位置得是连续的，
+                // 用 statusBarsPadding 这类系统内边距就没法连续插值，
+                // 系统栏厚度已经算进 addressTop 里了。
+                .offset { IntOffset(0, addressTop.toPx().roundToInt()) }
+                .padding(start = if (isTablet) 18.dp else 10.dp, end = if (isTablet) 18.dp else 10.dp)
                 .widthIn(max = 1000.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             GlassSurface(
                 backdrop = backdrop,
-                modifier = addressSharedModifier
+                modifier = Modifier
+                    // 横滑切标签的手势要排在 clickable 前面：
+                    // 地址栏里的网址是可点的，抢不到手势就会在切标签时顺手弹出键盘。
+                    // 指针事件在 Main 阶段之前就被消费掉，点击因此不会成立。
+                    .pointerInput(Unit) {
+                        // 甩动的速度阈值：600dp/s 已经是"明确的一划"。
+                        val fling = 600.dp.toPx()
+                        awaitEachGesture {
+                            val down = awaitFirstDown(
+                                requireUnconsumed = false,
+                                pass = PointerEventPass.Initial
+                            )
+                            // 每次起手先把"这一下不算点击"清掉：
+                            // 上一次横滑留下的标记不能影响这一次的正常点击。
+                            tabSwipeAteClick = false
+                            // 编辑态、面板、全屏各有各的手势，这里不抢。
+                            if (swipeGuard.value) return@awaitEachGesture
+                            val tabList = vm.tabs
+                            // 只剩一个标签时横滑没有意义：这一下照旧当点击处理。
+                            if (tabList.size <= 1) return@awaitEachGesture
+                            val index = tabList.indexOfFirst { it.id == swipeTabId.value }
+                            if (index < 0) return@awaitEachGesture
+                            val tracker = VelocityTracker()
+                            tracker.addPosition(down.uptimeMillis, down.position)
+                            val pointer = down.id
+                            var travelX = 0f
+                            var travelY = 0f
+                            var dragging = false
+                            // 1 是下一个标签，-1 是上一个标签。
+                            var direction = 0
+                            var canSwitch = false
+                            try {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val change = event.changes.fastFirstOrNull { it.id == pointer } ?: break
+                                    if (!change.pressed) break
+                                    val delta = change.positionChange()
+                                    travelX += delta.x
+                                    travelY += delta.y
+                                    tracker.addPosition(change.uptimeMillis, change.position)
+                                    if (!dragging && abs(travelX) > viewConfiguration.touchSlop) {
+                                        // 竖向意图更强时不接管：那一划多半是页面滚动。
+                                        if (abs(travelY) > abs(travelX)) break
+                                        dragging = true
+                                        // 向左滑是下一个标签，向右滑是上一个标签。
+                                        direction = if (travelX < 0) 1 else -1
+                                        canSwitch = if (direction > 0) {
+                                            index < tabList.size - 1
+                                        } else {
+                                            index > 0
+                                        }
+                                        // 划过就算切标签，不许这一下再当成点击。
+                                        tabSwipeAteClick = true
+                                    }
+                                    if (dragging) {
+                                        change.consume()
+                                        // 跟手位移：越界时衰减成橡皮筋，不是硬停。
+                                        val shown = if (canSwitch) travelX else travelX * 0.28f
+                                        tabSwipeOffset.floatValue = shown
+                                    }
+                                }
+                                if (dragging && canSwitch) {
+                                    val velocity = tracker.calculateVelocity().x
+                                    // 划过了距离或者甩得够快，都算切。
+                                    val far = abs(travelX) > size.width * 0.22f
+                                    val fast = if (direction > 0) velocity < -fling else velocity > fling
+                                    if (far || fast) {
+                                        tabList.getOrNull(index + direction)?.let { target ->
+                                            vm.selectTab(target.id)
+                                            haptics.performHapticFeedback(
+                                                HapticFeedbackType.TextHandleMove
+                                            )
+                                        }
+                                    }
+                                }
+                            } finally {
+                                // 松手后弹回原位：切没切成都要回弹。
+                                // 归位期间手指已经离开，用弹簧接管是安全的；
+                                // 跟手阶段才必须用普通状态。
+                                if (dragging) {
+                                    val from = tabSwipeOffset.floatValue
+                                    swipeScope.launch {
+                                        // 用顶层 animate 而不是 Animatable.animateTo：
+                                        // 后者的 block 是 AnimationScope 接收者形式，
+                                        // 这里要的是"跑一条 0→1 的进度再自己插值出位移"。
+                                        animate(
+                                            initialValue = 0f,
+                                            targetValue = 1f,
+                                            animationSpec = tabSwipeSettleSpec
+                                        ) { progress, _ ->
+                                            tabSwipeOffset.floatValue = from * (1f - progress)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .then(addressSharedModifier)
                     .fillMaxWidth()
                     .height(barHeight)
+                    // 量一下地址栏自己的位置：
+                    // 边缘手势靠它认出"落在地址栏上"，把那一带让给横滑。
+                    // 取窗口坐标：它与根容器原点相减就是根容器内的偏移。
+                    // 这个回调排在横滑位移之前，报的是静止位置——
+                    // 正在被拖动的那一下不该影响边缘手势的判定区。
+                    .onGloballyPositioned { addressBarBoundsInWindow = it.boundsInWindow() }
+                    // 横滑时的跟手位移：
+                    // 放在布局层而不是图层上，玻璃的折射取样才不会跟玻璃脱节。
+                    .offset { IntOffset(tabSwipeOffset.floatValue.roundToInt(), 0) }
+                    .graphicsLayer {
+                        // 划得越远玻璃收得越多：手指下像压着一页纸。
+                        val progress =
+                            (abs(tabSwipeOffset.floatValue) / (size.width * 0.5f)).coerceIn(0f, 1f)
+                        val scale = 1f - 0.04f * progress
+                        scaleX = scale
+                        scaleY = scale
+                    }
                     // 描边画在玻璃之上：玻璃自带的白色描边在白底页面上看不见，
                     // 地址栏会像"印"在页面里。这圈细边把它钉在页面之上。
                     .glassHairline(color = colors.textPrimary.copy(alpha = 0.11f)),
-                shape = RoundedCornerShape(barHeight / 2),
+                shape = GlassShape.capsule(),
                 tint = colors.glassTintStrong,
                 blurRadius = 22.dp,
                 lensHeight = 18.dp,
@@ -477,14 +744,19 @@ fun BrowserScreen(
                                 tab = tab,
                                 isTablet = isTablet,
                                 onClick = {
-                                    // 光标落在末尾而不是整条选中：
-                                    // 多数人点地址栏是为了改最后一段路径，
-                                    // 全选会让人一打字就把整条地址抹掉。
-                                    editValue = TextFieldValue(
-                                        text = tab.url,
-                                        selection = TextRange(tab.url.length)
-                                    )
-                                    editing = true
+                                    // 横滑切标签时这一下不算点击：
+                                    // 手指划过去的落点也在地址栏里，
+                                    // 不拦一下就会在切标签的同时把键盘弹出来。
+                                    if (!tabSwipeAteClick) {
+                                        // 光标落在末尾而不是整条选中：
+                                        // 多数人点地址栏是为了改最后一段路径，
+                                        // 全选会让人一打字就把整条地址抹掉。
+                                        editValue = TextFieldValue(
+                                            text = tab.url,
+                                            selection = TextRange(tab.url.length)
+                                        )
+                                        editing = true
+                                    }
                                 },
                                 onReload = {
                                     if (tab.isLoading) vm.stopLoading() else vm.reload()
@@ -510,51 +782,67 @@ fun BrowserScreen(
                     }
                 }
             }
+        }
 
-            // 加载进度条：淡入淡出，不再"啪"地一下冒出来。
-            // 进度动画放在可见性判断之外：放进去的话每次重新出现都要从 0 重新长，
-            // 加载快的站点会看到进度条闪一下，而不是接着上一段继续走。
-            val progressFraction by animateFloatAsState(
-                targetValue = tab.progress.coerceIn(0, 100) / 100f,
-                // 进度是连续上报的，补间每来一个新值就重算一次，视觉上会一顿一顿地追；
-                // 弹簧则是一路把它拉过去。弹簧会略微过冲，落到宽度上时再夹住。
-                animationSpec = MotionSpec.pageSpring(),
-                label = "page-progress"
-            )
-            Visibility(
-                // 出错时进度会停在半路，此时不该再显示进度条。
-                visible = tab.errorText == null && (tab.isLoading || tab.progress in 1..99),
-                enter = fadeIn(MotionSpec.enter(Motion.Quick)),
-                exit = fadeOut(MotionSpec.exit(Motion.Quick))
+        // 加载进度条：淡入淡出，不再"啪"地一下冒出来。
+        // 进度动画放在可见性判断之外：放进去的话每次重新出现都要从 0 重新长，
+        // 加载快的站点会看到进度条闪一下，而不是接着上一段继续走。
+        val progressFraction by animateFloatAsState(
+            targetValue = tab.progress.coerceIn(0, 100) / 100f,
+            // 进度是连续上报的，补间每来一个新值就重算一次，视觉上会一顿一顿地追；
+            // 弹簧则是一路把它拉过去。弹簧会略微过冲，落到宽度上时再夹住。
+            animationSpec = MotionSpec.pageSpring(),
+            label = "page-progress"
+        )
+        Visibility(
+            // 出错时进度会停在半路，此时不该再显示进度条。
+            visible = tab.errorText == null && (tab.isLoading || tab.progress in 1..99),
+            enter = fadeIn(MotionSpec.enter(Motion.Quick)),
+            exit = fadeOut(MotionSpec.exit(Motion.Quick)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                // 进度条跟着地址栏走：顶部档在它下面，底部档在它上面。
+                // 单独绝对定位，不再靠"排在地址栏后面"来定位——
+                // 那样的话它只能永远待在地址栏下方，底部档就跑到屏幕外了。
+                .offset { IntOffset(0, progressTop.toPx().roundToInt()) }
+                // 全屏时和地址栏一起淡出。
+                .graphicsLayer { alpha = chromeAlpha }
+                // 左右留白跟地址栏对齐：它自己不再套在地址栏那一列里。
+                .padding(start = if (isTablet) 18.dp else 10.dp, end = if (isTablet) 18.dp else 10.dp)
+                .widthIn(max = 1000.dp)
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 4.dp)
+                    .height(2.5.dp)
+                    .clip(GlassShape.capsule())
+                    .background(colors.textPrimary.copy(alpha = 0.08f))
             ) {
                 Box(
                     Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 4.dp)
-                        .height(2.5.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(colors.textPrimary.copy(alpha = 0.08f))
-                ) {
-                    Box(
-                        Modifier
-                            // 留一小截可见的头：进度为 0 时也要看得出页面在加载
-                            .fillMaxWidth(progressFraction.coerceIn(0.015f, 1f))
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(50))
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(colors.accent, colors.accentTertiary)
-                                )
+                        // 留一小截可见的头：进度为 0 时也要看得出页面在加载
+                        .fillMaxWidth(progressFraction.coerceIn(0.015f, 1f))
+                        .fillMaxHeight()
+                        .clip(GlassShape.capsule())
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(colors.accent, colors.accentTertiary)
                             )
-                    )
-                }
+                        )
+                )
             }
         }
 
         Visibility(
             // 菜单面板浮在底栏上方，两者同时出现会挤在一起。
             visible = !tab.isFullscreen && !isTablet && !collapsed && !menuOpen,
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                // 按算好的位置绝对定位：
+                // 顶部档贴屏幕下缘，分离档跟在地址栏下面，底部档叠在地址栏上面。
+                // dockTop 算的是胶囊自己的上沿，容器还要再让出胶囊外的留白。
+                .offset { IntOffset(0, (dockTop - dockGlassInset).toPx().roundToInt()) },
             enter = fadeIn(MotionSpec.enter()) + slideInVertically(
                 animationSpec = MotionSpec.pageSpring(IntOffset.Zero),
                 initialOffsetY = { it / 2 }
@@ -579,8 +867,8 @@ fun BrowserScreen(
                 },
                 backEnabled = canNavigateBack,
                 modifier = Modifier
-                    .navigationBarsPadding()
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                    // 导航栏厚度已经算进 dockTop，这里再加一次会往下偏一截。
+                    .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 8.dp)
                     .widthIn(max = 560.dp)
             )
         }
@@ -596,8 +884,10 @@ fun BrowserScreen(
             ),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 6.dp)
+                // handlePillBottom 是把手底边距容器底的距离：
+                // 把手本来就贴着容器底，往上挪这么多就落在该在的地方了。
+                // 不用再叠 navigationBarsPadding，导航栏厚度已经算进这个距离里。
+                .offset { IntOffset(0, -handlePillBottom.toPx().roundToInt()) }
         ) {
             CollapsedToolbarHandle(
                 backdrop = backdrop,
@@ -907,7 +1197,7 @@ private fun PrivacyShieldPanel(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
                 ) { },
-            shape = RoundedCornerShape(Radius.xl),
+            shape = GlassShape.squircle(Radius.xl),
             tint = colors.glassTintStrong.copy(alpha = 0.96f),
             blurRadius = 0.dp,
             lensHeight = 0.dp,
@@ -1229,10 +1519,10 @@ private fun AddressIdleContent(
                     .height(shieldBadgeSize)
                     // 药丸而不是圆点：两位数（12、25）在圆里会被压扁看不清。
                     .widthIn(min = shieldBadgeSize)
-                    .clip(RoundedCornerShape(50))
+                    .clip(GlassShape.capsule())
                     .background(colors.accent)
                     // 白圈：角标压在圆盘上，没有这一圈就分不清两层。
-                    .border(1.5.dp, colors.glassTintStrong, RoundedCornerShape(50))
+                    .border(1.5.dp, colors.glassTintStrong, GlassShape.capsule())
                     .padding(horizontal = 4.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -1303,7 +1593,7 @@ private fun AddressIdleContent(
                         text = hostLabel,
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(Radius.sm))
+                            .clip(GlassShape.squircle(Radius.sm))
                             .clickable(
                                 interactionSource = compactInteraction,
                                 indication = null,
@@ -1332,7 +1622,7 @@ private fun AddressIdleContent(
                     Column(
                         Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(GlassShape.squircle(12.dp))
                             .clickable(
                                 interactionSource = urlInteraction,
                                 indication = null,
@@ -1366,7 +1656,7 @@ private fun AddressIdleContent(
                                 Box(
                                     Modifier
                                         .padding(start = 6.dp)
-                                        .clip(RoundedCornerShape(50))
+                                        .clip(GlassShape.capsule())
                                         .background(colors.accent.copy(alpha = 0.14f))
                                         .padding(horizontal = 6.dp, vertical = 2.dp)
                                 ) {
@@ -1456,9 +1746,9 @@ private fun CollapsedToolbarHandle(
             modifier = Modifier
                 .width(64.dp)
                 .height(24.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(GlassShape.squircle(12.dp))
                 .pressScale(pressedScale = 0.9f, interactionSource = interaction),
-            shape = RoundedCornerShape(12.dp),
+            shape = GlassShape.squircle(12.dp),
             tint = colors.glassTintStrong,
             blurRadius = 16.dp,
             lensHeight = 8.dp,
@@ -1625,7 +1915,7 @@ private fun AddressEditContent(
             Box(
                 Modifier
                     .height(Dimens.minTouch)
-                    .clip(RoundedCornerShape(50))
+                    .clip(GlassShape.capsule())
                     .clickable(
                         interactionSource = cancelInteraction,
                         indication = null,
@@ -1689,7 +1979,7 @@ private fun AddressEditContent(
                     ) {
                         Box(
                             Modifier
-                                .clip(RoundedCornerShape(50))
+                                .clip(GlassShape.capsule())
                                 .background(chipBackground)
                                 .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
@@ -1852,7 +2142,7 @@ private fun RowScope.ToolDockButton(
                     .height(17.dp)
                     // 药丸而不是圆点：两位数（12、25）在圆里会被压扁看不清。
                     .widthIn(min = 17.dp)
-                    .clip(RoundedCornerShape(50))
+                    .clip(GlassShape.capsule())
                     .background(colors.accent)
                     .padding(horizontal = 4.dp),
                 contentAlignment = Alignment.Center
@@ -1917,7 +2207,7 @@ private fun BrowserDock(
             .height(Dimens.dockHeight)
             // 底栏同样浮在网页上，白底页面上也要有一条看得见的边。
             .glassHairline(color = colors.textPrimary.copy(alpha = 0.11f)),
-        shape = RoundedCornerShape(Dimens.dockHeight / 2),
+        shape = GlassShape.capsule(),
         tint = colors.dockTint,
         blurRadius = 24.dp,
         lensHeight = 18.dp,
@@ -1951,7 +2241,7 @@ private fun PageErrorCard(
     GlassSurface(
         backdrop = backdrop,
         modifier = modifier,
-        shape = RoundedCornerShape(Radius.lg),
+        shape = GlassShape.squircle(Radius.lg),
         tint = colors.glassTintStrong,
         blurRadius = 24.dp,
         lensHeight = 18.dp,
@@ -2197,12 +2487,12 @@ private fun BrowserMenu(
                     }
                 }
             )
-            .clip(RoundedCornerShape(Radius.xl))
+            .clip(GlassShape.squircle(Radius.xl))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
             ) { },
-        shape = RoundedCornerShape(Radius.xl),
+        shape = GlassShape.squircle(Radius.xl),
         tint = colors.glassTintStrong,
         blurRadius = 26.dp,
         lensHeight = 20.dp,
@@ -2276,7 +2566,7 @@ private fun BrowserMenu(
                     Modifier
                         .fillMaxWidth()
                         .heightIn(min = Dimens.minTouch)
-                        .clip(RoundedCornerShape(Radius.sm))
+                        .clip(GlassShape.squircle(Radius.sm))
                         .background(pressFill)
                         .clickable(
                             interactionSource = interaction,
@@ -2352,6 +2642,21 @@ private fun Modifier.glassHairline(color: Color): Modifier =
             style = Stroke(width = 1.dp.toPx())
         )
     }
+
+/**
+ * 在两个 Dp 位置之间插值。
+ *
+ * 地址栏换档时要从顶部搬到屏幕下缘（或反过来），
+ * 中间每一帧都得给出一个具体位置，
+ * 否则控件会在两档之间瞬移，看起来像闪了一下。
+ *
+ * 直接在 Dp 的原始值上算：Compose 的 `lerp` 只覆盖 Float/Int/Long，
+ * Dp 版本要么另找包要么自己换算，这里不绕那圈。
+ */
+private fun lerpDp(start: Dp, end: Dp, fraction: Float): Dp {
+    val f = fraction.coerceIn(0f, 1f)
+    return Dp(start.value + (end.value - start.value) * f)
+}
 
 /**
  * 地址栏要显示的站点名。

@@ -2,8 +2,7 @@
 
 对上传的 `Luna_v1.0.5_release.apk`（`com.mt.luna`）做的一次解包逆向。目的是找出**可以迁到本项目**的 UI 与动效做法。
 
-分析手段：APK 解包 → DEX 字符串表/方法表解析 → 内嵌 AGSL shader 提取 → `resources.arsc` 结构扫描。
-没有反编译器，所以这是「资源与常量级」的逆向，不是源码级。
+分析手段：APK 解包 → jadx 反编译 → 内嵌 AGSL shader 提取 → `resources.arsc` 结构扫描 → 第三方库（Backdrop / kyant shapes）反编译对照。
 
 ---
 
@@ -126,7 +125,7 @@ float sdfShape(float2 p, float2 b, float r) {
 }
 ```
 
-`in_smoothing` 是**连续圆角**（Apple 风格「squircle」）的插值系数，0 = 正圆角，1 = 超椭圆。本项目的 `RoundedCornerShape` 做不到这个——Backdrop 的 `lens` 用的是 `getCornerRadii`，只支持正圆角与绝对圆角。
+`in_smoothing` 是**连续圆角**（Apple 风格「squircle」）的插值系数，0 = 正圆角，1 = 超椭圆。Backdrop 的 `lens` 用的是 `getCornerRadii`，只支持正圆角与绝对圆角——但**kyant 的 `shapes` 库本身就内置了连续圆角**（`RoundedCornerStyle.Continuous`），不必自己写 SDF。
 
 **高光 shader 与本项目完全一致**（逐字节相同），确认两边同源：
 
@@ -242,32 +241,74 @@ half4 main(float2 coord) {
 ### 高：玻璃边缘光（`GlassEdge` + `GlassLight` + `GlassStrokeLight`）
 本项目现在是「一圈等宽描边」，玻璃边缘是平的。加上对向双光源的光带后，边缘才有厚度和方向感。三个 shader 源码就在 APK 里，可以直接对照实现。
 
+**已落地**：`ui/liquid/GlassEdge.kt`。实现走 Backdrop 的 `HighlightStyle`（公开接口，带 `createShader()` 钩子），`Highlight` 本来就沿玻璃轮廓描边并按形状裁剪，把着色器换掉即可，不必自建裁剪与混合管线。着色器自绘圆角矩形的 SDF，用梯度当表面法线，分别按主光/副光方向加权，边缘因此有方向感。
+
 ### 高：弹窗玻璃体系（`GlassPopup*` 六件套）
 本项目的菜单/对话框是统一 `LiquidDialog` + 纯色遮罩，没有「锚定到触发元素」的玻璃浮层。它的 `GlassPopupAnchorElement` / `GlassPopupFrame` / `GlassPopupVisuals` 是一套完整的浮层玻璃方案——菜单从按钮处「长出来」比从屏幕中央升起更贴手。
+
+**已落地**：`ui/components/GlassPopup.kt`。**不能用 `androidx.compose.ui.window.Popup`**——它开独立窗口，Backdrop 的折射采样同一 Activity 窗口里录制的 `LayerBackdrop`，独立窗口采不到任何东西，玻璃会变成一块死板的半透明色块。浮层改为同窗口按窗口绝对坐标定位。
 
 ### 中：工具栏横滑切标签
 本项目只做了边缘滑动前进/后退。横滑切标签是浏览器的第二高频手势，两者的手势区域可以共存（左右边缘 vs 中部）。
 
+**已落地**：地址栏玻璃件上横滑切标签。**地址栏上的横滑优先于边缘手势**——地址栏横跨整个宽度，两端与边缘手势区重叠，而用户在意地址栏上横滑时意图明确是切标签，边缘手势在那一带本来就容易被误触；边缘手势那条路径改为把落在地址栏里的起手让开，地址栏以外照常可用。
+
+跟手位移**直接写状态**，不用 `Animatable.snapTo()`（挂起函数，一次横滑上百个指针事件、上百个协程互相打断，地址栏会明显滞后于手指）；松手后的归位才交给弹簧。
+
 ### 中：Agent 的三个正交维度（思考等级 / 计划模式 / 权限模式）
 把本项目的 `AgentMode.Local/Cloud` 扩成三维，用户能更精确地控制 Agent 行为粒度。
+
+**已落地**：见 `docs/AI-Agent-design.md` 的「三个正交维度」一节。权限模式里有一条不可退让的红线——**表单提交与页面写入永远不能被自动执行**，任何权限模式下都必须用户显式确认。
 
 ### 中：长按 logo 全局菜单
 把首页那一排固定入口收进一个长按面板，换取首屏更干净，且不限制入口数量。
 
+**已落地**：长按首页品牌球弹出锚定型玻璃浮层（标签页 / 书签与历史 / 设置）。轻按不做任何事——球只是标记，抢走它的单击会让人误以为它能点。
+
 ### 中：地址栏位置可配置（顶部/底部/分离）
 最个人化的一条轴。本项目地址栏恒在顶部。
+
+**已落地**：三档都用「位置比例量 + 绝对定位」实现，换挡时位置连续，不会瞬移。
 
 ### 低：起始页四种样式
 「空白页」这一档对本项目尤其有价值——纯地址栏起步，配合长按 logo 菜单，功能都藏在手势后面。
 
+**已落地**：四种样式共用一套布局，按「留什么」拆成四个布尔，而不是抄四遍布局：
+- 品牌（全都要）/ 经典（去隐私承诺卡）/ 快捷（只剩常用网站，网格更密）/ 空白（只剩地址栏）。
+
 ### 低：连续圆角（squircle）
-`in_smoothing` 支持的。本项目用 `RoundedCornerShape`，Backdrop 的 `getCornerRadii` 不支持超椭圆。要换得自己写 SDF。
+`in_smoothing` 支持的。
+
+**已落地**：结论与当初的判断相反——**不必自己写 SDF**。kyant 的 `shapes` 1.2.1 已内置连续圆角：`RoundedCornerStyle.Continuous` + `RoundedRectangle(radius, style)`，四角同半径，且实现了 Backdrop 优先识别的 `RoundedRectangularShape` 接口，所以折射效果照常工作。封装在 `ui/liquid/GlassShape.kt`：
+
+- `GlassShape.squircle(radius)`：连续圆角矩形。
+- `GlassShape.capsule()`：胶囊（正圆角）。
+- `GlassShape.uneven(...)`：每角独立圆角（聊天气泡那种"尾巴收小一档"的形状）。
+
+胶囊保持正圆不改：它的两端本来就是半圆——已经是曲率最连续的样子了，再套连续圆角只会把端头压扁，让它既不像胶囊也不像圆。
+
+全项目已替换完毕：`RoundedCornerShape` 在 `app/src/main/java` 下只剩 `GlassShape.kt` 的注释里出现过一次。
+
+---
+
+## 6.1 落地过程中修正的三个判断
+
+解包时基于常量池得出的结论，有三条在拿到真实库之后需要修正：
+
+**一、Backdrop 2.0.1 没有独立的描边/边缘光效果。**
+`GlassEdge` / `GlassLight` / `GlassStrokeLight` 属于 Luna 自己的 Miuix 玻璃层。但 Backdrop 的 `HighlightStyle` 是公开接口，带 `createShader(shape, runtimeShaderCache)` 钩子，而 `Highlight` 本来就沿形状描边并按形状裁剪——把着色器换掉就能得到边缘光，不需要自建管线。`GlassEdge.kt` 走的就是这条路。
+
+**二、Backdrop 自带的取角半径只认 Compose 的 `CornerBasedShape`。**
+碰上 kyant 连续圆角矩形会一律当成胶囊。本项目另写了 `Shape.edgeCornerRadii()`：先认 `RoundedRectangularShape`，再认 `CornerBasedShape`，最后按胶囊处理。
+
+**三、`getCornerRadii` 不支持超椭圆，但连续圆角不需要它支持。**
+`squircle` 的四角半径仍然是四个标量，折射着色器照样能用；「曲率连续」这件事由形状自身（`RoundedRectangle` 的路径）承担，折射只关心半径。
 
 ---
 
 ## 7. 本次分析的边界
 
-- 没有反编译器，**看不到源码结构**：函数组织、状态管理、重组策略一概不知。
+- **看不到源码结构**：jadx 只能给出反编译后的 Java，函数组织、状态管理、重组策略一概不知；R8 把绝大多数类名混淆成 `a`/`b`/`c`，能确认存在但看不到实现。
 - 所有数值来自 `toString()` 常量池，是**默认值**；运行时是否被覆盖无从得知。
-- R8 把绝大多数类名混淆成 `a`/`b`/`c`，能确认存在但看不到实现。
 - 只有 `com.mt.luna.*` 顶层类与 `SettingsRoute` 保留了原名，说明**该项目的 Kotlin 源码本身大量使用单字母类名**（`ui/settings/a.kt`…`e.kt`），这本身也是一个信号：它的 UI 层被有意拆碎以压缩体积。
+- 本文 §6 描述的落地结果以**本项目**的实现为准，与 Luna 的实际效果可能有出入——它的玻璃层是 Miuix 的，我们用的是 Backdrop，两者的边缘光与连续圆角实现路径并不相同。

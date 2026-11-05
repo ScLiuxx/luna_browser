@@ -19,6 +19,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -41,7 +42,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -84,12 +84,18 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.emptyBackdrop
+import com.liuli.browser.data.StartPageStyle
 import com.liuli.browser.ui.components.BrandOrb
 import com.liuli.browser.ui.components.GlassIconButton
 import com.liuli.browser.ui.components.GlassPillButton
+import com.liuli.browser.ui.components.GlassPopup
+import com.liuli.browser.ui.components.GlassPopupAnchor
+import com.liuli.browser.ui.components.GlassPopupItem
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.components.glassPopupAnchor
+import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
@@ -116,6 +122,9 @@ private data class QuickLink(
  * 压暗之后仍认得出站点，整片网格却安静下来了。
  *
  * 顺序也按色相排过：同色系不挨着放，两块红色中间隔着别的颜色。
+ *
+ * 数量按"手机 4 列 / 平板 5 列"取整：留一列半的空位比塞满整排更难看。
+ * 十二个入口正好铺满手机三行、平板三行。
  */
 private val QuickLinks = listOf(
     QuickLink("百度", "https://m.baidu.com/", Color(0xFF2F5FE0)),
@@ -127,7 +136,10 @@ private val QuickLinks = listOf(
     QuickLink("GitHub", "https://github.com/", Color(0xFF414957)),
     QuickLink("京东", "https://m.jd.com/", Color(0xFFE1251B)),
     QuickLink("淘宝", "https://m.taobao.com/", Color(0xFFE8840E)),
-    QuickLink("网易云音乐", "https://music.163.com/", Color(0xFFA8232B))
+    QuickLink("网易云音乐", "https://music.163.com/", Color(0xFFA8232B)),
+    QuickLink("抖音", "https://www.douyin.com/", Color(0xFF2B2F3A)),
+    QuickLink("快手", "https://www.kuaishou.com/", Color(0xFFE8734A)),
+    QuickLink("微信", "https://weixin.qq.com/", Color(0xFF3BA05A))
 )
 
 /**
@@ -193,15 +205,26 @@ fun HomeScreen(
     isTablet: Boolean,
     bottomSpace: Dp,
     reduceMotion: Boolean,
+    startPageStyle: StartPageStyle,
     sharedScope: SharedTransitionScope,
     animatedScope: AnimatedVisibilityScope,
     onSearchSubmit: (String) -> Unit,
     onOpenUrl: (String) -> Unit,
     onOpenTab: (Long) -> Unit,
     onOpenLibrary: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onOpenTabs: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    // 起始页有四种样式，它们不是四套皮肤，而是四组"留什么"的选择：
+    // 品牌＝全都要，经典＝去掉隐私承诺卡，快捷＝只剩常用网站，空白＝只剩地址栏。
+    // 拆成四个布尔而不是四个分支，是因为每种样式只是少几个区块，
+    // 用分支写会把同一段布局抄四遍，改一处就漏三处。
+    val showHeaderText = startPageStyle != StartPageStyle.Blank
+    val showShortcuts = startPageStyle != StartPageStyle.Blank
+    val showRecent = startPageStyle == StartPageStyle.Brand ||
+        startPageStyle == StartPageStyle.Classic
+    val showPrivacy = startPageStyle == StartPageStyle.Brand
     // sharedBounds 的 boundsTransform 不是组合上下文，规格要在外面先算好。
     val addressBoundsSpec = MotionSpec.sharedSpring(reduceMotion, Rect(0f, 0f, 0f, 0f))
     val addressSharedModifier = with(sharedScope) {
@@ -214,11 +237,20 @@ fun HomeScreen(
     }
     var query by rememberSaveable { mutableStateOf("") }
     val haptics = LocalHapticFeedback.current
+    // 长按品牌球弹出的全局菜单。
+    var globalMenuOpen by remember { mutableStateOf(false) }
+    val globalAnchor = remember { GlassPopupAnchor() }
 
     val recentTabs = tabs.filter { !it.isPrivate && it.url.isNotBlank() }
         .sortedByDescending { it.lastUsedAt }
         .take(6)
-    val quickLinks = QuickLinks.take(if (isTablet) 10 else 8)
+    // 快捷样式只留常用网站，这一档的网格要密一些：
+    // 既然没有别的区块，入口就得一眼看全，摆成两行三列不如铺满一屏。
+    val quickLinkLimit = when (startPageStyle) {
+        StartPageStyle.Shortcuts -> if (isTablet) 15 else 12
+        else -> if (isTablet) 10 else 8
+    }
+    val quickLinks = QuickLinks.take(quickLinkLimit)
 
     // 入场节拍：所有区块按阅读顺序依次落位。
     // 搜索框不在其中：它是地址栏共享元素的落点，
@@ -272,28 +304,54 @@ fun HomeScreen(
                         .entranceReveal(headerBeat, reduceMotion),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    BrandOrb(size = if (isTablet) 42.dp else 36.dp)
+                    // 品牌球同时是全局菜单的入口：长按它弹出一份"全局动作"面板，
+                    // 把标签页、书签、设置这些不常按但需要够到的入口收在一处。
+                    // 轻按不做任何事——球只是标记，抢走它的单击会让人误以为它能点。
+                    Box(
+                        Modifier
+                            .size(if (isTablet) 42.dp else 36.dp)
+                            .clip(CircleShape)
+                            .combinedClickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onLongClickLabel = "打开全局菜单",
+                                onLongClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    globalMenuOpen = true
+                                },
+                                onClick = { }
+                            )
+                            .glassPopupAnchor(globalAnchor)
+                    ) {
+                        BrandOrb(size = if (isTablet) 42.dp else 36.dp)
+                    }
                     Spacer(Modifier.width(Space.md))
-                    Column(Modifier.weight(1f)) {
-                        // 产品名只当署名，不当标题：
-                        // 浏览器首屏该由搜索框当主角，二十多号的产品名
-                        // 压在搜索框上方，第一眼看到的是应用而不是输入框。
-                        BasicText(
-                            text = "琉璃浏览器",
-                            style = Type.title.copy(color = colors.textPrimary),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(Modifier.height(Space.xxs))
-                        BasicText(
-                            text = if (isPrivate) "隐私标签 · 不记录历史" else "轻盈 · 安全 · 一镜到底",
-                            style = Type.bodySmall.copy(
-                                color = if (isPrivate) colors.accentSecondary else colors.textTertiary,
-                                fontWeight = if (isPrivate) FontWeight.Medium else FontWeight.Normal
-                            ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                    if (showHeaderText) {
+                        Column(Modifier.weight(1f)) {
+                            // 产品名只当署名，不当标题：
+                            // 浏览器首屏该由搜索框当主角，二十多号的产品名
+                            // 压在搜索框上方，第一眼看到的是应用而不是输入框。
+                            BasicText(
+                                text = "琉璃浏览器",
+                                style = Type.title.copy(color = colors.textPrimary),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(Modifier.height(Space.xxs))
+                            BasicText(
+                                text = if (isPrivate) "隐私标签 · 不记录历史" else "轻盈 · 安全 · 一镜到底",
+                                style = Type.bodySmall.copy(
+                                    color = if (isPrivate) colors.accentSecondary else colors.textTertiary,
+                                    fontWeight = if (isPrivate) FontWeight.Medium else FontWeight.Normal
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    } else {
+                        // 空白样式下没有标题行，重量要靠品牌球自己撑住，
+                        // 否则整个头部会向左塌陷，球紧贴屏幕边缘。
+                        Spacer(Modifier.weight(1f))
                     }
                     if (!isTablet) {
                         // 书签与设置并排放在右上角：
@@ -336,101 +394,141 @@ fun HomeScreen(
 
                 Spacer(Modifier.height(sectionGap))
 
-                SectionTitle(
-                    title = "常用网站",
-                    hint = "轻触即可打开",
-                    modifier = Modifier.entranceReveal(linksTitleBeat, reduceMotion)
-                )
-                Spacer(Modifier.height(Space.md))
-                QuickLinkGrid(
-                    backdrop = backdrop,
-                    links = quickLinks,
-                    columns = columns,
-                    firstBeat = linksFirstBeat,
-                    isTablet = isTablet,
-                    reduceMotion = reduceMotion,
-                    onOpenUrl = onOpenUrl
-                )
-
-                Spacer(Modifier.height(sectionGap))
-                if (recentTabs.isNotEmpty()) {
+                if (showShortcuts) {
                     SectionTitle(
-                        title = "继续浏览",
-                        hint = "轻触切回标签页",
-                        modifier = Modifier.entranceReveal(recentTitleBeat, reduceMotion)
+                        title = "常用网站",
+                        hint = "轻触即可打开",
+                        modifier = Modifier.entranceReveal(linksTitleBeat, reduceMotion)
                     )
                     Spacer(Modifier.height(Space.md))
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(Space.md),
-                        // 末尾留一段空白：最后一张卡要能完整停稳，
-                        // 而不是永远卡在屏幕边缘被切掉。
-                        contentPadding = PaddingValues(end = horizontal)
-                    ) {
-                        itemsIndexed(recentTabs, key = { _, tab -> tab.id }) { index, tab ->
-                            // 逐张浮现：横向滚动条里的卡片错峰落位。
-                            val beat = recentFirstBeat + index
-                            var revealed by remember(tab.id) {
-                                mutableStateOf(tab.id in revealedTabIds)
-                            }
-                            LaunchedEffect(tab.id) {
-                                if (!revealed) {
-                                    if (!reduceMotion) delay((beat * EntranceBeatMillis).toLong())
-                                    revealed = true
-                                    if (tab.id !in revealedTabIds) revealedTabIds.add(tab.id)
+                    QuickLinkGrid(
+                        backdrop = backdrop,
+                        links = quickLinks,
+                        columns = columns,
+                        firstBeat = linksFirstBeat,
+                        isTablet = isTablet,
+                        reduceMotion = reduceMotion,
+                        onOpenUrl = onOpenUrl
+                    )
+                    Spacer(Modifier.height(sectionGap))
+                }
+
+                if (showRecent) {
+                    if (recentTabs.isNotEmpty()) {
+                        SectionTitle(
+                            title = "继续浏览",
+                            hint = "轻触切回标签页",
+                            modifier = Modifier.entranceReveal(recentTitleBeat, reduceMotion)
+                        )
+                        Spacer(Modifier.height(Space.md))
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(Space.md),
+                            // 末尾留一段空白：最后一张卡要能完整停稳，
+                            // 而不是永远卡在屏幕边缘被切掉。
+                            contentPadding = PaddingValues(end = horizontal)
+                        ) {
+                            itemsIndexed(recentTabs, key = { _, tab -> tab.id }) { index, tab ->
+                                // 逐张浮现：横向滚动条里的卡片错峰落位。
+                                val beat = recentFirstBeat + index
+                                var revealed by remember(tab.id) {
+                                    mutableStateOf(tab.id in revealedTabIds)
                                 }
-                            }
-                            val alpha by animateFloatAsState(
-                                targetValue = if (revealed) 1f else 0f,
-                                animationSpec = cardFadeSpec,
-                                label = "recent-tab-alpha"
-                            )
-                            val scale by animateFloatAsState(
-                                targetValue = if (revealed) 1f else 0.94f,
-                                animationSpec = cardScaleSpec,
-                                label = "recent-tab-scale"
-                            )
-                            Box(
-                                Modifier.graphicsLayer {
-                                    this.alpha = alpha
-                                    scaleX = scale
-                                    scaleY = scale
-                                }
-                            ) {
-                                RecentTabCard(
-                                    tab = tab,
-                                    backdrop = backdrop,
-                                    isTablet = isTablet,
-                                    onClick = {
-                                        // 切回标签页是一次明确的跳转，给一次轻触感。
-                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onOpenTab(tab.id)
+                                LaunchedEffect(tab.id) {
+                                    if (!revealed) {
+                                        if (!reduceMotion) delay((beat * EntranceBeatMillis).toLong())
+                                        revealed = true
+                                        if (tab.id !in revealedTabIds) revealedTabIds.add(tab.id)
                                     }
+                                }
+                                val alpha by animateFloatAsState(
+                                    targetValue = if (revealed) 1f else 0f,
+                                    animationSpec = cardFadeSpec,
+                                    label = "recent-tab-alpha"
                                 )
+                                val scale by animateFloatAsState(
+                                    targetValue = if (revealed) 1f else 0.94f,
+                                    animationSpec = cardScaleSpec,
+                                    label = "recent-tab-scale"
+                                )
+                                Box(
+                                    Modifier.graphicsLayer {
+                                        this.alpha = alpha
+                                        scaleX = scale
+                                        scaleY = scale
+                                    }
+                                ) {
+                                    RecentTabCard(
+                                        tab = tab,
+                                        backdrop = backdrop,
+                                        isTablet = isTablet,
+                                        onClick = {
+                                            // 切回标签页是一次明确的跳转，给一次轻触感。
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            onOpenTab(tab.id)
+                                        }
+                                    )
+                                }
                             }
                         }
-                    }
-                } else {
-                    // 没有可继续的标签页时给一句话说明，
-                    // 空白的一段会让用户以为这个功能坏了。
-                    SectionTitle(
-                        title = "继续浏览",
-                        hint = null,
-                        modifier = Modifier.entranceReveal(recentTitleBeat, reduceMotion)
-                    )
-                    Spacer(Modifier.height(Space.md))
-                    Box(Modifier.entranceReveal(recentTitleBeat + 1, reduceMotion)) {
-                        EmptyRecentHint(onOpenLibrary = onOpenLibrary)
+                    } else {
+                        // 没有可继续的标签页时给一句话说明，
+                        // 空白的一段会让用户以为这个功能坏了。
+                        SectionTitle(
+                            title = "继续浏览",
+                            hint = null,
+                            modifier = Modifier.entranceReveal(recentTitleBeat, reduceMotion)
+                        )
+                        Spacer(Modifier.height(Space.md))
+                        Box(Modifier.entranceReveal(recentTitleBeat + 1, reduceMotion)) {
+                            EmptyRecentHint(onOpenLibrary = onOpenLibrary)
+                        }
                     }
                 }
 
-                Spacer(Modifier.height(sectionGap))
-
-                Box(Modifier.entranceReveal(privacyBeat, reduceMotion)) {
-                    PrivacyCard(backdrop = backdrop)
+                if (showPrivacy) {
+                    Spacer(Modifier.height(sectionGap))
+                    Box(Modifier.entranceReveal(privacyBeat, reduceMotion)) {
+                        PrivacyCard(backdrop = backdrop)
+                    }
                 }
 
                 Spacer(Modifier.height(bottomSpace + Space.lg))
             }
+        }
+
+        // 全局菜单：浮层要盖住整屏，所以放在这一层的最末尾——
+        // 放在滚动内容里会被内容的裁剪切掉一半。
+        GlassPopup(
+            anchor = globalAnchor,
+            visible = globalMenuOpen,
+            onDismissRequest = { globalMenuOpen = false },
+            backdrop = backdrop,
+            shape = GlassShape.squircle(Radius.lg)
+        ) {
+            GlassPopupItem(
+                glyph = Glyph.Tabs,
+                label = "标签页",
+                onClick = {
+                    globalMenuOpen = false
+                    onOpenTabs()
+                }
+            )
+            GlassPopupItem(
+                glyph = Glyph.Bookmark,
+                label = "书签与历史",
+                onClick = {
+                    globalMenuOpen = false
+                    onOpenLibrary()
+                }
+            )
+            GlassPopupItem(
+                glyph = Glyph.Settings,
+                label = "设置",
+                onClick = {
+                    globalMenuOpen = false
+                    onOpenSettings()
+                }
+            )
         }
     }
 }
@@ -520,7 +618,7 @@ private fun HomeSearchBar(
                 scaleX = focusScale
                 scaleY = focusScale
             },
-        shape = RoundedCornerShape(Radius.xl),
+        shape = GlassShape.squircle(Radius.xl),
         tint = colors.glassTintStrong,
         blurRadius = 22.dp,
         lensHeight = 20.dp,
@@ -683,7 +781,7 @@ private fun HomeSearchBar(
             Box(
                 Modifier
                     .matchParentSize()
-                    .border(ringWidth, ringColor, RoundedCornerShape(Radius.xl))
+                    .border(ringWidth, ringColor, GlassShape.squircle(Radius.xl))
             )
         }
     }
@@ -748,7 +846,7 @@ private fun QuickLinkTile(
         backdrop = backdrop,
         modifier = modifier
             .height(if (isTablet) 108.dp else 92.dp)
-            .clip(RoundedCornerShape(Radius.md))
+            .clip(GlassShape.squircle(Radius.md))
             .clickable(
                 interactionSource = interaction,
                 indication = null,
@@ -757,7 +855,7 @@ private fun QuickLinkTile(
                 onClick = onClick
             )
             .pressScale(pressedScale = 0.94f, interactionSource = interaction),
-        shape = RoundedCornerShape(Radius.md),
+        shape = GlassShape.squircle(Radius.md),
         tint = colors.glassTint,
         blurRadius = 18.dp,
         lensHeight = 14.dp,
@@ -816,7 +914,7 @@ private fun RecentTabCard(
         modifier = Modifier
             .width(if (isTablet) 260.dp else 214.dp)
             .height(if (isTablet) 100.dp else 88.dp)
-            .clip(RoundedCornerShape(Radius.md))
+            .clip(GlassShape.squircle(Radius.md))
             .clickable(
                 interactionSource = interaction,
                 indication = null,
@@ -825,7 +923,7 @@ private fun RecentTabCard(
                 onClick = onClick
             )
             .pressScale(pressedScale = 0.95f, interactionSource = interaction),
-        shape = RoundedCornerShape(Radius.md),
+        shape = GlassShape.squircle(Radius.md),
         tint = colors.glassTint,
         blurRadius = 18.dp,
         lensHeight = 14.dp,
@@ -876,7 +974,7 @@ private fun TabIcon(tab: BrowserTab) {
     Box(
         Modifier
             .size(40.dp)
-            .clip(RoundedCornerShape(Radius.sm))
+            .clip(GlassShape.squircle(Radius.sm))
             .background(colors.glassTintStrong),
         contentAlignment = Alignment.Center
     ) {
@@ -909,7 +1007,7 @@ private fun EmptyRecentHint(onOpenLibrary: () -> Unit) {
         Box(
             Modifier
                 .size(40.dp)
-                .clip(RoundedCornerShape(Radius.sm))
+                .clip(GlassShape.squircle(Radius.sm))
                 .background(colors.glassTint),
             contentAlignment = Alignment.Center
         ) {
@@ -938,7 +1036,7 @@ private fun EmptyRecentHint(onOpenLibrary: () -> Unit) {
         Box(
             Modifier
                 .heightIn(min = Dimens.minTouch)
-                .clip(RoundedCornerShape(Radius.pill))
+                .clip(GlassShape.capsule())
                 .background(colors.accent.copy(alpha = 0.12f))
                 .clickable(
                     interactionSource = libraryInteraction,
@@ -970,7 +1068,7 @@ private fun PrivacyCard(
     GlassSurface(
         backdrop = backdrop,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(Radius.md),
+        shape = GlassShape.squircle(Radius.md),
         tint = colors.glassTint,
         blurRadius = 18.dp,
         lensHeight = 14.dp,

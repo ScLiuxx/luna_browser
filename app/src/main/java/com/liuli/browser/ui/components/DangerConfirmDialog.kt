@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -24,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.emptyBackdrop
+import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.liquid.LiquidButton
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
@@ -70,7 +70,7 @@ fun DangerConfirmDialog(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
                 ) { },
-            shape = RoundedCornerShape(Radius.xl),
+            shape = GlassShape.squircle(Radius.xl),
             tint = colors.glassTintStrong.copy(alpha = 0.96f),
             blurRadius = 0.dp,
             lensHeight = 0.dp,
