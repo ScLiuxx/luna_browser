@@ -576,9 +576,7 @@ fun BrowserScreen(
         // 否则渐变会在地址栏下方就淡完了，遮罩等于没铺。
         TopBarScrim(
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(topScrimHeight),
+                .align(Alignment.TopCenter),
             height = topScrimHeight
         )
 

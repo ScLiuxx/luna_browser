@@ -3,7 +3,8 @@ package com.liuli.browser.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -40,8 +41,11 @@ fun BoxScope.TopBarScrim(
     color: Color = LocalLiuliColors.current.pageBackground
 ) {
     Box(
+        // 高度在这里定：调用方只管说"多高"，不用自己先摆好尺寸。
+        // 组件内部若再 fillMaxSize，会把高度顶掉、遮罩盖住整屏。
         modifier
-            .fillMaxSize()
+            .fillMaxWidth()
+            .height(height)
             .background(
                 Brush.verticalGradient(
                     0.00f to color.copy(alpha = 1.00f),
