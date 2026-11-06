@@ -40,7 +40,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -87,6 +86,7 @@ import com.liuli.browser.ui.components.GlyphIcon
 import com.liuli.browser.ui.components.HeaderSubtitle
 import com.liuli.browser.ui.components.ScreenHeader
 import com.liuli.browser.ui.liquid.GlassShape
+import com.liuli.browser.ui.liquid.LunaGridCells
 import com.liuli.browser.ui.liquid.Visibility
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
@@ -132,8 +132,20 @@ fun TabSwitcherScreen(
         compareByDescending<BrowserTab> { it.id == activeId }
             .thenByDescending { it.lastUsedAt }
     )
-    val columns = if (isTablet) 3 else 2
-    // 平板上 3 列若沿用手机的比例，每张卡会宽到近 400dp、高到 500dp：
+    // 列数按可用宽度算，不再按"是不是平板"二选一。
+    //
+    // 此前是 `isTablet ? 3 : 2`：折叠屏展开、竖屏平板、横屏手机
+    // 这些宽度都落在 600dp 阈值的两侧，列数却在 2 与 3 之间硬跳。
+    // Luna 的算法是给每列定一个最小宽度，再由可用宽度算列数
+    // （`defpackage/cwc.java` 的 `mo4538a`），并且**列数下限是 2**。
+    //
+    // 最小列宽取 240dp 而不是 Luna 的 135dp：
+    // Luna 的标签卡里放的是图标加标题，135dp 够用；
+    // 本项目的卡片放的是网页快照，135dp 缩到看不清。
+    // 240dp 下手机仍是 2 列、平板仍是 3 列——与此前一致，
+    // 但宽度变化时列数是连续变化的，不再是硬跳。
+    val gridCells = remember { LunaGridCells(minSize = 240.dp) }
+    // 卡片比例：平板上 3 列若沿用手机的比例，每张卡会宽到近 400dp、高到 500dp：
     // 一屏放不下两张，网页快照还被裁得只剩中间一条。
     // 平板改用更宽的卡片比例，卡片回到"一眼能看完两行"的尺度。
     val cardAspect = if (isTablet) 0.92f else 0.70f
@@ -249,7 +261,7 @@ fun TabSwitcherScreen(
                 contentAlignment = Alignment.Center
             ) {
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(columns),
+                    columns = gridCells,
                     state = gridState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(

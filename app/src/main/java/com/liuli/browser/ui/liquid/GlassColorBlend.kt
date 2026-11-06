@@ -230,15 +230,21 @@ object GlassMaterials {
  * 玻璃呈现给人看的是折射后的画面，着色应当作用在那个画面上，
  * 否则着色会被折射再拉一遍，边缘的色会歪掉。
  *
- * 这一层由 AGSL 着色器完成，一次最多三层。
- * 着色器要 API 33；更低的版本上这个函数什么都不做，
- * 玻璃退回"只有模糊与折射"的朴素样子，不会崩。
+ * @param layers 要混进去的色层。
+ * @param amount 着色强度，0..1。
+ *   它乘进**每一层自己的 alpha**（Luna 的做法：
+ *   `defpackage/z02.java:94` 把 amount 乘进每层的 `ik2.m9301d(j)`）。
+ *   注意它只改着色：模糊与折射一点没动。
+ *   这正是它与"整块 alpha 淡入淡出"的分别——
+ *   后者会把模糊和折射一起淡掉，玻璃塌成一块普通半透明色块。
  */
-fun BackdropEffectScope.colorBlend(layers: List<GlassColorLayer>) {
+fun BackdropEffectScope.colorBlend(layers: List<GlassColorLayer>, amount: Float = 1f) {
     if (!isRuntimeShaderSupported()) return
     if (layers.isEmpty()) return
     // 着色器最多吃三层，超出的部分丢弃。
     val used = layers.take(MAX_LAYERS)
+    // Luna 先把 amount 夹到 0..1 再用（`defpackage/frb.java:3817`）。
+    val strength = amount.coerceIn(0f, 1f)
     runtimeShaderEffect(
         key = "GlassColorBlend",
         shaderString = COLOR_BLEND_SHADER,
@@ -249,7 +255,10 @@ fun BackdropEffectScope.colorBlend(layers: List<GlassColorLayer>) {
             val r = layer?.color?.red ?: 0f
             val g = layer?.color?.green ?: 0f
             val b = layer?.color?.blue ?: 0f
-            val a = layer?.color?.alpha ?: 0f
+            // 强度乘进每层的 alpha，而不是另开一个 uniform：
+            // 着色器那边的混合公式（`mix(d, b, a)`）本来就是按 alpha 加权的，
+            // 乘进去就等于"这一层少混一点"。
+            val a = (layer?.color?.alpha ?: 0f) * strength
             setFloatUniform("in_blend$index", r, g, b, a)
         }
         // 模式与层数打包在一个 float4 里：前三项是各层的模式编号，

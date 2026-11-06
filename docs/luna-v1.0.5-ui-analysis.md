@@ -180,15 +180,119 @@ float sdfShape(float2 p, float2 b, float r) {
 Backdrop 自带的 `getCornerRadii` 只认正圆角与绝对圆角——但**kyant 的 `shapes` 库本身就内置了连续圆角**（`RoundedCornerStyle.Continuous`），形状本身不必自己写 SDF；
 不过**着色器里的距离场**若按正圆角算，四角的等距线会与真实轮廓错开一小段，边光在角上就会「浮」起来。
 
+### 2.4.1 着色器原文就躺在 dex 里
+
+既有结论已经说了：Luna 的着色器是 **AGSL**（不是 SkSL）。
+再往下一层——**这些 AGSL 的原文是以 Java 字符串字面量的形式，明文存在 dex 里的**。
+逆向玻璃效果因此不需要"反混淆着色器"这一步：把字符串取出来就是可编译的 AGSL 源码。
+
+混色那一段的位置最明确：
+
+| 项 | 位置 |
+| --- | --- |
+| 方法 | `defpackage/frb.java:3814-3823` 的 `m6994x(x54, hd5, float, String)` |
+| 原文 | **第 3822 行一条长行**，整段 AGSL 原文明文（不加密、不 base64、不运行时拼接） |
+| 编译 | `defpackage/l08.java:193-197` → `x54.mo17858c(name, src)` 缓存（`defpackage/vza.java:17-27`），首次使用才 `new RuntimeShader(src)`（`defpackage/t15.java:3640-3648`） |
+| 调用点 | 只有两处：`defpackage/fd5.java:51`（`MiuixGlassColorBlendActionBar`）、`defpackage/fd5.java:54`（`MiuixGlassColorBlend`） |
+
+§2.4 那四段也是同一形态的明文字面量（`defpackage/mo4.java:85-91`）。
+也就是说：**APK 里的玻璃着色器全部是可读的原文，不是需要逆向的资源。**
+
+**等价的证明（逐行 diff）。** 把 `defpackage/frb.java:3822` 那条字符串取出来，与本项目
+`app/src/main/java/com/liuli/browser/ui/liquid/GlassColorBlend.kt:284-360` 的 `COLOR_BLEND_SHADER`
+做逐行比对，结论是**源码级等价**：
+
+- **可执行代码完全一致**——九种模式的公式、`clipColor` / `setLum` / `softLightChannel` 的写法、
+  `main` 里"去预乘 → 混合 → 加回预乘"的顺序，一处不差；
+- 差异只有两处**排版**：`lumOf` 与 `setLum` 的函数体，Luna 写成多行大括号、本项目写成单行；
+- 其余差异只是**注释**：Luna 是英文注释，本项目是中文译版。
+
+这话说白了就是：**本项目此前"照着截图调出来"的混色着色器，其实和 Luna 的原版是同一份东西**，
+不是"看起来差不多"。§2.2 的九种模式表能一字不差地对上，根子就在这儿。
+（§6.1.1 那轮的运行期数值对照只能证明"算出来一样"，这一条证明的是"源码就是同一份"。）
+
 ### 2.5 它的模糊不是 `RenderEffect.createBlurEffect`
 
 它的玻璃模糊走的是**自研的 AGSL 多 pass 高斯**（`qx1.u` → `u41`）：
 14 tap 可分离核、mip 层级 `1 << level * 13`、tile 尺寸、`LMGauss_H_d` / `LMGauss_V_d` 两段着色器串联。
 而 Backdrop 2.0.1 的 `blur()` 用的是 Compose 的 `BlurEffect`（单 pass box-blur 近似）。
 
-这条**没法照搬**——它在打包进来的 Backdrop 库里，不在本项目依赖的版本里。
+这条**没法照搬**——它在打包进来的库里，不在本项目依赖的版本里。
 本项目的玻璃模糊与它本来就有肉眼可见的差别（后者更"奶"，前者更"透"），
 但要改就得换库或自己实现一遍 14 tap 高斯，代价与收益不成比例。
+
+把这条链拆开，细节比"多 pass 高斯"这几个字具体得多：
+
+| 环节 | 位置 | 事实 |
+| --- | --- | --- |
+| 出处 | `defpackage/s54.java:8`、`defpackage/dw6.java:6` | `@Metadata` 里标着模块名 `top.yukonga.miuix.kmp:miuix-blur`——这套 AGSL 高斯是 **Miuix 自带的 `miuix-blur` 产物**（不是本项目依赖的 Backdrop 2.0.1 那套 `blur()`）；`s54` 正是持有 `z54` / `x54` 这套模糊状态的 modifier 节点（`defpackage/s54.java:63-146`） |
+| 核的生成 | `defpackage/u41.java:55-112` | **CPU 侧**算：14 个高斯权重（`double[14]`，`defpackage/s54.java:91`）两两合并成 **≤7 个 tap**（合并循环 `i < 7`），每个 tap 在着色器里取一对对称样本 → 最多 **14 次对称采样** |
+| 两趟 | `defpackage/qx1.java:3841`、`defpackage/qx1.java:3868` | 先水平 `LMGauss_H_d` 再垂直 `LMGauss_V_d`（名字在 `defpackage/u41.java:26` / `:35` 生成），两段都是 `RuntimeShader` |
+| 串联 | `defpackage/wu4.java:887-898` | `RenderEffect.createChainEffect(V, H)`（调用点 `defpackage/qx1.java:3874`）——**不是** `RenderEffect.createBlurEffect` |
+
+不过 APK 里确实还留着 `RenderEffect.createBlurEffect`（`defpackage/wu4.java:244` 等三处），
+容易看错它承担了什么。唯一调用它的地方是 `wu4.m19010L`（`defpackage/wu4.java:235-245`），
+而它在玻璃模糊链里被调了三次（`defpackage/z54.java:946`、`:967`、`:980`），
+半径分别按主半径的 **0.13 / 0.4 / 1.0** 倍折算（`defpackage/z54.java:901-906` 的
+`u41.m17214d`），每一档套的都是**同一条 AGSL 链**（`x54.f56108f` ← `qx1.m14999u`），
+三档再用 `BlendMode.SRC_OVER` 叠起来（`defpackage/z54.java:972-985`）。
+
+也就是说：**材质里的 `blurRadius` 最终落到那条 AGSL 链上**——
+`createBlurEffect` 是叠在它外面的补充层，不是它本身。
+本项目的 Backdrop 2.0.1 走的是 Compose 的 `BlurEffect`（单 pass box-blur 近似），
+与这条链完全是两回事，这就是"抄不动"的真正原因。
+
+### 2.6 它的模糊半径不按尺寸缩放，而且靠"把背景膨胀一圈"来避免边缘拉散
+
+**结论先行：模糊半径与玻璃形状的宽高完全无关，唯一约束是 150dp 的绝对上限。**
+
+半径的计算只有一行，`defpackage/fd5.java:48`：
+
+```java
+float fM8740t = hy4.m8740t(f, 0.0f, 150.0f) * x54Var.f56103a;
+```
+
+- `hy4.m8740t(f, 0f, 150f)` 就是 clamp（`defpackage/hy4.java:2344-2350`）；
+- `x54Var.f56103a` 是 **density**，证据链：`defpackage/ko3.java:81-83` 的
+  `mo1870w0(f) = mo1861b() * f` 就是 dp→px 换算 → `defpackage/x54.java:165-167` 的
+  `mo1861b()` 返回 `f56103a` → `defpackage/z54.java:1152` 把 density 写进 `x54Var.f56103a`。
+
+也就是说：**clamp(dp 值, 0, 150) × density**，上限 150dp 换算成 px。
+公式里**没有任何一项来自玻璃的宽或高**——同一个 60dp 模糊，贴在 40dp 高的胶囊和
+贴在 400dp 高的面板上，半径一模一样。
+
+那半径大了，边缘为什么不会被"拉散"？因为它**不是缩小半径来规避，而是把录到的背景层向外膨胀一圈**，
+让膨胀出来的那一圈拿到**真实的邻近像素**：
+
+1. **扩张量**：`defpackage/qx1.java:3778-3782` — `f56107e = 13 * (1 << level)` px。
+   这个 13 不是随便取的：核的权重下标是 0..13（`defpackage/u41.java:64-67`），
+   合并后的 tap 偏移以 13 为界（`defpackage/u41.java:84-95`），
+   而表面本身按 `1 << level` 降采样（`defpackage/qx1.java:3796-3804`），
+   所以换算回设备像素，核的最大支撑半径正好是 `13 * (1 << level)` px——**扩张量与支撑半径严丝合缝**。
+2. **层随之变大**：`defpackage/qx1.java:3783-3786` — 模糊层的宽高各加 `2 * 扩张量`。
+3. **录背景时把内容整体平移 `-pad`**：`defpackage/c7b.java:54-61` —
+   取 `x54Var.f56107e`（扩张量），按降采样倍率折算（`i > 1` 时除以 `i`，
+   对应 `defpackage/cw6.java:68-78` 那套按 1/i 缩放绘制），
+   **取负后作为绘制偏移**（x、y 各一份）。
+   这一步是关键：**内容往内挪一圈，层比形状多出来的那一圈就落在了原画面的真实邻近像素上**，
+   而不是空白。
+4. **因此 CLAMP 在形状内永不触发**：`defpackage/ysb.java:42` 的 LMGauss AGSL 用
+   `clamp(xy ± offset, float2(0.5), in_maxCoord)` 取样，
+   但层已经胀过一圈，形状内的取样永远落在有内容的范围内。
+
+> **顺带纠一个容易误读的地方**：`x54.f56110h = 0.0045f`（`defpackage/fd5.java:40`、
+> `defpackage/C0343f2.java:323`）**不是抗锯齿参数**，它的真实身份是**抖动**。
+> `defpackage/z54.java:187-199` 把它当 `noise_coeff` 喂给名为 `NoiseDither` 的着色器
+> （对每个像素加一点基于 `fract(sin(...))` 的伪随机噪声），用来**打散 8-bit 色带**；
+> `defpackage/z54.java:212`、`:597-604` 还会按层级对它做系数调整。
+> 它与边缘处理、与膨胀机制都没有关系。
+
+**这对本项目的意义**：本项目的 `ui/liquid/GlassColorBlend.kt:111-114` 已经记下了
+"Luna 的模糊半径不随玻璃尺寸缩放"这条结论（并引了同一处 `fd5.java:48`）——本项目一度按"最短边的 35%"夹一次，
+结果同一个浮层换个内容就换了一副样子。
+现在能补上**为什么**可以这么干：Luna 之所以敢让半径与尺寸无关，
+是因为它把"边缘会拉散"这个问题从**半径**转移到了**背景层的膨胀**上——
+而这一步依赖的是它自己那套录背景 + 可分离高斯的管线，本项目用的 Backdrop 没有这一层。
 
 ---
 
@@ -496,6 +600,12 @@ Kotlin 编译器看不见 AGSL 的语法错误——着色器是运行期字符�
 >
 > 第三轮又查出一个**只有跑起来才看得见**的缺陷（色层 alpha 写成了不透明），
 > 见 §6.2 第十五条。
+
+**此后又做了一次比数值对照更强的验证。**
+第三轮证明的是「跑起来算出来一样」；后来从 APK 里把着色器原文直接取了出来
+（§2.4.1），与本项目的实现做了**逐行比对**，结论是**源码级等价**——
+不是"数值碰巧对得上"，而是**同一份源码**（差异只有大括号排版与注释语言）。
+证据等级比数值对照高一级：数值对照能发现公式写错，逐行 diff 能发现**抄错了版本**。
 
 ---
 

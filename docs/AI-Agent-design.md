@@ -396,7 +396,7 @@ TaskContext
 - **手势不抢网页**：边缘滑动只在屏幕左右起手、越过 slop 后才消费事件，纵向滚动完全不受影响。判定同时看位移与速度，轻推和狠甩要有区别。
 - **读屏要能听出来**：图标-only 按钮必须给 `contentDescription`；选中态要给 `stateDescription`；长文本要限行。玻璃件上的白字压在浅色快照上会糊掉，卡片遮罩要分上下两段。
 
-### 6.4 液态动效的三条硬约定
+### 6.4 液态动效的十条硬约定
 
 这几条是逐个细节打磨过程中反复踩到的坑，写成约定以免再犯。
 
@@ -435,6 +435,42 @@ TaskContext
 误触返回键在浏览器里太常见了——一次误触就关掉整个浏览器，用户刚开的一堆标签全没了。所以退出应用要一个二次确认窗口（5 秒），提示「再按一次返回离开」。
 
 但**页面后退、关掉别的标签页不能拦**：用户明确要求了，让他再按一次才生效是在质疑他的操作。只有真正退到头、只剩"离开应用"这一条路时才确认。
+
+**七、玻璃材质要整份取，不得把半径与色层拆开单配**
+
+Luna 就是这么组织的：`GlassMaterial(blurRadius, first, second, third)`（`defpackage/hd5.java:60` 的 `toString` 原文），模糊半径与三层色同属一个对象，换半径时色层跟着换（`defpackage/hd5.java:32` 的 `m8228a` 只改半径、色层照搬），改不了配错。
+
+本项目此前把两者拆开传（`blurRadius` 一个参数、`blendLayers` 另一个），于是"半径 60dp 却配了轻色层"这种错配在调用处无从察觉——色层是按某个半径调的，半径被改小，错配就悄悄发生。
+
+约定：取玻璃材质只能整份取，不得把半径与色层拆开单配。本项目已落为 `GlassMaterial(blurRadius, layers)`（`ui/liquid/GlassColorBlend.kt`）：`GlassSurface` 的 `material` 参数一给，半径与色层就都定了；`blurRadius` / `blendLayers` 两个散参数只留给"素玻璃"用。要带色层的玻璃，从 `GlassMaterials` 取整份材质，别在调用处手写"半径 + 层列表"的组合。
+
+**八、模糊半径是材质的属性，不随玻璃尺寸缩放**
+
+Luna 的模糊半径只受一个 150dp 绝对上限约束（`defpackage/fd5.java:48`：`clamp(dp, 0, 150) * density`），与形状大小无关。
+
+本项目一度按"最短边的 35%"夹一次，结果同一个浮层换个内容就换了一副样子：菜单少两项时面板矮，模糊跟着变小，而色层仍是按 60dp 调的那一档——轻模糊配重色层，玻璃发浑。
+
+约定：玻璃的模糊半径是材质的属性，不随容器尺寸变化。不按最短边、不按高度、不按任何尺寸派生的量去缩放它；半径要变就整份换材质。
+
+**九、模糊的采样环必须盖住整个模糊核**
+
+本项目用 `com.kyant.backdrop` 2.0.1。该库的语义是：`blur()` 会把 `padding` 设成半径（`effects/Blur.kt:16-20`），这个 `padding` 就是采样环——录制的背景层比形状大一圈（`DrawBackdropModifier.kt:290-297`），这一圈里是真实的邻近像素，模糊核因此不会采到 clamp 出来的假边缘。而 `lens()` 会把 `padding` 减去折射高度（`effects/Lens.kt:25-27`），等于把模糊要的采样环扣掉了一圈。
+
+结果：采样环只剩 `blurRadius - lensHeight`，模糊核伸到环外 → 玻璃边缘被拉出一条散边。
+
+修复已落地（`ui/components/Glass.kt`）：在调用 `lens()` 之前把 `padding` 垫回 `blurPx + lensHeight`，让 `lens()` 减完正好回到 `blurRadius`，库的约定就守住了。
+
+约定：玻璃的采样环必须不小于其模糊半径；折射不得以牺牲模糊核为代价。新增玻璃件时，凡同时用 `blur()` 与 `lens()`，都要显式把 `padding` 补足折射高度。
+
+**十、混色层可以有"强度"（amount），不要靠整块 alpha 淡入淡出**
+
+Luna 的 `defpackage/frb.java:3814` `m6994x(x54, hd5, float amount, String name)` 把 `amount` clamp 到 0..1（`defpackage/frb.java:3817`），再在 `defpackage/z02.java:94` 把它乘进每一层的 alpha（`ik2.m9301d(j) * f5`）——只改着色，不动模糊与折射。
+
+典型用法见 `defpackage/vv4.java:943`：玻璃的 amount 取自一个 0..1 的动画量（`defpackage/vv4.java:881` 处 `clamp(f8, 0, 1)`，再乘一个系数后传下去）。于是玻璃的着色强度跟着动画走——不是整块淡入淡出，而是只让着色跟着变，模糊与折射始终在。
+
+本项目的 `GlassColorBlend.kt` 目前每层的强度写死在颜色自己的 alpha 里，缺一个"整体强度"旋钮。
+
+约定：玻璃的着色强度用独立的 amount 控制，不要靠整块 alpha 淡入淡出来代替——后者会把模糊与折射一起淡掉，玻璃会塌成一块普通半透明色块。
 
 ### 6.5 浏览器的个人化轴
 

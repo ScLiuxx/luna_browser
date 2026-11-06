@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -20,6 +21,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
@@ -51,6 +54,7 @@ import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.tanh
 
@@ -101,6 +105,19 @@ fun GlassSurface(
      */
     material: GlassMaterial? = null,
     /**
+     * 着色强度，0..1。
+     *
+     * 它只改**着色**，模糊与折射一点不动。
+     * 这与"整块 alpha 淡入淡出"是两件事：
+     * 后者把模糊和折射一起淡掉，玻璃塌成一块普通半透明色块；
+     * 前者让玻璃的底色自己变化，透出来的层次还在。
+     *
+     * Luna 就是这么分的：amount 乘进每层色自己的 alpha
+     * （`defpackage/z02.java:94`），由调用方按动画量给
+     * （`defpackage/vv4.java:943` 把一个 0..1 的动画量乘上去）。
+     */
+    blendAmount: Float = 1f,
+    /**
      * 模糊半径。
      *
      * 只有在不给 [material] 时才用它。
@@ -133,14 +150,30 @@ fun GlassSurface(
     val effectiveBlurRadius = material?.blurRadius ?: blurRadius
     val effectiveBlendLayers = material?.layers ?: blendLayers
     val requestedTint = tint ?: colors.glassTint
+    // 着色强度只压暗**色**，不碰模糊与折射。
+    // 玻璃的"透"由模糊与折射决定，"色"由 tint 与混色层决定，两者是分开的。
+    val amount = blendAmount.coerceIn(0f, 1f)
     val effectiveTint = if (isRenderEffectSupported()) {
-        requestedTint
+        requestedTint.copy(alpha = requestedTint.alpha * amount)
     } else {
-        requestedTint.copy(alpha = max(requestedTint.alpha, if (colors.isDark) 0.90f else 0.88f))
+        // 不支持 RenderEffect 时玻璃退化成半透明色块，
+        // 这时颜色得自己扛住对比度，不能跟着强度一起淡掉。
+        requestedTint.copy(alpha = max(requestedTint.alpha * amount, if (colors.isDark) 0.90f else 0.88f))
     }
     // 折射着色器只认圆角形状，喂给它别的形状会直接抛异常。
     // 玻璃件统一用圆角形状，这里再兜一次底，免得调用方踩到崩溃。
     val lensEnabled = lensHeight > 0.dp && lensAmount > 0.dp && shape.supportsLens()
+
+    // 采样环的上限：玻璃到"有内容的地方"还有多远。
+    //
+    // 采样环是模糊核伸到玻璃外的那一圈真实内容（Backdrop 的 `padding`）。
+    // 环伸到窗口外就没有内容了——那里是空白，混进来是透明，
+    // 玻璃的边缘会淡成半透明，比拉散还难看。
+    //
+    // 位置每次布局后才知道（玻璃会被动画带着走），所以用 onGloballyPositioned 量。
+    // 存成 mutableIntStateOf 而不是普通 state：它只在**绘制**时被读，
+    // 位置变了只重画、不重组（地址栏在顶/底之间移动时每帧位置都变）。
+    val marginPx = remember { mutableIntStateOf(0) }
 
     // 有 onClick 定开启液态跟随，interactive 单独开启则只跟随不接管点击
     val liquidEnabled = interactive || onClick != null
@@ -177,6 +210,28 @@ fun GlassSurface(
     Box(
         modifier
             .then(pressModifier)
+            .onGloballyPositioned { coordinates ->
+                // 玻璃到"有内容的地方"还有多远：
+                // 背景层只铺满窗口，玻璃贴着窗口边时，
+                // 采样环伸出去的那一段是空白，混进来是透明。
+                //
+                // 四边取最近的一边——任何一边越界，那一圈就不完整。
+                //
+                // "有内容的地方"就是组合的根：背景层铺的正是它。
+                val bounds = coordinates.boundsInWindow()
+                val rootBounds = generateSequence(coordinates) { it.parentLayoutCoordinates }
+                    .last()
+                    .boundsInWindow()
+                val margin = minOf(
+                    bounds.left - rootBounds.left,
+                    bounds.top - rootBounds.top,
+                    rootBounds.right - bounds.right,
+                    rootBounds.bottom - bounds.bottom
+                ).coerceAtLeast(0f)
+                if (margin != marginPx.floatValue) {
+                    marginPx.floatValue = margin
+                }
+            }
             .drawBackdrop(
                 backdrop = backdrop,
                 shape = { shape },
@@ -203,11 +258,30 @@ fun GlassSurface(
                         // 就换了一副样子**：菜单少两项时面板矮，模糊跟着变小，
                         // 而色层仍是按 60dp 调的那一档——轻模糊配重色层，玻璃发浑。
                         // 现在按材质给的值走，色层与半径始终是同一档。
+                        // 采样环：模糊核会伸到玻璃外多远，就得由多宽的**真实内容**垫着，
+                        // 否则核只能取到记录层的边缘像素，玻璃边上就拉出一条散边。
+                        //
+                        // 库里 blur() 把 padding 设成半径（`effects/Blur.kt:16-20`），
+                        // 正是这个意思；但 lens() 又按折射高度把它扣掉
+                        // （`effects/Lens.kt:25-27`），环于是缩到 blurRadius - lensHeight，
+                        // 模糊核伸到环外——散边就是这么来的。
+                        //
+                        // 这里把折射要扣的量先垫回去，lens() 减完，环正好回到模糊半径。
+                        //
+                        // 但环也不能越过窗口：窗外没有内容，混进来是透明，
+                        // 玻璃的边缘会淡成半透明，比散边还难看。
+                        // 所以环宽取"模糊半径"与"玻璃到窗口边的距离"里小的那个。
                         val blurPx = effectiveBlurRadius.toPx()
-                        if (blurPx > 0f) blur(blurPx)
+                        val lensHeightPx = lensHeight.toPx()
+                        val ringPx = min(blurPx, marginPx.intValue.toFloat())
+                        if (blurPx > 0f) {
+                            blur(blurPx)
+                        }
                         if (lensEnabled) {
+                            // 折射 band 的深度要从环里扣，先补回去，lens() 自己会减。
+                            padding = ringPx + lensHeightPx
                             lens(
-                                refractionHeight = lensHeight.toPx(),
+                                refractionHeight = lensHeightPx,
                                 refractionAmount = lensAmount.toPx(),
                                 chromaticAberration = true
                             )
@@ -216,7 +290,7 @@ fun GlassSurface(
                         // 你隔着玻璃看到的是被折射、被模糊过的内容，
                         // 着色若发生在那之前，边缘的色会跟着折射再歪一次。
                         if (effectiveBlendLayers.isNotEmpty()) {
-                            colorBlend(effectiveBlendLayers)
+                            colorBlend(effectiveBlendLayers, amount)
                         }
                     }
                 },
