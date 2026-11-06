@@ -204,6 +204,25 @@ private fun screenTransition(
     // 用户才知道自己还在哪个标签上。
     val dimAlpha = 0.35f
 
+    // 浮层淡入淡出的时长。
+    //
+    // 没有共享元素在飞时，用 Luna 那套"进慢出快"（190ms / 95ms）：
+    // 用户的注意力已经跟着新页面走了，旧页面就该立刻让路。
+    //
+    // 共享元素在飞时**不能**用这套时长：标签页快照还要飞 300ms 上下才落位，
+    // 容器若 95ms 就淡完，快照会浮在一块已经定住的画面上。
+    // 这时保持两边接近，让容器与快照一起到位。
+    val fadeEnter = if (sharedFlight) {
+        MotionSpec.enter(reduced)
+    } else {
+        MotionSpec.screenEnter(reduced)
+    }
+    val fadeExit = if (sharedFlight) {
+        MotionSpec.exit(reduced)
+    } else {
+        MotionSpec.screenExit(reduced)
+    }
+
     // 浮层升起 / 落下：纵向滑动，桌面端从右侧滑入。
     if (from != to && (to == ScreenLayer.Overlay || from == ScreenLayer.Overlay)) {
         if (to == ScreenLayer.Overlay) {
@@ -220,10 +239,10 @@ private fun screenTransition(
             // 浮层朝观众压过来，底层往后退并压暗。
             return (enter +
                 scaleIn(animationSpec = scaleSpec, initialScale = overlayScale) +
-                fadeIn(MotionSpec.enter(reduced))) togetherWith
+                fadeIn(fadeEnter)) togetherWith
                 (exit +
                     scaleOut(animationSpec = scaleSpec, targetScale = baseScale) +
-                    fadeOut(MotionSpec.exit(reduced), targetAlpha = dimAlpha))
+                    fadeOut(fadeExit, targetAlpha = dimAlpha))
         }
         val enter = if (isTablet) {
             slideInHorizontally(animationSpec = offsetSpec) { -it / 8 }
@@ -238,16 +257,21 @@ private fun screenTransition(
         // 原路退回：底面回到前景，浮层缩回原处。
         return (enter +
             scaleIn(animationSpec = scaleSpec, initialScale = baseScale) +
-            fadeIn(MotionSpec.enter(reduced), initialAlpha = dimAlpha)) togetherWith
+            fadeIn(fadeEnter, initialAlpha = dimAlpha)) togetherWith
             (exit +
                 scaleOut(animationSpec = scaleSpec, targetScale = overlayScale) +
-                fadeOut(MotionSpec.exit(reduced)))
+                fadeOut(fadeExit))
     }
     // 网页与首页之间靠共享元素承接，这里只做轻微缩放，避免抢戏。
     val enterScale = if (to == ScreenLayer.Content) 0.99f else 1f
     val exitScale = if (from == ScreenLayer.Content) 1.01f else 1f
     // 交叉淡化的时长要和共享元素的飞行时间相当：
     // 淡出比淡入短，中途会露出背景，交叉淡化中间帧发灰。
+    //
+    // 这条路径**不能**用上面那套"进慢出快"的时长：
+    // 共享元素（地址栏）用的是临界阻尼弹簧，稳定要 315ms 左右，
+    // 交叉淡化若 95ms 就淡完，地址栏会在两屏都淡定之后才落下来。
+    // 所以这里保持两边等长，只把时长对齐共享元素的飞行时间。
     return (fadeIn(MotionSpec.enter(reduced, Motion.Slow)) +
         scaleIn(animationSpec = scaleSpec, initialScale = enterScale)) togetherWith
         (fadeOut(MotionSpec.exit(reduced, Motion.Slow)) +

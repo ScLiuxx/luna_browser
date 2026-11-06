@@ -45,6 +45,26 @@ object Motion {
     /** 通用元素位移：无过冲，避免列表项抖动。 */
     val GlideSpring: SpringSpec = SpringSpec(dampingRatio = 1f, stiffness = 420f)
 
+    /**
+     * 浮层展开：轻微过冲，让面板"长"出来。
+     *
+     * 取自 Luna 的实际数值（`defpackage/ry4.java:891`）。
+     * 它用"周期"而不是刚度来描述弹簧：周期 0.4 秒、阻尼 0.8，
+     * 换算成刚度约 247。过冲只有一点点，手感干净。
+     */
+    val PopupEnterSpring: SpringSpec = SpringSpec(dampingRatio = 0.8f, stiffness = 246.7f)
+
+    /**
+     * 浮层收起：同一套阻尼，但周期缩到 0.28 秒（刚度约 504）。
+     *
+     * **退场必须比进场快**，这是硬编码在 Luna 里的不对称：
+     * 面板缩回锚点时用户的注意力已经移开，让它慢慢退会拖沓。
+     *
+     * 用同一套阻尼是为了让进出的手感连续——
+     * 换一套曲线的话，展开与收起看上去像两个不同的组件。
+     */
+    val PopupExitSpring: SpringSpec = SpringSpec(dampingRatio = 0.8f, stiffness = 503.6f)
+
     // ---------------------------------------------------------------------
     // 时长
     // ---------------------------------------------------------------------
@@ -53,6 +73,30 @@ object Motion {
     const val Quick = 160
     const val Normal = 220
     const val Slow = 320
+
+    // ---------------------------------------------------------------------
+    // 页面转场
+    // ---------------------------------------------------------------------
+
+    /**
+     * 转场进场时长。
+     *
+     * 取自 Luna 的实际数值（`p000/mt7.java:155`）。
+     * 它比本项目原先用的 [Normal] 略短：190ms 已经足够看清"新页面从哪来"，
+     * 再长就变成"等动画"了。
+     */
+    const val ScreenEnter = 190
+
+    /**
+     * 转场退场时长。
+     *
+     * 取自 Luna 的实际数值（`p000/mt7.java:161`）。
+     *
+     * 退场只有进场的一半，这个**不对称**是关键：
+     * 用户的注意力已经跟着新页面走了，旧页面就该立刻让路；
+     * 两边等长时，旧页面会赖在屏幕上不走，转场显得拖沓。
+     */
+    const val ScreenExit = 95
 
     // ---------------------------------------------------------------------
     // 缓动
@@ -150,6 +194,19 @@ object MotionSpec {
         if (reduced) tween(Motion.Fast) else Motion.GlideSpring.spring()
 
     /**
+     * 浮层展开动画。
+     *
+     * 退场另有 [popupExitSpring]，它比进场快一半——
+     * 面板缩回锚点时用户注意力已经移开，慢慢退会拖沓。
+     */
+    fun popupEnterSpring(reduced: Boolean): FiniteAnimationSpec<Float> =
+        if (reduced) tween(Motion.Fast) else Motion.PopupEnterSpring.spring()
+
+    /** 浮层收起动画。刻意比进场快。 */
+    fun popupExitSpring(reduced: Boolean): FiniteAnimationSpec<Float> =
+        if (reduced) tween(Motion.Fast) else Motion.PopupExitSpring.spring()
+
+    /**
      * 补间时长。
      *
      * "减少动态效果"开启时一律用最短档：补间规格此前完全无视这个开关，
@@ -166,6 +223,19 @@ object MotionSpec {
     /** 退出动画（用于 fadeOut / scaleOut 等 Float 规格的转场）。 */
     fun exit(reduced: Boolean, durationMillis: Int = Motion.Quick): FiniteAnimationSpec<Float> =
         tween(duration(reduced, durationMillis), easing = Motion.Exit)
+
+    /**
+     * 页面级转场的进场淡入。
+     *
+     * 与 [exit] 配套使用：进场 190ms、退场 95ms。
+     * 两边等长时旧页面会在新页面到位后还赖着不走，转场显得拖。
+     */
+    fun screenEnter(reduced: Boolean): FiniteAnimationSpec<Float> =
+        tween(duration(reduced, Motion.ScreenEnter), easing = Motion.Enter)
+
+    /** 页面级转场的退场淡出。刻意比进场短一半。 */
+    fun screenExit(reduced: Boolean): FiniteAnimationSpec<Float> =
+        tween(duration(reduced, Motion.ScreenExit), easing = Motion.Exit)
 
     /** 数值补间动画。 */
     fun value(reduced: Boolean, durationMillis: Int = Motion.Normal): FiniteAnimationSpec<Float> =
@@ -213,6 +283,14 @@ object MotionSpec {
     @Composable
     fun glideSpring(): FiniteAnimationSpec<Float> = glideSpring(reduceMotion)
 
+    /** 浮层展开动画。 */
+    @Composable
+    fun popupEnterSpring(): FiniteAnimationSpec<Float> = popupEnterSpring(reduceMotion)
+
+    /** 浮层收起动画。 */
+    @Composable
+    fun popupExitSpring(): FiniteAnimationSpec<Float> = popupExitSpring(reduceMotion)
+
     /** 进入动画（用于 fadeIn / scaleIn 等 Float 规格的转场）。 */
     @Composable
     fun enter(durationMillis: Int = Motion.Normal): FiniteAnimationSpec<Float> =
@@ -222,6 +300,14 @@ object MotionSpec {
     @Composable
     fun exit(durationMillis: Int = Motion.Quick): FiniteAnimationSpec<Float> =
         exit(reduceMotion, durationMillis)
+
+    /** 页面级转场的进场淡入（190ms）。 */
+    @Composable
+    fun screenEnter(): FiniteAnimationSpec<Float> = screenEnter(reduceMotion)
+
+    /** 页面级转场的退场淡出（95ms）。 */
+    @Composable
+    fun screenExit(): FiniteAnimationSpec<Float> = screenExit(reduceMotion)
 
     /** 数值补间动画。 */
     @Composable

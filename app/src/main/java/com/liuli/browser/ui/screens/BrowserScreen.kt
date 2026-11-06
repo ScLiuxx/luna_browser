@@ -141,6 +141,7 @@ import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.components.TopBarScrim
 import com.liuli.browser.ui.liquid.GlassMaterials
 import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.liquid.Visibility
@@ -308,6 +309,11 @@ fun BrowserScreen(
         rootHeight - navInset - barHeight,
         bottomBlend
     )
+    // 顶栏渐隐遮罩的高度：盖住状态栏与地址栏这一摞。
+    // 遮罩要盖到地址栏底下一点才有效果——
+    // 渐变是"上半实、下半虚"，正好把地址栏罩住，
+    // 内容从底下滚过来时先撞上实的那一段，文字才不会被压住。
+    val topScrimHeight = addressTop + barHeight + 12.dp
     // 进度条那一行：顶部档在胶囊下方，底部档在胶囊上方。
     val progressTop = lerpDp(
         addressTop + barHeight,
@@ -561,6 +567,21 @@ fun BrowserScreen(
             animationSpec = MotionSpec.pageSpring(0.01.dp),
             label = "address-padding-v"
         )
+        // 网页内容会从顶栏底下滚过去，顶栏自己又是玻璃：
+        // 玻璃再透，内容也会与顶栏里的字叠在一起，糊成一片。
+        // 铺一层竖直渐变：上半部完全不透明保证文字对比度，
+        // 往下快速消散，内容于是"溶"进顶栏而不是被硬边切断。
+        //
+        // 高度取顶栏这一摞的实际高度（含状态栏），
+        // 否则渐变会在地址栏下方就淡完了，遮罩等于没铺。
+        TopBarScrim(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .height(topScrimHeight),
+            height = topScrimHeight
+        )
+
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -706,7 +727,11 @@ fun BrowserScreen(
                 // 铺一层半透明白纱会把网页内容洗成一片奶白，
                 // 换成混色层之后，内容的明暗层次被保留下来，
                 // 玻璃反而比之前更"透"。
-                blendLayers = if (colors.isDark) GlassMaterials.Dark else GlassMaterials.Light,
+                //
+                // 22dp 属于小模糊档：色层给得足，内容层次清楚。
+                // 换到大模糊档时色层得跟着换（LightLarge / DarkLarge），
+                // 只放大模糊半径而照抄同一组颜色，玻璃会糊成一片奶白。
+                blendLayers = GlassMaterials.of(isDark = colors.isDark),
                 contentPadding = PaddingValues(
                     horizontal = barPaddingH,
                     vertical = barPaddingV

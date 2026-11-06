@@ -124,8 +124,16 @@ fun Modifier.glassPopupAnchor(anchor: GlassPopupAnchor): Modifier =
  *   （例如 `LiuliApp` 里 `rememberLayerBackdrop()` 出来、传给各页面的 `auroraBackdrop`）。
  *   这里不自己 `rememberLayerBackdrop()`：自建的那份只能录到浮层自己画的东西，
  *   采样到的会是浮层自己，折射毫无意义。
- * @param minWidth 菜单最小宽度，内容比它窄时面板仍留到这个宽度。
- * @param maxWidth 菜单最大宽度，内容比它宽时文字省略，不把面板撑破。
+ * @param panelMinWidth 菜单最小宽度，内容比它窄时面板仍留到这个宽度。
+ * @param panelMaxWidth 菜单最大宽度，内容比它宽时文字省略，不把面板撑破。
+ * @param panelMaxHeight 菜单最大高度。菜单项多时按它截断并滚动。
+ * @param safeMargin 面板与屏幕边缘的最小间距。
+ *
+ * 宽度与高度这三个参数**故意不叫** maxWidth / maxHeight：
+ * 浮层内部用 BoxWithConstraints 拿可用区域，而那个作用域里
+ * 也有 maxWidth / maxHeight / minWidth 三个同名成员。
+ * Kotlin 里外层函数的参数会**盖住**作用域的同名成员
+ * （已用字节码核实），同名会让"屏幕有多宽"与"菜单该多宽"混成一件事。
  */
 @Composable
 fun GlassPopup(
@@ -135,8 +143,10 @@ fun GlassPopup(
     backdrop: Backdrop,
     modifier: Modifier = Modifier,
     shape: Shape = GlassShape.squircle(Radius.lg),
-    minWidth: Dp = 220.dp,
-    maxWidth: Dp = 320.dp,
+    panelMinWidth: Dp = 220.dp,
+    panelMaxWidth: Dp = 320.dp,
+    panelMaxHeight: Dp = 416.dp,
+    safeMargin: Dp = 12.dp,
     onExitFinished: () -> Unit = {},
     content: @Composable ColumnScope.() -> Unit
 ) {
@@ -156,8 +166,13 @@ fun GlassPopup(
     val progress = remember { Animatable(0f) }
 
     // 规格统一从 MotionSpec 取：它内部已经按全局开关降级。
-    val enterSpec = MotionSpec.pageSpring()
-    val exitSpec = MotionSpec.exit()
+    //
+    // 进出场用同一套阻尼但不同刚度：进场慢一点让面板"长"出来，
+    // 退场快一倍让它干脆缩回锚点。
+    // 之前退场用补间、进场用弹簧，两条曲线形状不同，
+    // 面板展开与收起看上去像两个不同的组件。
+    val enterSpec = MotionSpec.popupEnterSpring()
+    val exitSpec = MotionSpec.popupExitSpring()
 
     LaunchedEffect(visible) {
         if (visible) {
@@ -173,8 +188,9 @@ fun GlassPopup(
             snapshotFlow { anchor.boundsInWindow != null && panelSize != null }.first { it }
             progress.animateTo(1f, animationSpec = enterSpec)
         } else {
-            // 退场用补间而不是弹簧：弹簧在消失时会回弹一下，像是不舍得走，
-            // 关闭动作要干脆。
+            // 退场用更快的弹簧（见 exitSpec 的说明）：
+            // 面板缩回锚点时用户的注意力已经移开，
+            // 让它慢慢退会拖沓，关闭动作要干脆。
             // 首次组合时 visible 本来就是 false，这一支也会走：
             // 那时面板从没展开过，不该通知外面"退场结束了"。
             val wasShowing = showing
@@ -205,9 +221,15 @@ fun GlassPopup(
     ) {
         // 用 BoxWithConstraints 拿可用区域的尺寸：约束在首帧就是确定的，
         // 而"量出来"的尺寸首帧还是 0，拿它算高度上限会把面板压成一条线。
+        //
+        // 这里必须显式写 this.maxWidth / this.maxHeight：
+        // 作用域的这两个成员与本函数的参数同名，
+        // 不加 this. 读到的是参数（菜单该多宽），而不是屏幕有多宽。
+        // 混起来的后果是面板按 320dp 的宽度去和屏幕比，
+        // 在平板上永远算成"放不下"，菜单会莫名翻到锚点上方。
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val areaWidth = with(density) { maxWidth.toPx() }
-            val areaHeight = with(density) { maxHeight.toPx() }
+            val areaWidth = with(density) { this@BoxWithConstraints.maxWidth.toPx() }
+            val areaHeight = with(density) { this@BoxWithConstraints.maxHeight.toPx() }
             val anchorRect = anchor.boundsInWindow
 
             val layout = remember(anchorRect, contentOrigin, panelSize, gap, areaWidth, areaHeight) {
@@ -221,8 +243,27 @@ fun GlassPopup(
                 )
             }
 
+            // 面板尺寸约束：先夹到"屏幕能给的"，再夹到"自己要的"。
+            //
+            // 顺序很重要：先把最大宽度夹到可用宽度，最小宽度再夹到最大宽度。
+            // 反过来夹的话，在窄屏上最小宽度会大于被夹过的最大宽度，
+            // 面板宽度会超出屏幕边缘。
+            //
+            // 高度同理：可用高度要先扣掉上下两边的安全间距。
+            // areaWidth / areaHeight 是屏幕实际给的尺寸（像素），
+            // 参数那边要换算成像素再比。
+            val marginPx = with(density) { safeMargin.toPx() }
+            val usableWidth = (areaWidth - marginPx * 2f).coerceAtLeast(0f)
+            val usableHeight = (areaHeight - marginPx * 2f).coerceAtLeast(0f)
+            val clampedMaxWidth = with(density) { panelMaxWidth.toPx() }
+                .coerceAtMost(usableWidth)
+            val clampedMinWidth = with(density) { panelMinWidth.toPx() }
+                .coerceAtMost(clampedMaxWidth)
             // 菜单高度上限：屏幕再矮也不能让浮层吃掉整屏。
-            val maxPanelHeight = maxHeight * 0.6f
+            // 之前这里写死 0.6 倍屏幕高，折叠屏展开后那点高度会算出一个
+            // 比可用空间还大的上限，面板就会被推到屏幕外。
+            val maxPanelHeight = with(density) { panelMaxHeight.toPx() }
+                .coerceAtMost(usableHeight)
 
             Box(
                 Modifier
@@ -321,11 +362,16 @@ fun GlassPopup(
                     ) {
                         Column(
                             Modifier
-                                // 宽度先按内容取（IntrinsicSize.Max），再夹进 [minWidth, maxWidth]：
+                                // 宽度先按内容取（IntrinsicSize.Max），再夹进 [最小宽度, 最大宽度]：
                                 // 只夹不取，菜单要么永远是最大宽、要么被挤成一条。
-                                .widthIn(min = minWidth, max = maxWidth)
+                                // 这两个边界已经按可用宽度夹过了，
+                                // 窄屏上夹出来的范围不会超出屏幕。
+                                .widthIn(
+                                    min = with(density) { clampedMinWidth.toDp() },
+                                    max = with(density) { clampedMaxWidth.toDp() }
+                                )
                                 .width(IntrinsicSize.Max)
-                                .heightIn(max = maxPanelHeight)
+                                .heightIn(max = with(density) { maxPanelHeight.toDp() })
                                 .verticalScroll(rememberScrollState())
                         ) {
                             content()

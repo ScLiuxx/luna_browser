@@ -64,32 +64,82 @@ data class GlassColorLayer(
  * 数值来自 Luna 的实际调校结果，直接照搬：
  * 它的玻璃之所以看起来是"玻璃"而不是"磨砂片"，
  * 靠的就是这几层的组合方式，而不是模糊半径本身。
+ *
+ * Luna 把材质分成**四档**，每档按模糊半径分组：
+ * 小模糊（20dp）与大模糊（60dp），各有一浅一深。
+ * 模糊越大，身后内容被糊得越彻底，色层就越要"补"回层次，
+ * 于是两档的色层强度并不相同——不能只换模糊半径、照抄同一组颜色。
  */
 object GlassMaterials {
 
     /**
-     * 浅色下的玻璃。
+     * 浅色 · 小模糊（20dp）。
      *
      * 三层各司其职：
-     * - 先减色 5%：玻璃整体压一点，厚玻璃挡光；
+     * - 先减色 2%：玻璃整体压一点，厚玻璃挡光；
      * - 再柔光叠白 60%：把背后内容提亮，但不冲掉它的层次；
      * - 最后强光叠白 40%：亮部再收一档，边界更清楚。
      */
     val Light: List<GlassColorLayer> = listOf(
-        GlassColorLayer(Color.Black.copy(alpha = 0.05f), GlassBlendMode.PlusDarker),
+        GlassColorLayer(Color.Black.copy(alpha = 0.020f), GlassBlendMode.PlusDarker),
         GlassColorLayer(Color.White.copy(alpha = 0.60f), GlassBlendMode.SoftLight),
         GlassColorLayer(Color.White.copy(alpha = 0.40f), GlassBlendMode.HardLight)
     )
 
     /**
-     * 深色下的玻璃。
+     * 浅色 · 大模糊（60dp）。
      *
-     * 深色下反过来：亮度取黑（压暗），再叠一层普通黑把对比拉平。
+     * 模糊到 60dp 时背后内容几乎只剩色块，
+     * 于是第三层从"强光收边界"换成"再叠 60% 白"：
+     * 边界此时靠形状本身交代，不需要强光去压。
+     */
+    val LightLarge: List<GlassColorLayer> = listOf(
+        GlassColorLayer(Color.Black.copy(alpha = 0.020f), GlassBlendMode.PlusDarker),
+        GlassColorLayer(Color.White.copy(alpha = 0.60f), GlassBlendMode.SoftLight),
+        GlassColorLayer(Color.White.copy(alpha = 0.60f), GlassBlendMode.HardLight)
+    )
+
+    /**
+     * 深色 · 小模糊（20dp）。
+     *
+     * 深色下反过来：先减色 10% 把整体压下去，
+     * 再用亮度混合把明度往中灰拉，最后叠一层遮罩把对比拉平。
+     *
+     * 亮度层用的是**中灰而不是纯黑**：亮度混合只取色层的明度，
+     * 纯黑会把背后内容一路压到全黑，玻璃就成了一个洞；
+     * 中灰则保留住"底下还有东西"的知觉。
      */
     val Dark: List<GlassColorLayer> = listOf(
-        GlassColorLayer(Color.Black.copy(alpha = 0.45f), GlassBlendMode.Luminosity),
-        GlassColorLayer(Color.Black.copy(alpha = 0.32f), GlassBlendMode.SrcOver)
+        GlassColorLayer(Color.Black.copy(alpha = 0.102f), GlassBlendMode.PlusDarker),
+        GlassColorLayer(Color(0xFF565656), GlassBlendMode.Luminosity),
+        GlassColorLayer(Color(0xFF3F3F3F), GlassBlendMode.Overlay)
     )
+
+    /**
+     * 深色 · 大模糊（60dp）。
+     *
+     * 模糊极大时，亮度层要拉得更狠（60% 而不是 40%）才压得住，
+     * 同时把遮罩换成近黑的 6%：
+     * 深色玻璃底下透出的东西越少，遮罩就越要实。
+     */
+    val DarkLarge: List<GlassColorLayer> = listOf(
+        GlassColorLayer(Color.Black.copy(alpha = 0.102f), GlassBlendMode.PlusDarker),
+        GlassColorLayer(Color(0xFF6C6C6C), GlassBlendMode.Luminosity),
+        GlassColorLayer(Color(0xFF060606), GlassBlendMode.SoftLight)
+    )
+
+    /**
+     * 按主题与模糊档取预设。
+     *
+     * 调用处不必自己判断深浅色：深色下用错了浅色那组，
+     * 玻璃会变成一块发白的脏纱，是最常见的"液态玻璃没做对"。
+     */
+    fun of(isDark: Boolean, large: Boolean = false): List<GlassColorLayer> = when {
+        isDark && large -> DarkLarge
+        isDark -> Dark
+        large -> LightLarge
+        else -> Light
+    }
 }
 
 /**
