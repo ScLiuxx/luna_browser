@@ -10,7 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -171,9 +171,9 @@ fun GlassSurface(
     // 玻璃的边缘会淡成半透明，比拉散还难看。
     //
     // 位置每次布局后才知道（玻璃会被动画带着走），所以用 onGloballyPositioned 量。
-    // 存成 mutableIntStateOf 而不是普通 state：它只在**绘制**时被读，
+    // 存成 mutableFloatStateOf 而不是普通 state：它只在**绘制**时被读，
     // 位置变了只重画、不重组（地址栏在顶/底之间移动时每帧位置都变）。
-    val marginPx = remember { mutableIntStateOf(0) }
+    val marginPx = remember { mutableFloatStateOf(0f) }
 
     // 有 onClick 定开启液态跟随，interactive 单独开启则只跟随不接管点击
     val liquidEnabled = interactive || onClick != null
@@ -273,7 +273,7 @@ fun GlassSurface(
                         // 所以环宽取"模糊半径"与"玻璃到窗口边的距离"里小的那个。
                         val blurPx = effectiveBlurRadius.toPx()
                         val lensHeightPx = lensHeight.toPx()
-                        val ringPx = min(blurPx, marginPx.intValue.toFloat())
+                        val ringPx = min(blurPx, marginPx.floatValue)
                         if (blurPx > 0f) {
                             blur(blurPx)
                         }
