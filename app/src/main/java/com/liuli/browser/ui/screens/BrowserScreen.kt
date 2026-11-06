@@ -718,6 +718,14 @@ fun BrowserScreen(
                     .glassHairline(color = colors.textPrimary.copy(alpha = 0.11f)),
                 shape = GlassShape.capsule(),
                 tint = colors.glassTintStrong,
+                // 22dp：这不是随便挑的数，是 GlassSurface 的上限
+                // （模糊半径不超过玻璃最短边的 35%，地址栏高 64dp → 22.4dp）。
+                //
+                // Luna 的顶栏用 44.72dp（浅）/ 63.25dp（深），比这大一倍多。
+                // 本项目照搬不了：模糊会把背后的图层向外撑开，
+                // 地址栏只有 64dp 高，撑出去的采样区会越过屏幕顶边，
+                // 取到空白。要用更大的模糊得先解决采样区越界的问题，
+                // 不能直接把数字调大——那样只是让上限形同虚设。
                 blurRadius = 22.dp,
                 lensHeight = 18.dp,
                 lensAmount = 26.dp,
@@ -726,10 +734,10 @@ fun BrowserScreen(
                 // 换成混色层之后，内容的明暗层次被保留下来，
                 // 玻璃反而比之前更"透"。
                 //
-                // 22dp 属于小模糊档：色层给得足，内容层次清楚。
-                // 换到大模糊档时色层得跟着换（LightLarge / DarkLarge），
-                // 只放大模糊半径而照抄同一组颜色，玻璃会糊成一片奶白。
-                blendLayers = GlassMaterials.of(isDark = colors.isDark),
+                // 取的是**顶栏**那档颜色（Luna 的 a / b 两套）：
+                // Luna 的顶栏就是"大模糊配顶栏色层"，
+                // 照搬成"大模糊配重色层"会把内容压得太沉。
+                blendLayers = GlassMaterials.topBar(isDark = colors.isDark),
                 contentPadding = PaddingValues(
                     horizontal = barPaddingH,
                     vertical = barPaddingV

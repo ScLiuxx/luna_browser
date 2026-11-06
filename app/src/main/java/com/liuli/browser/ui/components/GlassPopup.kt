@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.Backdrop
+import com.liuli.browser.ui.liquid.GlassMaterials
 import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
@@ -315,6 +316,12 @@ fun GlassPopup(
                     GlassSurface(
                         backdrop = backdrop,
                         shape = shape,
+                        // 浮层是大模糊档（60dp）：面板要盖住身后的内容，
+                        // 模糊不够时底下的字会透上来，面板看着像半透明的。
+                        // 色层也得跟着换成弹窗那档——模糊大了，
+                        // 背后内容糊成色块，顶栏那档的色层补不回层次。
+                        blurRadius = 60.dp,
+                        blendLayers = GlassMaterials.popup(isDark = LocalLiuliColors.current.isDark),
                         modifier = Modifier
                             .offset { IntOffset(placement.left.roundToInt(), placement.top.roundToInt()) }
                             .onSizeChanged { panelSize = it }

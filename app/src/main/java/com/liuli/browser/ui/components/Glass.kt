@@ -100,9 +100,13 @@ fun GlassSurface(
      *
      * 混色在折射与模糊**之后**进行：你看到的是折射后的画面，
      * 着色得作用在那个画面上，否则边缘的色会歪掉。
+     *
+     * 档位要与模糊半径配套：大模糊档的色层更重，
+     * 配到小模糊的玻璃上会把内容压得太沉。用
+     * [com.liuli.browser.ui.liquid.GlassMaterials.of] 取，别手写。
      */
     blendLayers: List<GlassColorLayer> = emptyList(),
-    content: @Composable BoxScope.() -> Unit = {}
+    content: @Composable BoxScope.() -> Unit
 ) {
     val colors = LocalLiuliColors.current
     val requestedTint = tint ?: colors.glassTint

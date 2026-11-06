@@ -65,15 +65,20 @@ data class GlassColorLayer(
  * 它的玻璃之所以看起来是"玻璃"而不是"磨砂片"，
  * 靠的就是这几层的组合方式，而不是模糊半径本身。
  *
- * Luna 把材质分成**四档**，每档按模糊半径分组：
- * 小模糊（20dp）与大模糊（60dp），各有一浅一深。
- * 模糊越大，身后内容被糊得越彻底，色层就越要"补"回层次，
- * 于是两档的色层强度并不相同——不能只换模糊半径、照抄同一组颜色。
+ * Luna 的八套预设是「模糊半径 × 色层」的组合，而**用哪套是由场合定的**，
+ * 不是由模糊半径定的（`defpackage/gv4.java:1105-1125`）：
+ *
+ * - 顶栏用 **a / b** 两套的**颜色**，但模糊半径另取 44.72dp（浅）/ 63.25dp（深）；
+ * - 弹窗用 **c / d** 两套（自带 60dp 模糊）。
+ *
+ * 所以这里把**颜色**与**模糊半径**分开取：
+ * 颜色按「顶栏 / 弹窗」两档给，模糊半径由调用方自己定。
+ * 照搬成"模糊大就用重色层"是错的——Luna 的顶栏就是大模糊配轻色层。
  */
 object GlassMaterials {
 
     /**
-     * 浅色 · 小模糊（20dp）。
+     * 顶栏 · 浅色。
      *
      * 三层各司其职：
      * - 先减色 2%：玻璃整体压一点，厚玻璃挡光；
@@ -87,11 +92,11 @@ object GlassMaterials {
     )
 
     /**
-     * 浅色 · 大模糊（60dp）。
+     * 弹窗 · 浅色。
      *
-     * 模糊到 60dp 时背后内容几乎只剩色块，
-     * 于是第三层从"强光收边界"换成"再叠 60% 白"：
-     * 边界此时靠形状本身交代，不需要强光去压。
+     * 与顶栏只差第三层：强光 40% 改成 60%。
+     * 弹窗比顶栏"厚"——它整个盖住底下的内容，
+     * 边界不该靠强光去压，得多给一层白才压得住底下的字。
      */
     val LightLarge: List<GlassColorLayer> = listOf(
         GlassColorLayer(Color.Black.copy(alpha = 0.020f), GlassBlendMode.PlusDarker),
@@ -100,7 +105,7 @@ object GlassMaterials {
     )
 
     /**
-     * 深色 · 小模糊（20dp）。
+     * 顶栏 · 深色。
      *
      * 深色下反过来：先减色 10% 把整体压下去，
      * 再用亮度混合把明度往中灰拉，最后叠一层遮罩把对比拉平。
@@ -108,38 +113,47 @@ object GlassMaterials {
      * 亮度层用的是**中灰而不是纯黑**：亮度混合只取色层的明度，
      * 纯黑会把背后内容一路压到全黑，玻璃就成了一个洞；
      * 中灰则保留住"底下还有东西"的知觉。
+     *
+     * 注意颜色的 alpha 是**这一层的强度**（0x66 = 40%、0x99 = 60%），
+     * 不是不透明：色层靠 alpha 决定混进去多少。
      */
     val Dark: List<GlassColorLayer> = listOf(
         GlassColorLayer(Color.Black.copy(alpha = 0.102f), GlassBlendMode.PlusDarker),
-        GlassColorLayer(Color(0xFF565656), GlassBlendMode.Luminosity),
-        GlassColorLayer(Color(0xFF3F3F3F), GlassBlendMode.Overlay)
+        GlassColorLayer(Color(0x66565656), GlassBlendMode.Luminosity),
+        GlassColorLayer(Color(0x993F3F3F), GlassBlendMode.Overlay)
     )
 
     /**
-     * 深色 · 大模糊（60dp）。
+     * 弹窗 · 深色。
      *
-     * 模糊极大时，亮度层要拉得更狠（60% 而不是 40%）才压得住，
+     * 亮度层要拉得更狠（60% 而不是 40%）才压得住，
      * 同时把遮罩换成近黑的 6%：
      * 深色玻璃底下透出的东西越少，遮罩就越要实。
      */
     val DarkLarge: List<GlassColorLayer> = listOf(
         GlassColorLayer(Color.Black.copy(alpha = 0.102f), GlassBlendMode.PlusDarker),
-        GlassColorLayer(Color(0xFF6C6C6C), GlassBlendMode.Luminosity),
-        GlassColorLayer(Color(0xFF060606), GlassBlendMode.SoftLight)
+        GlassColorLayer(Color(0x996C6C6C), GlassBlendMode.Luminosity),
+        GlassColorLayer(Color(0x99060606), GlassBlendMode.SoftLight)
     )
 
     /**
-     * 按主题与模糊档取预设。
+     * 顶栏那档（浅色 / 深色）。
      *
-     * 调用处不必自己判断深浅色：深色下用错了浅色那组，
-     * 玻璃会变成一块发白的脏纱，是最常见的"液态玻璃没做对"。
+     * @param isDark 深色主题。
      */
-    fun of(isDark: Boolean, large: Boolean = false): List<GlassColorLayer> = when {
-        isDark && large -> DarkLarge
-        isDark -> Dark
-        large -> LightLarge
-        else -> Light
-    }
+    fun topBar(isDark: Boolean): List<GlassColorLayer> =
+        if (isDark) Dark else Light
+
+    /**
+     * 弹窗那档（浅色 / 深色）。
+     *
+     * 弹窗比顶栏"厚"——它整个盖住底下的内容，
+     * 底下的字不能透上来，所以色层给得更重。
+     *
+     * @param isDark 深色主题。
+     */
+    fun popup(isDark: Boolean): List<GlassColorLayer> =
+        if (isDark) DarkLarge else LightLarge
 }
 
 /**
