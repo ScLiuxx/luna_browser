@@ -38,6 +38,7 @@ import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.RoundedRectangularShape
 import com.liuli.browser.ui.liquid.GlassColorLayer
 import com.liuli.browser.ui.liquid.GlassEdgeStyle
+import com.liuli.browser.ui.liquid.GlassMaterial
 import com.liuli.browser.ui.liquid.colorBlend
 import com.liuli.browser.ui.liquid.GlassShape
 import com.liuli.browser.ui.liquid.InteractiveHighlight
@@ -69,7 +70,6 @@ fun GlassSurface(
     modifier: Modifier = Modifier,
     shape: Shape = GlassShape.squircle(Dimens.cardRadius),
     tint: Color? = null,
-    blurRadius: Dp = 18.dp,
     lensHeight: Dp = 16.dp,
     lensAmount: Dp = 24.dp,
     shadow: Boolean = true,
@@ -92,6 +92,27 @@ fun GlassSurface(
     /** 是否画内阴影。有内阴影的玻璃才像一块有厚度的板，而不是一层贴图。 */
     innerShadow: Boolean = false,
     /**
+     * 玻璃的材质：模糊半径与色层打包在一起。
+     *
+     * 给了它，半径与色层就都定了，调用处没法只改一半。
+     *
+     * 不给时用 [blurRadius] 与 [blendLayers]——
+     * 素玻璃（只有模糊与折射）用不着包一层。
+     */
+    material: GlassMaterial? = null,
+    /**
+     * 模糊半径。
+     *
+     * 只有在不给 [material] 时才用它。
+     *
+     * 这个值**不按玻璃尺寸缩放**（Luna 也不缩放，
+     * `defpackage/fd5.java:48` 只受 150dp 的绝对上限约束）。
+     * 缩放的后果是同一块玻璃换个内容就换了一副样子：
+     * 菜单少两项时面板矮，模糊跟着变小，色层却还是按大模糊调的那一档，
+     * 轻模糊配重色层，玻璃发浑。
+     */
+    blurRadius: Dp = 18.dp,
+    /**
      * 混色层。
      *
      * 空列表时玻璃只有模糊与折射；给了层数，身后的内容会被按这些模式重新混合一遍，
@@ -101,14 +122,16 @@ fun GlassSurface(
      * 混色在折射与模糊**之后**进行：你看到的是折射后的画面，
      * 着色得作用在那个画面上，否则边缘的色会歪掉。
      *
-     * 档位要与模糊半径配套：大模糊档的色层更重，
-     * 配到小模糊的玻璃上会把内容压得太沉。用
-     * [com.liuli.browser.ui.liquid.GlassMaterials.of] 取，别手写。
+     * 要用带色层的玻璃，从 [GlassMaterials] 取整份材质，别拆开手写——
+     * 拆开就可能配错档，那正是本项目此前踩过的坑。
      */
     blendLayers: List<GlassColorLayer> = emptyList(),
     content: @Composable BoxScope.() -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    // 材质优先：给了它，半径与色层都是它的，调用处改不了。
+    val effectiveBlurRadius = material?.blurRadius ?: blurRadius
+    val effectiveBlendLayers = material?.layers ?: blendLayers
     val requestedTint = tint ?: colors.glassTint
     val effectiveTint = if (isRenderEffectSupported()) {
         requestedTint
@@ -164,10 +187,23 @@ fun GlassSurface(
                         // 它都套在已有效果的外面（Backdrop 的 chain 是"新的在外层"）。
                         // 于是最后写的那个看到的是前面所有处理完的画面。
                         //
-                        // 模糊不能无限盖过玻璃本身的大小：模糊会把背后的图层向外撑开，
-                        // 小玻璃上就会露出一圈被拉散的边，也白费一份显存。
-                        // 这里只做兜底，正常尺寸的玻璃件不受影响。
-                        val blurPx = blurRadius.toPx().coerceAtMost(size.minDimension * 0.35f)
+                        // 模糊半径**不按玻璃尺寸缩小**。
+                        //
+                        // Luna 也不这么做：它把半径当成材质的一部分
+                        // （`defpackage/fd5.java:48`：`clamp(dp, 0, 150) * density`），
+                        // 唯一的上限是 150dp 的绝对值，与形状多大无关。
+                        //
+                        // 边缘会不会被拉散也不靠缩小半径来避免，而是靠
+                        // "把录到的背景向外扩一圈、让那一圈取到真实的邻接像素"。
+                        // Backdrop 库正是这么做的：`blur()` 会把 `padding` 设成半径
+                        // （`effects/Blur.kt:17`），录制的图层因此比形状大一圈
+                        // （`DrawBackdropModifier.kt:293`），多出来的部分是真实的邻接内容。
+                        //
+                        // 之前这里按"最短边的 35%"夹一次，结果是**同一个浮层换个内容
+                        // 就换了一副样子**：菜单少两项时面板矮，模糊跟着变小，
+                        // 而色层仍是按 60dp 调的那一档——轻模糊配重色层，玻璃发浑。
+                        // 现在按材质给的值走，色层与半径始终是同一档。
+                        val blurPx = effectiveBlurRadius.toPx()
                         if (blurPx > 0f) blur(blurPx)
                         if (lensEnabled) {
                             lens(
@@ -179,8 +215,8 @@ fun GlassSurface(
                         // 混色排在最后：它要作用在**折射与模糊之后**的画面上。
                         // 你隔着玻璃看到的是被折射、被模糊过的内容，
                         // 着色若发生在那之前，边缘的色会跟着折射再歪一次。
-                        if (blendLayers.isNotEmpty()) {
-                            colorBlend(blendLayers)
+                        if (effectiveBlendLayers.isNotEmpty()) {
+                            colorBlend(effectiveBlendLayers)
                         }
                     }
                 },
@@ -248,7 +284,7 @@ fun GlassSurface(
                     // 混色层已经把颜色算进画面里了，这里再铺一层色纱就成了双重着色：
                     // 背后内容的层次被洗掉，混色带来的那点对比也一并没了。
                     // 两者只能选一个——有混色就不铺纱。
-                    if (blendLayers.isEmpty()) {
+                    if (effectiveBlendLayers.isEmpty()) {
                         drawRect(effectiveTint)
                     }
                     // 均匀描边：没有它，深色背景上的玻璃会整个"融"进去，

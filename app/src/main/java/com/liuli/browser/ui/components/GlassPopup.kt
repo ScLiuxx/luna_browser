@@ -316,12 +316,16 @@ fun GlassPopup(
                     GlassSurface(
                         backdrop = backdrop,
                         shape = shape,
-                        // 浮层是大模糊档（60dp）：面板要盖住身后的内容，
-                        // 模糊不够时底下的字会透上来，面板看着像半透明的。
-                        // 色层也得跟着换成弹窗那档——模糊大了，
-                        // 背后内容糊成色块，顶栏那档的色层补不回层次。
-                        blurRadius = 60.dp,
-                        blendLayers = GlassMaterials.popup(isDark = LocalLiuliColors.current.isDark),
+                        // 浮层用整份弹窗材质：60dp 大模糊 + 配套的重色层
+                        // （Luna 预设 c / d，`defpackage/id5.java`）。
+                        //
+                        // 面板要盖住身后的内容，模糊不够时底下的字会透上来，
+                        // 面板看着像半透明的；色层也得跟着加重，
+                        // 顶栏那档的色层补不回被糊成色块的层次。
+                        //
+                        // 半径与色层打包成一份材质，就是不让它们被拆开配错——
+                        // 面板矮一点若把半径也带小，就成了"轻模糊配重色层"，玻璃发浑。
+                        material = GlassMaterials.popupMaterial(isDark = LocalLiuliColors.current.isDark),
                         modifier = Modifier
                             .offset { IntOffset(placement.left.roundToInt(), placement.top.roundToInt()) }
                             .onSizeChanged { panelSize = it }

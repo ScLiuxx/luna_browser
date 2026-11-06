@@ -91,9 +91,6 @@ import com.liuli.browser.ui.theme.Space
 import com.liuli.browser.ui.theme.Type
 import com.liuli.browser.ui.theme.reduceMotion
 import kotlinx.coroutines.delay
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /** 离场动画播完再动数据要等的时长，与离场时长对齐。 */
 private const val REMOVE_EXIT_DELAY = 180L
@@ -716,13 +713,27 @@ private fun monogramOf(url: String): String? =
         ?.uppercaseChar()
         ?.toString()
 
+/**
+ * 相对时间。
+ *
+ * 六档，与 Luna 一致（`RelativeDateTimeFormatter` 的阈值，单位分钟）：
+ * 60 / 1440 / 10080 / 43200 / 525600
+ * —— 分钟 / 小时 / 天（7 天内）/ 周（30 天内）/ 月（1 年内）/ 年。
+ *
+ * 之前超过一天就直接显示绝对日期（"05-14 15:22"）。
+ * 历史列表是按时间倒着扫的，绝对日期要求读者自己算"多久以前"，
+ * 相对日期一眼就能看出新旧——Luna 的历史行就是这么排的。
+ */
 private fun formatTime(timestamp: Long): String {
-    val now = System.currentTimeMillis()
-    val diff = now - timestamp
+    val diff = System.currentTimeMillis() - timestamp
+    val minutes = diff / 60_000L
     return when {
         diff < 60_000L -> "刚刚"
-        diff < 3_600_000L -> "${diff / 60_000L} 分钟前"
-        diff < 86_400_000L -> "${diff / 3_600_000L} 小时前"
-        else -> SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(timestamp))
+        minutes < 60 -> "$minutes 分钟前"
+        minutes < 1_440 -> "${minutes / 60} 小时前"
+        minutes < 10_080 -> "${minutes / 1_440} 天前"
+        minutes < 43_200 -> "${minutes / 10_080} 周前"
+        minutes < 525_600 -> "${minutes / 43_200} 个月前"
+        else -> "${minutes / 525_600} 年前"
     }
 }

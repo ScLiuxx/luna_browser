@@ -2,6 +2,8 @@ package com.liuli.browser.ui.liquid
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.BackdropEffectScope
 import com.kyant.backdrop.RuntimeShader
 import com.kyant.backdrop.effects.runtimeShaderEffect
@@ -59,6 +61,37 @@ data class GlassColorLayer(
 )
 
 /**
+ * 一份玻璃材质：模糊半径与色层是**一件东西**。
+ *
+ * Luna 就是这么组织的：`GlassMaterial(blurRadius, first, second, third)`
+ * （`defpackage/hd5.java`），半径与三层色同属一个对象，
+ * 换半径时色层跟着换，改不了配错。
+ *
+ * 本项目之前把两者拆开传（`blurRadius` 一个参数、`blendLayers` 另一个），
+ * 于是"半径 60dp 却配了轻色层"这种错配在调用处无从察觉——
+ * 色层是按某个半径调的，半径被改小，错配就悄悄发生。
+ * 合成一个对象之后，取材质只能整份取，错配在源头就做不到。
+ *
+ * @param blurRadius 模糊半径。
+ * @param layers 色层。空列表表示只有模糊与折射，没有混色。
+ */
+@Immutable
+data class GlassMaterial(
+    val blurRadius: Dp,
+    val layers: List<GlassColorLayer> = emptyList()
+) {
+    companion object {
+        /**
+         * 只有模糊与折射的素玻璃。
+         *
+         * 绝大多数玻璃件要的就是这个：内容自己透过来，
+         * 不额外调色。
+         */
+        fun plain(blurRadius: Dp): GlassMaterial = GlassMaterial(blurRadius)
+    }
+}
+
+/**
  * 玻璃的材质预设。
  *
  * 数值来自 Luna 的实际调校结果，直接照搬：
@@ -74,6 +107,11 @@ data class GlassColorLayer(
  * 所以这里把**颜色**与**模糊半径**分开取：
  * 颜色按「顶栏 / 弹窗」两档给，模糊半径由调用方自己定。
  * 照搬成"模糊大就用重色层"是错的——Luna 的顶栏就是大模糊配轻色层。
+ *
+ * 另注：Luna 的模糊半径**不随玻璃尺寸缩放**
+ * （`defpackage/fd5.java:48`：`clamp(dp, 0, 150) * density`），
+ * 它只受一个绝对上限约束。本项目一度按"最短边的 35%"夹一次，
+ * 结果同一个浮层换个内容就换了一副样子。
  */
 object GlassMaterials {
 
@@ -154,8 +192,37 @@ object GlassMaterials {
      */
     fun popup(isDark: Boolean): List<GlassColorLayer> =
         if (isDark) DarkLarge else LightLarge
-}
 
+    /**
+     * 顶栏的整份材质。
+     *
+     * 色层取 Luna 预设 a / b，但**模糊半径另给**——
+     * Luna 顶栏就是"轻色层 + 大模糊"
+     * （`defpackage/gv4.java:1119` 把预设 a / b 的半径改成 44.72dp / 63.25dp，
+     * 色层不动）。本项目的顶栏贴着屏幕顶边，采样环不能越出窗口，
+     * 所以半径比它小——见调用处的说明。
+     *
+     * @param isDark 深色主题。
+     * @param blurRadius 模糊半径。
+     */
+    fun topBarMaterial(isDark: Boolean, blurRadius: Dp): GlassMaterial = GlassMaterial(
+        blurRadius = blurRadius,
+        layers = topBar(isDark)
+    )
+
+    /**
+     * 弹窗的整份材质。
+     *
+     * 预设 c / d 自带 60dp 模糊与配套的重色层
+     * （`defpackage/id5.java`），两者是一套，整体取用。
+     *
+     * @param isDark 深色主题。
+     */
+    fun popupMaterial(isDark: Boolean): GlassMaterial = GlassMaterial(
+        blurRadius = 60.dp,
+        layers = popup(isDark)
+    )
+}
 /**
  * 把一层层颜色按各自的混合方式混进背后的内容。
  *

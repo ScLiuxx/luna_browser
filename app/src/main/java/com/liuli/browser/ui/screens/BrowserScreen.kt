@@ -718,26 +718,27 @@ fun BrowserScreen(
                     .glassHairline(color = colors.textPrimary.copy(alpha = 0.11f)),
                 shape = GlassShape.capsule(),
                 tint = colors.glassTintStrong,
-                // 22dp：这不是随便挑的数，是 GlassSurface 的上限
-                // （模糊半径不超过玻璃最短边的 35%，地址栏高 64dp → 22.4dp）。
+                // 22dp：这是**采样环**能给出的上限，不是随手挑的数。
                 //
-                // Luna 的顶栏用 44.72dp（浅）/ 63.25dp（深），比这大一倍多。
-                // 本项目照搬不了：模糊会把背后的图层向外撑开，
-                // 地址栏只有 64dp 高，撑出去的采样区会越过屏幕顶边，
-                // 取到空白。要用更大的模糊得先解决采样区越界的问题，
-                // 不能直接把数字调大——那样只是让上限形同虚设。
-                blurRadius = 22.dp,
-                lensHeight = 18.dp,
-                lensAmount = 26.dp,
-                // 地址栏是屏幕上最显眼的一块玻璃，也是最需要"看得清底下在干什么"的地方：
-                // 铺一层半透明白纱会把网页内容洗成一片奶白，
-                // 换成混色层之后，内容的明暗层次被保留下来，
-                // 玻璃反而比之前更"透"。
+                // 模糊要把采样区向玻璃外扩一圈，扩出去的那一圈得是真实内容，
+                // 否则边缘会拉出一条被拉散的边。地址栏只有 64dp 高，
+                // 又是整块贴在屏幕顶上的，采样环越过屏幕顶边就取到空白。
+                // Luna 的顶栏用 44.72dp（浅）/ 63.25dp（深）
+                // （`defpackage/gv4.java:1119`），比这大一倍多——
+                // 它的背景是整屏录制的，采样环落在屏幕内，取得到内容；
+                // 本项目的顶栏紧贴屏幕顶边，扩出去就是空白。
                 //
-                // 取的是**顶栏**那档颜色（Luna 的 a / b 两套）：
+                // 色层取的是**顶栏**那档（Luna 的 a / b 两套）：
                 // Luna 的顶栏就是"大模糊配顶栏色层"，
                 // 照搬成"大模糊配重色层"会把内容压得太沉。
-                blendLayers = GlassMaterials.topBar(isDark = colors.isDark),
+                //
+                // 半径与色层打包成一份材质，改不了配错档。
+                material = GlassMaterials.topBarMaterial(
+                    isDark = colors.isDark,
+                    blurRadius = 22.dp
+                ),
+                lensHeight = 18.dp,
+                lensAmount = 26.dp,
                 contentPadding = PaddingValues(
                     horizontal = barPaddingH,
                     vertical = barPaddingV
