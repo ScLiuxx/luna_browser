@@ -611,6 +611,45 @@ Luna 的**顶栏**用的就是大模糊（44.72 / 63.25dp）配**轻**色层（�
 
 ---
 
+## 6.3 主题切换：从硬切到淡过去
+
+Luna 的阅读模式切换主题（浅色 / 深色 / 护眼）时，
+前景与背景**一起淡过去**（`defpackage/vzc.java:385`）：
+
+```css
+body {
+  transition-duration: 500ms;
+  transition-property: color, background-color;
+  transition-timing-function: ease;
+}
+```
+
+本项目此前换主题是**硬切**：`LiuliTheme` 里 `if (isDark) DarkColors else LightColors`
+一次换掉整套 15 个颜色值，整屏"啪"一下变过去。
+
+硬切的问题是它让对比度与亮度**同时跳变**：深色主题下白字变黑字的那一瞬间，
+正在读的那一行会闪一下。一起淡过去就没有这个闪。
+
+**已落地**：`ui/theme/LiuliTheme.kt`。逐个颜色字段动画（`animateColorAsState`），
+时长 `Motion.ThemeFade = 260ms`。
+
+两点实现上的讲究：
+
+- **逐字段动画而不是整屏交叉淡化**。后者会让整棵界面树重建，
+  几百个组件同时换掉背景与文字色；前者只改颜色值，布局完全不动。
+- **`LocalLiuliColors` 从 `staticCompositionLocalOf` 换成 `compositionLocalOf`**。
+  `static` 版本只在**值变化时**让读取者重组，而过渡时调色板是**逐帧变化**的，
+  用 `static` 的话读取者永远拿到最后一次提供的值，中间那几百毫秒根本看不见。
+
+顺带把 `LocalReduceMotion` 的 provider 从主题**里面**挪到**外面**：
+主题过渡本身要读这个开关（开了就降级成最短档），
+开关放在主题里面，主题读不到。
+
+> 260ms 是本项目自己的取值：比转场的 190ms 长一点（换主题比换页面"重"），
+> 又比 Luna 的 500ms 短——那是网页里的 body 文字，本项目是整个 App 的界面。
+
+---
+
 ## 7. 本次分析的边界
 
 - **看不到源码结构**：jadx 只能给出反编译后的 Java，函数组织、状态管理、重组策略一概不知；R8 把绝大多数类名混淆成 `a`/`b`/`c`，能确认存在但看不到实现。

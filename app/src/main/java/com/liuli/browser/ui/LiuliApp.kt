@@ -45,17 +45,20 @@ fun LiuliApp(
     val settings = remember { SettingsStore(context.applicationContext) }
     val library = remember { LibraryStore(context.applicationContext) }
 
-    LiuliTheme(
-        darkMode = settings.darkModeOption,
-        accentIndex = settings.accentIndex
-    ) {
-        val colors = LocalLiuliColors.current
-        val view = LocalView.current
-        val backdrop = rememberLayerBackdrop()
-        var backgroundActive by remember { mutableStateOf(true) }
+    // "减少动态效果"此前只有极光背景一处生效，这里提升为全局开关。
+    //
+    // 它必须包在 LiuliTheme **外面**：主题过渡本身也要读这个开关
+    // （开了就把颜色过渡降级成最短档），开关放在主题里面，主题读不到。
+    CompositionLocalProvider(LocalReduceMotion provides settings.reduceMotion) {
+        LiuliTheme(
+            darkMode = settings.darkModeOption,
+            accentIndex = settings.accentIndex
+        ) {
+            val colors = LocalLiuliColors.current
+            val view = LocalView.current
+            val backdrop = rememberLayerBackdrop()
+            var backgroundActive by remember { mutableStateOf(true) }
 
-        // "减少动态效果"此前只有极光背景一处生效，这里提升为全局开关。
-        CompositionLocalProvider(LocalReduceMotion provides settings.reduceMotion) {
             SideEffect {
                 WindowCompat.getInsetsController(activity.window, view).apply {
                     isAppearanceLightStatusBars = !colors.isDark

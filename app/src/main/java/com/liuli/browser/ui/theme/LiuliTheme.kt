@@ -1,10 +1,13 @@
 package com.liuli.browser.ui.theme
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -34,6 +37,22 @@ val AccentPalettes = listOf(
     AccentPalette("珊瑚", Color(0xFFEA5A6B), Color(0xFFF08A7A), Color(0xFFB06AB3))
 )
 
+/**
+ * 主题调色板。
+ *
+ * 深浅两套主题之间切换时，颜色**不是硬切**的，而是一起淡过去。
+ * Luna 的阅读模式做的是同一件事：
+ * `body { transition: color 500ms ease }`（`defpackage/vzc.java:385`）——
+ * 换主题时前景与背景同时过渡，眼睛不用重新适应。
+ *
+ * 硬切的问题是它"啪"一下把整屏换掉了：
+ * 深色主题下白字变黑字的那一瞬间，对比度与亮度同时跳变，
+ * 正在读的那一行会闪一下。一起淡过去就没有这个闪。
+ *
+ * 逐个颜色动画而不是整屏交叉淡化：后者会让整棵界面树重建，
+ * 几百个组件同时换掉背景与文字色；前者只改颜色值，
+ * 布局完全不动，开销小得多。
+ */
 @Immutable
 data class LiuliColors(
     val isDark: Boolean,
@@ -98,7 +117,18 @@ private val DarkColors = LiuliColors(
     success = Color(0xFF4CD79A)
 )
 
-val LocalLiuliColors = staticCompositionLocalOf { LightColors }
+/**
+ * 调色板。
+ *
+ * 用 `compositionLocalOf` 而不是 `staticCompositionLocalOf`：
+ * 后者只在**值变化时**让读取者重组，而主题过渡时调色板是**逐帧变化**的
+ * （淡过去的每一帧都是一个新值）。用 static 的话，读取者拿到的
+ * 永远是最后一次提供的值，中间那几百毫秒的过渡根本看不见。
+ *
+ * `compositionLocalOf` 会记录读取位置，值一变就让所有读取者重组——
+ * 这正是主题过渡需要的。
+ */
+val LocalLiuliColors = compositionLocalOf { LightColors }
 
 @Composable
 fun LiuliTheme(
@@ -114,14 +144,56 @@ fun LiuliTheme(
     }
     val base = if (isDark) DarkColors else LightColors
     val accent = AccentPalettes[accentIndex.coerceIn(0, AccentPalettes.lastIndex)]
-    val colors = base.copy(
+    val target = base.copy(
         accent = accent.primary,
         accentSecondary = accent.secondary,
         accentTertiary = accent.tertiary
     )
+    // 颜色一起淡过去，而不是硬切（见 LiuliColors 的注释）。
+    //
+    // 逐个字段动画：每个字段是一条独立的补间，
+    // 但它们的规格与时长相同，所以整屏看上去是同步的一次过渡。
+    //
+    // isDark 是布尔量，不能动画——它是"现在算深色还是浅色"的判断依据，
+    // 半途改变会让 onDanger 之类的派生值在过渡中途翻一次。
+    // 它在过渡开始时就切到目标值，其余颜色跟过去。
+    val spec = MotionSpec.color(reduceMotion, Motion.ThemeFade)
+    val colors = LiuliColors(
+        isDark = isDark,
+        textPrimary = animateColor(target.textPrimary, spec),
+        textSecondary = animateColor(target.textSecondary, spec),
+        textTertiary = animateColor(target.textTertiary, spec),
+        accent = animateColor(target.accent, spec),
+        accentSecondary = animateColor(target.accentSecondary, spec),
+        accentTertiary = animateColor(target.accentTertiary, spec),
+        glassTint = animateColor(target.glassTint, spec),
+        glassTintStrong = animateColor(target.glassTintStrong, spec),
+        glassBorder = animateColor(target.glassBorder, spec),
+        dockTint = animateColor(target.dockTint, spec),
+        pageBackground = animateColor(target.pageBackground, spec),
+        scrim = animateColor(target.scrim, spec),
+        danger = animateColor(target.danger, spec),
+        success = animateColor(target.success, spec)
+    )
     CompositionLocalProvider(LocalLiuliColors provides colors) {
         content()
     }
+}
+
+/**
+ * 主题过渡时单个颜色的动画。
+ *
+ * 用 `animateColorAsState` 而不是自己插值：它会在颜色再次变化时
+ * 从**当前**颜色继续走，不会跳回起点。
+ */
+@Composable
+private fun animateColor(target: Color, spec: AnimationSpec<Color>): Color {
+    val animated by animateColorAsState(
+        targetValue = target,
+        animationSpec = spec,
+        label = "theme-color"
+    )
+    return animated
 }
 
 object Dimens {
