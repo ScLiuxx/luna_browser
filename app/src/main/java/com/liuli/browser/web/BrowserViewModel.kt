@@ -23,7 +23,6 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
-import android.webkit.ReferrerPolicy
 import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
@@ -855,6 +854,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         if (tab == null || !bound) return null
         webViews[tab.id]?.let { return it }
         val store = settings
+        // 每个标签页各自累积滚动位移：判定"该不该收起工具栏"看的是
+        // 这段时间一共滚了多远，而不是某一帧滚了多少。
+        // 上下分开记：共用一个累加量的话，往回滚一点就永远凑不满展开阈值。
+        var scrollDown = 0
+        var scrollUp = 0
         val webView = WebView(currentActivity ?: app).apply {
             tag = tab.id
             layoutParams = FrameLayout.LayoutParams(
@@ -886,10 +890,38 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             }
             setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
                 if (store?.autoHideToolbar != false) {
-                    if (scrollY - oldScrollY > 8 && scrollY > 120) {
-                        this@BrowserViewModel.toolbarCollapsed = true
-                    } else if (oldScrollY - scrollY > 6 || scrollY <= 4) {
+                    // 累积位移而不是看单帧增量：
+                    // 单帧增量取决于滚动速度——快速甩动一帧能走几十像素，
+                    // 慢速拖动一帧只走几像素。用单帧增量判断的结果是
+                    // "慢速往下滚永远收不起工具栏"，而且一旦收起后
+                    // 慢速往回滚也拉不回来（单帧增量一直不够阈值）。
+                    //
+                    // 上下滚动分开累积：共用一个累加量的话，
+                    // 往下滚了 300px 再往回滚 5px，累加量仍为正，
+                    // 回滚永远凑不满展开阈值，工具栏就再也拉不回来了。
+                    val delta = scrollY - oldScrollY
+                    if (delta > 0) {
+                        scrollDown += delta
+                        scrollUp = 0
+                        if (scrollDown >= TOOLBAR_COLLAPSE_DISTANCE_PX &&
+                            scrollY > TOOLBAR_MIN_SCROLL_PX
+                        ) {
+                            this@BrowserViewModel.toolbarCollapsed = true
+                            scrollDown = 0
+                        }
+                    } else if (delta < 0) {
+                        scrollUp += -delta
+                        scrollDown = 0
+                        if (scrollUp >= TOOLBAR_EXPAND_DISTANCE_PX) {
+                            this@BrowserViewModel.toolbarCollapsed = false
+                            scrollUp = 0
+                        }
+                    }
+                    // 回到页面顶部必须展开，否则工具栏再也出不来。
+                    if (scrollY <= TOOLBAR_TOP_PX) {
                         this@BrowserViewModel.toolbarCollapsed = false
+                        scrollDown = 0
+                        scrollUp = 0
                     }
                 }
                 scheduleSnapshot(this, tab)
@@ -930,9 +962,6 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             setSupportMultipleWindows(true)
             allowFileAccess = false
             allowContentAccess = false
-            // Prevent the page from leaking the full URL (with tracking params)
-            // or the current site in the Referer header of cross-origin requests.
-            referrerPolicy = ReferrerPolicy.NO_REFERRER
             @Suppress("DEPRECATION")
             setPluginState(WebSettings.PluginState.OFF)
             @Suppress("DEPRECATION")
@@ -1010,6 +1039,11 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
             // never mixes with regular browsing.
             if (tab.isPrivate) {
                 PrivacyGuard.installPrivate(view)
+            }
+            // 隐私护盾开启时声明 no-referrer，避免页面把当前站点与完整 URL
+            // 通过 Referer 头泄露给第三方。
+            if (privacyShieldActive) {
+                PrivacyGuard.installReferrerPolicy(view)
             }
             if (url != null && url != tab.url) tab.blockedTrackers = 0
             tab.url = url ?: tab.url
@@ -1126,7 +1160,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                     ?.let { runCatching { Uri.parse(it).host }.getOrNull() }
                 val targetHost = runCatching { Uri.parse(url).host }.getOrNull()
                 if (isRedirect && pendingHost != null && pendingHost == targetHost) {
-                    if (id != null) httpUpgradeOrigins.remove(id)
+                    // pendingHost 非空说明 id 一定非空，不用再判一次。
+                    httpUpgradeOrigins.remove(id)
                     tabFor(view)?.let {
                         it.isLoading = false
                         it.errorText = "该网站将加密连接重定向回明文 HTTP，为保护隐私已阻止访问"
@@ -1433,5 +1468,25 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         private const val KEY_SESSION = "session"
         private const val SNAPSHOT_SCALE = 0.45f
         private const val SNAPSHOT_DELAY_MS = 320L
+
+        /**
+         * 工具栏自动收起的判定阈值（像素）。
+         *
+         * 用像素而不是 dp：WebView 的 scrollY 本来就是像素，
+         * 换算成 dp 还要再乘密度，反而多一层出错的机会。
+         * 数值取常见分辨率下约 64dp～96dp 的量级，
+         * 高密度屏上会显得更灵敏一些，这是可接受的。
+         */
+        /** 往下累计滚过这么多像素才收起工具栏。 */
+        private const val TOOLBAR_COLLAPSE_DISTANCE_PX = 160
+
+        /** 往上累计滚回这么多像素就展开工具栏。 */
+        private const val TOOLBAR_EXPAND_DISTANCE_PX = 90
+
+        /** 页面顶部：到这里必须展开工具栏，否则回不去了。 */
+        private const val TOOLBAR_TOP_PX = 8
+
+        /** 页面滚过这么多像素之前不收起工具栏：刚进页面不该立刻少一块。 */
+        private const val TOOLBAR_MIN_SCROLL_PX = 200
     }
 }

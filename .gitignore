@@ -10,3 +10,11 @@ keystore.properties
 *.aab
 .idea/
 .DS_Store
+
+# 沙箱构建工具缓存（Gradle 分发包与 Android 命令行工具）
+.toolchain/
+
+# 逆向分析时下载的 Python 轮子（androguard / frida 等），
+# 与本项目无关，不该进版本库
+*.whl
+*.tar.gz

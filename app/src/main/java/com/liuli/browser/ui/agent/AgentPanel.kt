@@ -1,12 +1,37 @@
 package com.liuli.browser.ui.agent
 
 import android.speech.tts.TextToSpeech
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -23,24 +48,31 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,40 +81,79 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
+import com.liuli.browser.data.AgentPermissionMode
+import com.liuli.browser.data.AgentPlanMode
+import com.liuli.browser.data.AgentThinkingLevel
+import com.liuli.browser.ui.components.EmptyState
 import com.liuli.browser.ui.components.GlassIconButton
+import com.liuli.browser.ui.components.GlassPillButton
 import com.liuli.browser.ui.components.GlassSurface
 import com.liuli.browser.ui.components.Glyph
 import com.liuli.browser.ui.components.GlyphIcon
+import com.liuli.browser.ui.liquid.GlassShape
+import com.liuli.browser.ui.liquid.Visibility
+import com.liuli.browser.ui.liquid.pressScale
 import com.liuli.browser.ui.theme.Dimens
 import com.liuli.browser.ui.theme.LocalLiuliColors
+import com.liuli.browser.ui.theme.Motion
+import com.liuli.browser.ui.theme.MotionSpec
+import com.liuli.browser.ui.theme.Radius
+import com.liuli.browser.ui.theme.Space
+import com.liuli.browser.ui.theme.Type
+import com.liuli.browser.ui.theme.reduceMotion
 import com.liuli.browser.web.agent.AgentActionStatus
+import com.liuli.browser.web.agent.AgentCompactStatus
 import com.liuli.browser.web.agent.AgentController
+import com.liuli.browser.web.agent.AgentCreation
+import com.liuli.browser.web.agent.AgentCreationFormat
+import com.liuli.browser.web.agent.AgentCreationKind
 import com.liuli.browser.web.agent.AgentMessage
 import com.liuli.browser.web.agent.AgentMessageRole
 import com.liuli.browser.web.agent.AgentMode
 import com.liuli.browser.web.agent.AgentPlan
 import com.liuli.browser.web.agent.AgentPlanCommand
 import com.liuli.browser.web.agent.AgentPlanStatus
+import com.liuli.browser.web.agent.AgentPlanStepKind
 import com.liuli.browser.web.agent.AgentReport
 import com.liuli.browser.web.agent.AgentReportFormat
 import com.liuli.browser.web.agent.AgentSiteMode
+import com.liuli.browser.web.agent.CreationEngine
 import com.liuli.browser.web.agent.ResearchEngine
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import java.util.Locale
+
+/**
+ * 提问框的字数上限。
+ *
+ * 超出部分会被丢掉，所以必须在接近上限时给出提示，
+ * 否则用户粘贴一段长文后只看到尾巴没了，却不知道是被截断的。
+ */
+private const val AgentInputLimit = 500
 
 @Composable
 fun AgentOrb(
@@ -91,6 +162,7 @@ fun AgentOrb(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalLiuliColors.current
+    val interaction = remember { MutableInteractionSource() }
     GlassSurface(
         backdrop = backdrop,
         modifier = modifier
@@ -101,10 +173,13 @@ fun AgentOrb(
                 role = Role.Button
             }
             .clickable(
+                interactionSource = interaction,
+                indication = null,
                 role = Role.Button,
                 onClickLabel = "打开琉璃 Agent",
                 onClick = onClick
-            ),
+            )
+            .pressScale(pressedScale = 0.90f, interactionSource = interaction),
         shape = CircleShape,
         tint = colors.glassTintStrong,
         blurRadius = 20.dp,
@@ -144,14 +219,44 @@ fun AgentPanel(
     onCancelAction: (Long) -> Unit,
     onPlanCommand: (AgentPlanCommand) -> Unit,
     onExportReport: (AgentReport, AgentReportFormat) -> Unit,
+    onExportCreation: (AgentCreation, AgentCreationFormat) -> Unit,
+    onShareCreation: (AgentCreation) -> Unit,
+    onShareCreationCard: (AgentCreation) -> Unit,
     onOpenSource: (String, Boolean) -> Unit,
     onSharePage: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
     var input by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+    // 开关型操作（语音回复）靠轻触反馈告知状态翻转。
+    val haptics = LocalHapticFeedback.current
+    // 已经演过入场动画的消息：滚出去再回来不重播。
+    val revealedMessageIds = remember { mutableStateListOf<Long>() }
+    // 已经逐块显现过的正文：同一段回答只演一次。
+    // 放在面板层而不是气泡里，是因为 LazyColumn 会回收滑出可视区的条目，
+    // 记在条目上的话，滚回来时同一段话会再"打字"一遍。
+    val revealedTextIds = remember { mutableStateListOf<Long>() }
+    // "减少动态效果"开关：AnimatedContent 的 transitionSpec 不是 @Composable 上下文，
+    // 只能在这里把开关读出来，交给非组合版本的时间轴。
+    val reduced = reduceMotion
+    // 规格先在组合作用域算好：fadeIn / scaleIn 的参数位不是
+    // @Composable 上下文，不能直接调用 MotionSpec 的组合版本。
+    val fadeInSpec = MotionSpec.enter()
+    val fadeOutSpec = MotionSpec.exit()
+    val scaleInSpec = MotionSpec.pageSpring()
+    val slideSpec = MotionSpec.pageSpring(androidx.compose.ui.unit.IntOffset.Zero)
+    // 高度变化（审计行、会话行出现/消失）用带可见阈值的弹簧。
+    val expandSpec = MotionSpec.pageSpring(IntSize.Zero)
+    // 尺寸补间：卡片收起时的高度收缩。
+    val sizeValueSpec = MotionSpec.sizeValue()
+    // 滚动跟随用的位移曲线。
+    val glideSpec = MotionSpec.glideSpring()
+    // 顶部免责声明与底部说明文案：面板展开时淡入，不要整块压在标题下面。
+    var notesVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { notesVisible = true }
 
     // P7 语音回复：只在用户开启后朗读最新一条只读回答，不上传音频、不请求录音权限。
     val context = LocalContext.current
@@ -180,6 +285,49 @@ fun AgentPanel(
         if (voiceReplies) speakLatest()
     }
 
+    // 这几项在列表区域之外也要用（自动滚动、回到底部按钮），
+    // 提前读一次快照，避免同一份状态在两个作用域里各读一遍。
+    val currentPlan = agent.plan
+    val currentReport = agent.report
+    val currentCreation = agent.creation
+    // 面板空空如也时显示占位页，而不是空列表。
+    val emptyPanel = currentPlan == null &&
+        currentReport == null &&
+        currentCreation == null &&
+        agent.messages.isEmpty()
+    // 列表里的内容条数：消息 + 计划/报告/创作卡片。末尾恒有一行思考位。
+    val contentItems = agent.messages.size +
+        (if (currentPlan != null) 1 else 0) +
+        (if (currentReport != null) 1 else 0) +
+        (if (currentCreation != null) 1 else 0)
+    // 滚动落点：忙碌时停在思考行，否则停在最后一条内容上。
+    // 思考行常驻列表末尾，收起后紧跟最后一条内容。
+    // 不忙时不能拿思考行当落点：它此时高度为 0，滚过去等于滚到列表末尾，
+    // 看着像"跳过去"而不是"停住"。
+    val scrollIndex = if (agent.busy) contentItems else (contentItems - 1).coerceAtLeast(0)
+    // 卡片收起时先播出场动画，动画播完才真正移除：
+    // 直接置空会让卡片瞬间消失，少一个收尾。
+    val cardExitMillis = if (reduced) Motion.Fast + 60 else Motion.Normal + 60
+    // 用户往上翻阅旧回答时，新内容不该把他拽回底部。
+    // 只在滚动位置变化时重算：新消息到达会让列表重排，
+    // 那不是"翻阅旧消息"，不该把自动跟随关掉。
+    var scrolledAway by remember { mutableStateOf(false) }
+    LaunchedEffect(listState) {
+        // 触发源是滚动位置：只有用户真的动了列表才重算。
+        // 若改成观察内容条数，新消息到达会让列表重排，
+        // 那不是"翻阅旧消息"，不该把自动跟随关掉。
+        snapshotFlow {
+            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+        }
+            .distinctUntilChanged()
+            .collect {
+                // 判据是"还能不能继续往下滚"：底部不在眼前就是在翻旧内容。
+                // 比"最后一条是否可见"准——长回答占满屏幕时，
+                // 最后一条一直可见，可用户明明正在往回翻。
+                scrolledAway = listState.canScrollForward
+            }
+    }
+
     val modeLabel = when {
         isPrivate -> "本机"
         agent.cloudConfigured -> "云端"
@@ -201,13 +349,16 @@ fun AgentPanel(
         }
     }
 
-    LaunchedEffect(agent.messages.size, agent.busy, agent.plan != null, agent.report?.createdAt) {
-        val target = agent.messages.size +
-            (if (agent.plan != null) 1 else 0) +
-            (if (agent.report != null) 1 else 0) +
-            (if (agent.busy) 1 else 0)
-        if (target == 0) return@LaunchedEffect
-        listState.animateScrollToItem(target - 1)
+    LaunchedEffect(
+        agent.messages.size,
+        agent.busy,
+        agent.plan != null,
+        agent.report?.createdAt,
+        agent.creation?.createdAt
+    ) {
+        // 空面板还没有列表可滚；用户正在翻旧消息时也不打断他。
+        if (emptyPanel || scrolledAway) return@LaunchedEffect
+        listState.scrollToLatest(scrollIndex, glideSpec)
     }
 
     fun submit(text: String) {
@@ -225,9 +376,18 @@ fun AgentPanel(
     }
 
     Box(Modifier.fillMaxSize()) {
+        // 遮罩淡入：面板展开时背景不该瞬间变暗。
+        var scrimVisible by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) { scrimVisible = true }
+        val scrimAlpha by animateFloatAsState(
+            targetValue = if (scrimVisible) 1f else 0f,
+            animationSpec = MotionSpec.value(Motion.Quick),
+            label = "agent-scrim"
+        )
         Box(
             Modifier
                 .fillMaxSize()
+                .graphicsLayer { alpha = scrimAlpha }
                 .background(Color.Black.copy(alpha = 0.20f))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -240,7 +400,7 @@ fun AgentPanel(
                 .align(Alignment.CenterEnd)
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .padding(end = 16.dp, top = 10.dp, bottom = 10.dp)
+                .padding(end = Space.lg, top = Space.md, bottom = Space.md)
                 .width(400.dp)
                 .fillMaxHeight()
         } else {
@@ -248,7 +408,7 @@ fun AgentPanel(
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
                 .imePadding()
-                .padding(start = 10.dp, end = 10.dp, bottom = 8.dp)
+                .padding(start = Space.md, end = Space.md, bottom = Space.sm)
                 .fillMaxWidth()
                 .widthIn(max = 560.dp)
                 .fillMaxHeight(0.72f)
@@ -257,12 +417,12 @@ fun AgentPanel(
         GlassSurface(
             backdrop = backdrop,
             modifier = panelModifier
-                .clip(RoundedCornerShape(28.dp))
+                .clip(GlassShape.squircle(Radius.xl))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
                 ) { },
-            shape = RoundedCornerShape(28.dp),
+            shape = GlassShape.squircle(Radius.xl),
             tint = colors.glassTintStrong,
             blurRadius = 26.dp,
             lensHeight = 20.dp,
@@ -272,7 +432,7 @@ fun AgentPanel(
             Column(
                 Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
+                    .padding(horizontal = Space.lg, vertical = Space.lg)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -288,231 +448,709 @@ fun AgentPanel(
                     ) {
                         GlyphIcon(Glyph.Sparkle, Color.White, size = 19.dp)
                     }
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(Space.md))
                     Column(Modifier.weight(1f)) {
                         BasicText(
                             text = "琉璃 Agent",
-                            style = TextStyle(
+                            // 面板标题：走 title 档，字号保留 16sp 的紧凑感。
+                            style = Type.title.copy(
                                 color = colors.textPrimary,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontSize = 16.sp
                             )
                         )
-                        BasicText(
-                            text = subtitle,
-                            style = TextStyle(color = colors.textTertiary, fontSize = 10.sp),
-                            maxLines = 1
-                        )
+                        // 站点策略变化时副标题淡入淡出，而不是整行硬切。
+                        AnimatedContent(
+                            targetState = subtitle,
+                            transitionSpec = {
+                                fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Normal))
+                                    .togetherWith(fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)))
+                                    .using(SizeTransform(clip = false))
+                            },
+                            label = "agent-subtitle"
+                        ) { text ->
+                            BasicText(
+                                text = text,
+                                style = Type.caption.copy(color = colors.textTertiary),
+                                maxLines = 1
+                            )
+                        }
                     }
+                    // 模式徽标："本机 / 云端 / 本地"切换时底色与字色交叉过渡。
+                    val modeBadgeBg by animateColorAsState(
+                        targetValue = modeTint.copy(alpha = 0.14f),
+                        animationSpec = MotionSpec.color(),
+                        label = "mode-badge-bg"
+                    )
+                    val modeBadgeTint by animateColorAsState(
+                        targetValue = modeTint,
+                        animationSpec = MotionSpec.color(),
+                        label = "mode-badge-tint"
+                    )
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(modeTint.copy(alpha = 0.14f))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .clip(GlassShape.capsule())
+                            .background(modeBadgeBg)
+                            .padding(horizontal = Space.sm, vertical = Space.xs)
                     ) {
-                        BasicText(
-                            text = modeLabel,
-                            style = TextStyle(
-                                color = modeTint,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Medium
+                        AnimatedContent(
+                            targetState = modeLabel,
+                            transitionSpec = {
+                                fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick))
+                                    .togetherWith(fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)))
+                            },
+                            label = "mode-badge-label"
+                        ) { label ->
+                            BasicText(
+                                text = label,
+                                style = Type.micro.copy(color = modeBadgeTint)
                             )
-                        )
+                        }
                     }
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(Space.xs))
                     GlassIconButton(
                         glyph = Glyph.Close,
                         contentDescription = "关闭 Agent",
                         onClick = onClose,
                         backdrop = backdrop,
+                        // 与隐私说明、隐私护盾面板的关闭键同一规格：
+                        // 三个浮层此前一个 15dp、一个 16dp。
                         size = 40.dp,
-                        glyphSize = 15.dp
+                        glyphSize = 16.dp
                     )
                 }
 
-                Spacer(Modifier.height(8.dp))
-                BasicText(
-                    text = "只读取可见正文与元素名称，不读取输入框已有内容、密码、Cookie 或剪贴板。",
-                    style = TextStyle(color = colors.textTertiary, fontSize = 10.sp, lineHeight = 15.sp)
+                Spacer(Modifier.height(Space.sm))
+                // 免责声明淡入：面板展开时不要整块"啪"地压在标题下面，
+                // 高度也跟着过渡，快捷标签不会被顶下去。
+                AnimatedVisibility(
+                    visible = notesVisible,
+                    enter = fadeIn(animationSpec = fadeInSpec) +
+                        expandVertically(animationSpec = expandSpec),
+                    exit = fadeOut(animationSpec = fadeOutSpec) +
+                        shrinkVertically(animationSpec = expandSpec)
+                ) {
+                    BasicText(
+                        text = "只读取可见正文与元素名称，不读取输入框已有内容、密码、Cookie 或剪贴板。",
+                        // 承诺条款用正文档：10sp 的角标字号读一整句话太吃力，
+                        // 而这句话恰恰是用户最该看清的一行。
+                        style = Type.bodySmall.copy(color = colors.textTertiary)
+                    )
+                }
+
+                Spacer(Modifier.height(Space.md))
+                // 能力条：三个正交维度的当前档位，点一下就换档。
+                // 放在快捷标签之前——快捷标签是"做什么"，能力条是"怎么做"，
+                // 后者决定前者的边界，用户先看到它才知道快捷标签会怎样执行。
+                AgentCapabilityBar(
+                    thinkingLevel = agent.thinkingLevel,
+                    planMode = agent.planMode,
+                    permissionMode = agent.permissionMode,
+                    backdrop = backdrop,
+                    onThinkingLevelChange = agent::updateThinkingLevel,
+                    onPlanModeChange = agent::updatePlanMode,
+                    onPermissionModeChange = agent::updatePermissionMode
                 )
 
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(Space.sm))
+                // 上下文占用与压缩状态：长对话会一直涨，
+                // 用户需要看见"它快满了"以及"已经压过了"，否则只会觉得 Agent 忘事。
+                AgentContextMeter(
+                    tokens = agent.contextTokens,
+                    status = agent.compactStatus,
+                    compactedCount = agent.compactedCount,
+                    threshold = agent.contextCompactThreshold,
+                    onCompactNow = agent::compactNow
+                )
+
+                Spacer(Modifier.height(Space.sm))
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(Space.sm)
                 ) {
-                    QuickChip("总结此页") { submit("总结此页") }
-                    QuickChip("页面信息") { submit("页面信息") }
+                    // 忙碌时快捷标签整体退场：点了没反应比明确变灰更让人困惑。
+                    QuickChip("总结此页", enabled = !agent.busy) { submit("总结此页") }
+                    QuickChip("页面信息", enabled = !agent.busy) { submit("页面信息") }
                     QuickChip("页内查找") { prepareFind() }
-                    QuickChip("监控此页") { submit("监控此页") }
-                    QuickChip("检查关注") { submit("检查关注") }
-                    QuickChip("页面审计") { submit("审计此页") }
-                    QuickChip("查看关注") { submit("查看关注") }
-                    QuickChip("调研标签页") { submit("调研这些标签页并生成报告") }
-                    QuickChip("开始录制") { submit("开始录制") }
-                    QuickChip("结束录制") { submit("结束录制") }
-                    QuickChip("查看宏") { submit("查看宏") }
-                    QuickChip("浏览日报") { submit("浏览日报") }
+                    QuickChip("监控此页", enabled = !agent.busy) { submit("监控此页") }
+                    QuickChip("检查关注", enabled = !agent.busy) { submit("检查关注") }
+                    QuickChip("页面审计", enabled = !agent.busy) { submit("审计此页") }
+                    QuickChip("查看关注", enabled = !agent.busy) { submit("查看关注") }
+                    QuickChip("调研标签页", enabled = !agent.busy) { submit("调研这些标签页并生成报告") }
+                    QuickChip("开始录制", enabled = !agent.busy) { submit("开始录制") }
+                    QuickChip("结束录制", enabled = !agent.busy) { submit("结束录制") }
+                    QuickChip("查看宏", enabled = !agent.busy) { submit("查看宏") }
+                    QuickChip("浏览日报", enabled = !agent.busy) { submit("浏览日报") }
                     QuickChip("分享此页") { onSharePage() }
-                    QuickChip(if (voiceReplies) "停止语音" else "语音回复") {
+                    QuickChip(
+                        label = if (voiceReplies) "停止语音" else "语音回复",
+                        active = voiceReplies
+                    ) {
+                        // 开关型操作给一次轻触反馈：与设置页的开关、手风琴一致，
+                        // 用户不看字也知道状态翻过去了。
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         voiceReplies = !voiceReplies
                         if (!voiceReplies) replySpeech.stop()
                     }
                 }
 
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(Space.sm))
 
                 val currentPlan = agent.plan
                 val currentReport = agent.report
-                if (currentPlan == null && agent.messages.isEmpty()) {
-                    EmptyState(
-                        tabTitle = tabTitle,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                    )
-                } else {
+                val currentCreation = agent.creation
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    // 空面板用占位页填满，否则只是一片空白，看不出这里能做什么。
+                    // 第一条内容到达时占位页淡出，而不是被瞬间抽走。
+                    Visibility(
+                        visible = emptyPanel,
+                        enter = fadeIn(animationSpec = fadeInSpec),
+                        exit = fadeOut(animationSpec = fadeOutSpec)
+                    ) {
+                        AgentEmptyState(
+                            tabTitle = tabTitle,
+                            // 空状态给出能直接点的下一步：
+                            // 只摆一句说明，用户还得自己想第一句该问什么。
+                            onQuickAsk = { submit(it) },
+                            onQuickFind = { prepareFind() },
+                            modifier = Modifier
+                                .fillMaxSize()
+                        )
+                    }
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                        contentPadding = PaddingValues(vertical = 4.dp)
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(Space.xxs),
+                        contentPadding = PaddingValues(vertical = Space.xs)
                     ) {
-                        items(agent.messages, key = { it.id }) { message ->
-                            MessageBubble(
-                                message = message,
-                                onConfirm = { onConfirmAction(message.id) },
-                                onCancel = { onCancelAction(message.id) }
-                            )
+                        itemsIndexed(agent.messages, key = { _, item -> item.id }) { index, message ->
+                            // 逐条浮现：新消息到达时轻轻滑入。
+                            // 用户消息从右侧滑入，Agent 回答从下方升起，方向与来源一致。
+                            val stagger = MotionSpec.staggerDelay(index, stepMillis = 18)
+                            val alreadyShown = message.id in revealedMessageIds
+                            var appeared by remember(message.id) {
+                                mutableStateOf(alreadyShown)
+                            }
+                            LaunchedEffect(message.id) {
+                                // 错峰延迟可能被列表回收打断，
+                                // 那样这条消息就永远停在"没出现"的状态——
+                                // 收尾必须放在 finally 里，不能只走正常路径。
+                                try {
+                                    if (!alreadyShown) {
+                                        if (stagger > 0) delay(stagger.toLong())
+                                        revealedMessageIds.add(message.id)
+                                    }
+                                } finally {
+                                    appeared = true
+                                }
+                            }
+                            val isUserMessage = message.role == AgentMessageRole.User
+                            val enterTransition: EnterTransition = if (isUserMessage) {
+                                fadeIn(animationSpec = fadeInSpec) +
+                                    slideInHorizontally(
+                                        animationSpec = slideSpec,
+                                        initialOffsetX = { it / 4 }
+                                    )
+                            } else {
+                                fadeIn(animationSpec = fadeInSpec) +
+                                    slideInVertically(
+                                        animationSpec = slideSpec,
+                                        initialOffsetY = { it / 6 }
+                                    )
+                            }
+                            Visibility(
+                                visible = appeared,
+                                enter = enterTransition,
+                                exit = fadeOut(animationSpec = fadeOutSpec)
+                            ) {
+                                MessageBubble(
+                                    message = message,
+                                    // 标注跟随这一条消息自己的来路：
+                                    // 云端规划失败改用本机汇总时，这条就该写"本机"。
+                                    modeLabel = bubbleModeLabel(message.mode, isPrivate),
+                                    // 正文逐块显现只给"刚到的 Agent 回答"：
+                                    // 短句一次出现更利落，长回答才需要流式的感觉。
+                                    revealText = message.role == AgentMessageRole.Agent &&
+                                        message.action == null &&
+                                        message.text.length >= 24 &&
+                                        message.id !in revealedTextIds,
+                                    onTextRevealed = { revealedTextIds.add(message.id) },
+                                    backdrop = backdrop,
+                                    onConfirm = { onConfirmAction(message.id) },
+                                    onCancel = { onCancelAction(message.id) }
+                                )
+                            }
                         }
                         if (currentPlan != null) {
                             item(key = "plan") {
-                                PlanCard(plan = currentPlan, onCommand = onPlanCommand)
+                                // 计划没有独立 id，用目标文本作为身份标识：
+                                // 换了目标就是新计划，重新播一次入场动画。
+                                var appeared by remember(currentPlan.goal) {
+                                    mutableStateOf(false)
+                                }
+                                LaunchedEffect(currentPlan.goal) { appeared = true }
+                                Visibility(
+                                    visible = appeared,
+                                    enter = fadeIn(animationSpec = fadeInSpec) +
+                                        scaleIn(
+                                            animationSpec = scaleInSpec,
+                                            initialScale = 0.94f
+                                        ),
+                                    exit = fadeOut(animationSpec = fadeOutSpec) +
+                                        scaleOut(
+                                            animationSpec = scaleInSpec,
+                                            targetScale = 0.96f
+                                        )
+                                ) {
+                                    PlanCard(
+                                        plan = currentPlan,
+                                        backdrop = backdrop,
+                                        onCommand = onPlanCommand
+                                    )
+                                }
                             }
                         }
                         if (currentReport != null) {
                             item(key = "report-${currentReport.createdAt}") {
-                                ReportCard(
-                                    report = currentReport,
-                                    onExport = { format -> onExportReport(currentReport, format) },
-                                    onOpenSource = onOpenSource,
-                                    onDismiss = agent::dismissReport
+                                var appeared by remember(currentReport.createdAt) {
+                                    mutableStateOf(false)
+                                }
+                                // 收起：先播出场动画，播完才真正把报告清空。
+                                // 直接置空会让卡片瞬间消失，列表少一个收尾。
+                                var closing by remember(currentReport.createdAt) {
+                                    mutableStateOf(false)
+                                }
+                                LaunchedEffect(currentReport.createdAt) { appeared = true }
+                                // 清空报告的延时必须跑在面板级的 scope 里。
+                                // 卡片一旦被滚出可视区而回收，它自己的协程会被取消，
+                                // 报告就再也清不掉——用户按了"收起"，卡片又回来了。
+                                // 收尾放在 finally 里：延时被打断时把收起状态复位，
+                                // 否则卡片会永远隐身，而 agent.report 还在。
+                                fun dismissReportCard() {
+                                    closing = true
+                                    scope.launch {
+                                        try {
+                                            delay(cardExitMillis.toLong())
+                                            // 期间若换成了新报告，别把新报告一起清掉。
+                                            if (agent.report?.createdAt == currentReport.createdAt) {
+                                                agent.dismissReport()
+                                            }
+                                        } finally {
+                                            if (agent.report?.createdAt == currentReport.createdAt) {
+                                                closing = false
+                                            }
+                                        }
+                                    }
+                                }
+                                Visibility(
+                                    visible = appeared && !closing,
+                                    enter = fadeIn(animationSpec = fadeInSpec) +
+                                        scaleIn(
+                                            animationSpec = scaleInSpec,
+                                            initialScale = 0.94f
+                                        ),
+                                    exit = fadeOut(animationSpec = fadeOutSpec) +
+                                        shrinkVertically(animationSpec = sizeValueSpec)
+                                ) {
+                                    ReportCard(
+                                        report = currentReport,
+                                        onExport = { format -> onExportReport(currentReport, format) },
+                                        onOpenSource = onOpenSource,
+                                        onDismiss = { dismissReportCard() }
+                                    )
+                                }
+                            }
+                        }
+                        if (currentCreation != null) {
+                            item(key = "creation-${currentCreation.createdAt}") {
+                                var appeared by remember(currentCreation.createdAt) {
+                                    mutableStateOf(false)
+                                }
+                                var closing by remember(currentCreation.createdAt) {
+                                    mutableStateOf(false)
+                                }
+                                LaunchedEffect(currentCreation.createdAt) { appeared = true }
+                                // 与报告卡同理：清空动作跑在面板级的 scope 里，
+                                // 卡片被回收时也要把产物清干净，收尾放在 finally 里。
+                                fun dismissCreationCard() {
+                                    closing = true
+                                    scope.launch {
+                                        try {
+                                            delay(cardExitMillis.toLong())
+                                            // 期间若换成了新产物，别把新产物一起清掉。
+                                            if (agent.creation?.createdAt == currentCreation.createdAt) {
+                                                agent.dismissCreation()
+                                            }
+                                        } finally {
+                                            if (agent.creation?.createdAt == currentCreation.createdAt) {
+                                                closing = false
+                                            }
+                                        }
+                                    }
+                                }
+                                Visibility(
+                                    visible = appeared && !closing,
+                                    enter = fadeIn(animationSpec = fadeInSpec) +
+                                        scaleIn(
+                                            animationSpec = scaleInSpec,
+                                            initialScale = 0.94f
+                                        ),
+                                    exit = fadeOut(animationSpec = fadeOutSpec) +
+                                        shrinkVertically(animationSpec = sizeValueSpec)
+                                ) {
+                                    CreationCard(
+                                        creation = currentCreation,
+                                        onExport = { format -> onExportCreation(currentCreation, format) },
+                                        onShare = { onShareCreation(currentCreation) },
+                                        onShareCard = { onShareCreationCard(currentCreation) },
+                                        onDismiss = { dismissCreationCard() }
+                                    )
+                                }
+                            }
+                        }
+                        // 思考行常驻列表末尾：请求结束时先收起来再消失，
+                        // 否则它会被瞬间移除，面板内容"啪"地少一块。
+                        item(key = "thinking") {
+                            Visibility(
+                                visible = agent.busy,
+                                enter = fadeIn(animationSpec = fadeInSpec) +
+                                    expandVertically(animationSpec = expandSpec),
+                                exit = fadeOut(animationSpec = fadeOutSpec) +
+                                    shrinkVertically(animationSpec = expandSpec)
+                            ) {
+                                ThinkingRow(
+                                    phase = agent.currentPhase?.label,
+                                    onStop = { agent.cancelCurrent() }
                                 )
                             }
                         }
-                        if (agent.busy) {
-                            item(key = "thinking") { ThinkingRow() }
+                    }
+                    // 往上翻阅旧回答时，右下角浮出"回到最新"：
+                    // 没有它，用户只能一直往下拖才知道有新消息来了。
+                    // 与自动跟随用同一个判据：底部不在眼前就该给按钮，
+                    // 两者若用两套标准，按钮会和自动跟随打架。
+                    val showJumpToLatest = scrolledAway
+                    Visibility(
+                        visible = showJumpToLatest && !emptyPanel,
+                        enter = fadeIn(MotionSpec.enter(Motion.Quick)) + scaleIn(
+                            animationSpec = MotionSpec.enter(Motion.Quick),
+                            initialScale = 0.7f
+                        ),
+                        exit = fadeOut(MotionSpec.exit(Motion.Quick)) + scaleOut(
+                            animationSpec = MotionSpec.exit(Motion.Quick),
+                            targetScale = 0.7f
+                        ),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = Space.md, bottom = Space.sm)
+                    ) {
+                        val jumpInteraction = remember { MutableInteractionSource() }
+                        Box(
+                            Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (colors.isDark) {
+                                        Color(0xFF1B2130)
+                                    } else {
+                                        Color.White.copy(alpha = 0.92f)
+                                    }
+                                )
+                                .semantics {
+                                    contentDescription = "回到最新"
+                                    role = Role.Button
+                                }
+                                .clickable(
+                                    interactionSource = jumpInteraction,
+                                    indication = null,
+                                    role = Role.Button,
+                                    onClickLabel = "回到最新",
+                                    onClick = {
+                                        // 回到最新是一次明确的跳转，给一次轻触反馈：
+                                        // 滚动本身无声，用户容易以为按钮没生效。
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        scope.launch {
+                                            listState.scrollToLatest(scrollIndex, glideSpec)
+                                        }
+                                    }
+                                )
+                                .pressScale(pressedScale = 0.86f, interactionSource = jumpInteraction),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            GlyphIcon(Glyph.ChevronDown, colors.textSecondary, size = 18.dp)
                         }
                     }
                 }
 
-                Spacer(Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Spacer(Modifier.height(Space.sm))
+                // 接近上限时提示剩余字数：粘贴长文被截断却毫无提示，
+                // 用户只会觉得"尾巴怎么没了"。
+                Visibility(
+                    visible = input.length >= AgentInputLimit * 4 / 5,
+                    enter = fadeIn(MotionSpec.enter(Motion.Quick)) +
+                        expandVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick)),
+                    exit = fadeOut(MotionSpec.exit(Motion.Quick)) +
+                        shrinkVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick))
+                ) {
+                    BasicText(
+                        // 逼近上限时改用危险色：还剩几十字的时候，
+                        // 一句中性的"还可输入 42 字"很容易被眼睛略过。
+                        text = if (input.length >= AgentInputLimit) {
+                            "已达上限 $AgentInputLimit 字"
+                        } else {
+                            "还可输入 ${AgentInputLimit - input.length} 字"
+                        },
+                        style = Type.micro.copy(
+                            color = if (AgentInputLimit - input.length <= AgentInputLimit / 10) {
+                                colors.danger
+                            } else {
+                                colors.textTertiary
+                            },
+                            textAlign = TextAlign.End
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                // 输入框会随内容长高，发送键要贴着输入框底部：
+                // 垂直居中时，多行输入会把按钮顶到中间，看着像漂在框里。
+                Row(verticalAlignment = Alignment.Bottom) {
+                    // 输入框聚焦时描一圈主色：光标之外还有一处"正在输入"的提示。
+                    val inputInteraction = remember { MutableInteractionSource() }
+                    val inputFocused by inputInteraction.collectIsFocusedAsState()
+                    val inputBorder by animateColorAsState(
+                        targetValue = if (inputFocused) {
+                            colors.accent.copy(alpha = 0.55f)
+                        } else {
+                            Color.Transparent
+                        },
+                        animationSpec = MotionSpec.color(),
+                        label = "input-border"
+                    )
+                    // 聚焦时底色也偏向强调色：与设置页的输入框同一套反馈，
+                    // 只描边不换底色时两者看起来像两种控件。
+                    val inputBackground by animateColorAsState(
+                        targetValue = if (inputFocused) {
+                            colors.accent.copy(alpha = 0.10f)
+                        } else {
+                            colors.textPrimary.copy(alpha = 0.06f)
+                    },
+                        animationSpec = MotionSpec.color(),
+                        label = "input-background"
+                    )
                     Box(
                         Modifier
                             .weight(1f)
                             .heightIn(min = 44.dp)
-                            .clip(RoundedCornerShape(22.dp))
-                            .background(colors.textPrimary.copy(alpha = 0.06f))
-                            .padding(horizontal = 14.dp, vertical = 2.dp),
+                            .clip(GlassShape.squircle(Radius.md))
+                            .background(inputBackground)
+                            .border(1.dp, inputBorder, GlassShape.squircle(Radius.md))
+                            .padding(horizontal = Space.md, vertical = Space.xxs),
                         contentAlignment = Alignment.CenterStart
                     ) {
-                        BasicTextField(
-                            value = input,
-                            onValueChange = { input = it.take(500) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 40.dp)
-                                .focusRequester(focusRequester),
-                            textStyle = TextStyle(
-                                color = colors.textPrimary,
-                                fontSize = 13.sp,
-                                lineHeight = 18.sp
-                            ),
-                            cursorBrush = SolidColor(colors.accent),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                            keyboardActions = KeyboardActions(onSend = { submit(input) }),
-                            decorationBox = { innerTextField ->
-                                Box(contentAlignment = Alignment.CenterStart) {
-                                    if (input.isEmpty()) {
-                                        BasicText(
-                                            text = "询问本页内容…",
-                                            style = TextStyle(
-                                                color = colors.textTertiary,
-                                                fontSize = 13.sp
-                                            )
-                                        )
+                        // 选区底色与手柄跟随强调色，和地址栏、首页搜索框一致。
+                        // 整个输入框都要裹进去：手柄是画在装饰框之外的兄弟节点，
+                        // 只包 decorationBox 的话手柄仍是默认蓝。
+                        CompositionLocalProvider(
+                            LocalTextSelectionColors provides TextSelectionColors(
+                                handleColor = colors.accent,
+                                backgroundColor = colors.accent.copy(alpha = 0.28f)
+                            )
+                        ) {
+                            BasicTextField(
+                                value = input,
+                                // 超出上限的字符会被丢掉。上面有字数提示兜底，
+                                // 用户至少知道内容被截断了。
+                                onValueChange = { input = it.take(AgentInputLimit) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(focusRequester)
+                                    .semantics { contentDescription = "向助手提问" },
+                                interactionSource = inputInteraction,
+                                textStyle = Type.body.copy(
+                                    color = colors.textPrimary,
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp
+                                ),
+                                cursorBrush = SolidColor(colors.accent),
+                                // 多行输入：提问框上限 500 字，单行会把长问题压成
+                                // 一条横向滚动的细线，看不清自己写了什么。
+                                // 输入框随内容长高，最多到 5 行就不再涨。
+                                singleLine = false,
+                                maxLines = 5,
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Sentences,
+                                    imeAction = ImeAction.Send
+                                ),
+                                keyboardActions = KeyboardActions(onSend = { submit(input) }),
+                                decorationBox = { innerTextField ->
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        // 正文块自己留出 40dp 的下限并把文字居中：
+                                        // 多行输入时正文框按内容长高，
+                                        // 一行时又不会因为高度富余而把字顶到框沿上。
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .heightIn(min = 40.dp),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            if (input.isEmpty()) {
+                                                BasicText(
+                                                    text = "询问本页内容…",
+                                                    style = Type.body.copy(
+                                                        color = colors.textTertiary,
+                                                        fontSize = 13.sp
+                                                    )
+                                                )
+                                            }
+                                            innerTextField()
+                                        }
+                                        // 清空入口：逐字删太慢，
+                                        // 给一个能直接擦掉的按钮。
+                                        Visibility(
+                                            visible = input.isNotEmpty(),
+                                            enter = fadeIn(MotionSpec.enter(Motion.Quick)),
+                                            exit = fadeOut(MotionSpec.exit(Motion.Quick))
+                                        ) {
+                                            val clearInteraction = remember { MutableInteractionSource() }
+                                            Box(
+                                                Modifier
+                                                    .size(26.dp)
+                                                    .clip(CircleShape)
+                                                    .semantics {
+                                                        contentDescription = "清空提问"
+                                                        role = Role.Button
+                                                    }
+                                                    .clickable(
+                                                        interactionSource = clearInteraction,
+                                                        indication = null,
+                                                        role = Role.Button,
+                                                        onClickLabel = "清空"
+                                                    ) { input = "" }
+                                                    .pressScale(
+                                                        pressedScale = 0.82f,
+                                                        interactionSource = clearInteraction
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                GlyphIcon(Glyph.Close, colors.textTertiary, size = 13.dp)
+                                            }
+                                        }
                                     }
-                                    innerTextField()
                                 }
-                            }
-                        )
+                            )
+                        }
                     }
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(Space.sm))
                     val canSend = input.isNotBlank() && !agent.busy
+                    val busyNow = agent.busy
+                    val sendInteraction = remember { MutableInteractionSource() }
+                    // 发送键有三种状态，样子必须各不相同：
+                    // 可发送（主色铺底）、空内容（几乎融进面板）、处理中（发灰且明确禁用）。
+                    // 处理中不能和"没写字"共用一套外观，否则用户以为按钮坏了。
+                    val sendBackground by animateColorAsState(
+                        targetValue = when {
+                            canSend -> colors.accent
+                            busyNow -> colors.textPrimary.copy(alpha = 0.10f)
+                            else -> colors.textPrimary.copy(alpha = 0.06f)
+                        },
+                        animationSpec = MotionSpec.color(),
+                        label = "send-bg"
+                    )
+                    val sendTint by animateColorAsState(
+                        targetValue = when {
+                            canSend -> Color.White
+                            busyNow -> colors.textTertiary.copy(alpha = 0.7f)
+                            else -> colors.textTertiary
+                        },
+                        animationSpec = MotionSpec.color(),
+                        label = "send-tint"
+                    )
                     Box(
                         Modifier
                             .size(Dimens.minTouch)
                             .clip(CircleShape)
-                            .background(
-                                if (canSend) colors.accent
-                                else colors.textPrimary.copy(alpha = 0.06f)
-                            )
+                            .background(sendBackground)
                             .semantics {
-                                contentDescription = "发送"
+                                contentDescription = if (busyNow) "正在处理中" else "发送"
                                 role = Role.Button
                             }
                             .clickable(
+                                interactionSource = sendInteraction,
+                                indication = null,
                                 enabled = canSend,
                                 role = Role.Button,
                                 onClickLabel = "发送",
-                                onClick = { submit(input) }
-                            ),
+                                onClick = {
+                                    // 发送是面板里最重的一次点击，给一次轻触反馈。
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    submit(input)
+                                }
+                            )
+                            .pressScale(pressedScale = 0.88f, interactionSource = sendInteraction),
                         contentAlignment = Alignment.Center
                     ) {
                         GlyphIcon(
                             glyph = Glyph.Sparkle,
-                            tint = if (canSend) Color.White else colors.textTertiary,
+                            tint = sendTint,
                             size = 20.dp
                         )
                     }
                 }
 
-                Spacer(Modifier.height(8.dp))
-                BasicText(
-                    text = "受控操作：单步动作需逐条确认；多步任务需先批准计划，执行中可暂停或取消，不会自动提交表单。",
-                    style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
-                )
-                if (agent.audit.isNotEmpty()) {
-                    Spacer(Modifier.height(3.dp))
+                Spacer(Modifier.height(Space.sm))
+                // 底部说明文案与面板一起淡入。
+                AnimatedVisibility(
+                    visible = notesVisible,
+                    enter = fadeIn(animationSpec = fadeInSpec) +
+                        expandVertically(animationSpec = expandSpec),
+                    exit = fadeOut(animationSpec = fadeOutSpec) +
+                        shrinkVertically(animationSpec = expandSpec)
+                ) {
                     BasicText(
-                        text = "审计 ${agent.audit.size} 条 · 仅本机内存，清除对话或退出时删除",
-                        style = TextStyle(
-                            color = colors.textTertiary,
-                            fontSize = 9.sp,
-                            lineHeight = 13.sp
-                        )
+                        text = "受控操作：单步动作需逐条确认；多步任务需先批准计划，执行中可暂停或取消，不会自动提交表单。",
+                        // 这是承诺条款，不是角标：走正文档才读得下去。
+                        style = Type.bodySmall.copy(color = colors.textTertiary)
                     )
                 }
-                if (agent.watches.isNotEmpty() || agent.macros.isNotEmpty() || agent.recordingMacro) {
-                    Spacer(Modifier.height(3.dp))
-                    BasicText(
-                        text = buildString {
-                            append("本机会话：关注 ${agent.watches.size} 个页面 · 宏 ${agent.macros.size} 个")
-                            if (agent.recordingMacro) append(" · 正在录制宏")
-                            append("（不后台运行）")
-                        },
-                        style = TextStyle(
-                            color = colors.textTertiary,
-                            fontSize = 9.sp,
-                            lineHeight = 13.sp
+                // 审计行与会话行：出现/消失都带高度过渡，输入框不会被顶来顶去。
+                AnimatedVisibility(
+                    visible = agent.audit.isNotEmpty(),
+                    enter = fadeIn(animationSpec = fadeInSpec) +
+                        expandVertically(animationSpec = expandSpec),
+                    exit = fadeOut(animationSpec = fadeOutSpec) +
+                        shrinkVertically(animationSpec = expandSpec)
+                ) {
+                    Column(Modifier.fillMaxWidth()) {
+                        Spacer(Modifier.height(Space.xxs))
+                        BasicText(
+                            text = "审计 ${agent.audit.size} 条 · 仅本机内存，清除对话或退出时删除",
+                            style = Type.caption.copy(color = colors.textTertiary)
                         )
-                    )
+                    }
+                }
+                AnimatedVisibility(
+                    visible = agent.watches.isNotEmpty() || agent.macros.isNotEmpty() || agent.recordingMacro,
+                    enter = fadeIn(animationSpec = fadeInSpec) +
+                        expandVertically(animationSpec = expandSpec),
+                    exit = fadeOut(animationSpec = fadeOutSpec) +
+                        shrinkVertically(animationSpec = expandSpec)
+                ) {
+                    Column(Modifier.fillMaxWidth()) {
+                        Spacer(Modifier.height(Space.xxs))
+                        BasicText(
+                            text = buildString {
+                                append("本机会话：关注 ${agent.watches.size} 个页面 · 宏 ${agent.macros.size} 个")
+                                if (agent.recordingMacro) append(" · 正在录制宏")
+                                append("（不后台运行）")
+                            },
+                            style = Type.caption.copy(color = colors.textTertiary)
+                        )
+                    }
                 }
             }
         }
@@ -520,79 +1158,468 @@ fun AgentPanel(
 }
 
 @Composable
-private fun QuickChip(label: String, onClick: () -> Unit) {
+private fun QuickChip(
+    label: String,
+    enabled: Boolean = true,
+    active: Boolean = false,
+    onClick: () -> Unit
+) {
     val colors = LocalLiuliColors.current
+    val reduced = reduceMotion
+    val interaction = remember { MutableInteractionSource() }
+    // 忙碌时标签退成灰色，开着的开关（语音回复）用主色标出来：
+    // 状态一眼能分清，不必去猜哪个还生效。
+    val background by animateColorAsState(
+        targetValue = when {
+            active -> colors.accent.copy(alpha = 0.18f)
+            enabled -> colors.textPrimary.copy(alpha = 0.06f)
+            else -> colors.textPrimary.copy(alpha = 0.03f)
+        },
+        animationSpec = MotionSpec.color(),
+        label = "chip-bg"
+    )
+    val tint by animateColorAsState(
+        targetValue = when {
+            !enabled -> colors.textTertiary.copy(alpha = 0.55f)
+            active -> colors.accent
+            else -> colors.textSecondary
+        },
+        animationSpec = MotionSpec.color(),
+        label = "chip-tint"
+    )
     Box(
         Modifier
-            .clip(RoundedCornerShape(50))
-            .background(colors.textPrimary.copy(alpha = 0.06f))
-            .clickable(role = Role.Button, onClickLabel = label, onClick = onClick)
-            .padding(horizontal = 11.dp, vertical = 6.dp)
+            .clip(GlassShape.capsule())
+            .background(background)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                enabled = enabled,
+                role = Role.Button,
+                onClickLabel = label,
+                onClick = onClick
+            )
+            // 禁用时 interactionSource 不会发出按下事件，按压形变自然不出现。
+            .pressScale(pressedScale = 0.90f, interactionSource = interaction)
+            .padding(horizontal = Space.md, vertical = Space.sm)
+    ) {
+        // 文案会变（"语音回复"↔"停止语音"），交叉淡入淡出而不是硬切。
+        AnimatedContent(
+            targetState = label,
+            transitionSpec = {
+                fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick))
+                    .togetherWith(fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)))
+                    .using(SizeTransform(clip = false))
+            },
+            label = "chip-label"
+        ) { text ->
+            BasicText(
+                text = text,
+                style = Type.label.copy(color = tint)
+            )
+        }
+    }
+}
+
+/**
+ * 能力条：思考等级 / 计划模式 / 权限模式三个正交维度。
+ *
+ * 三者互不耦合，所以并排摆着，而不是收进一个下拉里：
+ * 收进下拉的话，用户每次调一个维度都要先打开菜单再选，
+ * 而这三个恰好是最常调的东西（尤其是权限模式）。
+ *
+ * 思考与计划两档都是"点一下就换到下一档"：
+ * 它们的档位都很少（2-4 档），循环切换比开菜单快，
+ * 而当前档位一直显示在面上，不存在"选错了看不出来"的问题。
+ *
+ * 权限不一样：**放宽到自动执行要用户点头**。
+ * 一次随手的点击不该悄悄把 Agent 的自主度调高——
+ * 权限是三个维度里唯一带安全含义的一档。
+ */
+@Composable
+private fun AgentCapabilityBar(
+    thinkingLevel: AgentThinkingLevel,
+    planMode: AgentPlanMode,
+    permissionMode: AgentPermissionMode,
+    backdrop: Backdrop,
+    onThinkingLevelChange: (AgentThinkingLevel) -> Unit,
+    onPlanModeChange: (AgentPlanMode) -> Unit,
+    onPermissionModeChange: (AgentPermissionMode) -> Unit
+) {
+    val haptics = LocalHapticFeedback.current
+    // 待确认的权限档位：用户点了"低风险自动"但还没点头确认。
+    var pendingPermission by remember { mutableStateOf<AgentPermissionMode?>(null) }
+
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(Space.sm)
+        ) {
+            CapabilityDial(
+                title = "思考",
+                value = thinkingLevel.label,
+                // 偏离默认档（中等）就标出来：用户要能一眼看出"这一项我动过"。
+                emphasis = thinkingLevel != AgentThinkingLevel.Medium,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    val next = AgentThinkingLevel.entries[
+                        (thinkingLevel.ordinal + 1) % AgentThinkingLevel.entries.size
+                    ]
+                    onThinkingLevelChange(next)
+                }
+            )
+            CapabilityDial(
+                title = "计划",
+                value = planMode.label,
+                emphasis = planMode != AgentPlanMode.Auto,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    val next = AgentPlanMode.entries[
+                        (planMode.ordinal + 1) % AgentPlanMode.entries.size
+                    ]
+                    onPlanModeChange(next)
+                }
+            )
+            CapabilityDial(
+                title = "权限",
+                // 显示的永远是**真正生效**的那一档：
+                // 待确认的档位还没生效，显示它会让用户以为权限已经放开了。
+                value = permissionMode.label,
+                // 权限模式换到哪一档都会改变安全边界，颜色上要分得出来。
+                emphasis = permissionMode != AgentPermissionMode.Ask,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    // 确认条已经挂着的时候，这一格再点一下就是撤销这次请求：
+                    // 否则按下去毫无变化，用户会以为这格坏了。
+                    // 撤销比"再算下一档"好——用户想撤销时，
+                    // 不该被塞给他一个自己没点的档位。
+                    if (pendingPermission != null) {
+                        pendingPermission = null
+                        return@CapabilityDial
+                    }
+                    // 下一档始终从**生效中**的那一档算起：
+                    // 若从待确认的那档算，确认条一出现再点一下就会跳到"只读"，
+                    // 待确认的状态也被顺手抹掉了。
+                    val next = AgentPermissionMode.entries[
+                        (permissionMode.ordinal + 1) % AgentPermissionMode.entries.size
+                    ]
+                    if (next == AgentPermissionMode.LowRiskAuto) {
+                        // 只有"低风险自动"要确认：它是唯一一档会让 Agent
+                        // 在用户不知情时自己动手的档位。
+                        // 其余两档之间切换——哪怕是从只读放宽到逐次确认——
+                        // 每一步都还要用户点头，Agent 不会自己动。
+                        pendingPermission = next
+                    } else {
+                        onPermissionModeChange(next)
+                    }
+                }
+            )
+        }
+
+        val pending = pendingPermission
+        if (pending != null) {
+            PermissionConfirmRow(
+                target = pending,
+                backdrop = backdrop,
+                onConfirm = {
+                    pendingPermission = null
+                    onPermissionModeChange(pending)
+                },
+                onCancel = { pendingPermission = null }
+            )
+        }
+    }
+}
+
+/**
+ * 放宽权限前的确认条。
+ *
+ * 不用对话框：确认条就贴在能力条下面，用户看得见自己刚点的是哪一档，
+ * 而对话框会把整个面板盖住，反而看不清上下文。
+ *
+ * 说明文字单独一行，按钮另起一行靠右：
+ * 两者挤在同一行时，窄屏上文字会被压成三四行，
+ * 整条确认条比消息本身还高，面板被它撑得变形。
+ */
+@Composable
+private fun PermissionConfirmRow(
+    target: AgentPermissionMode,
+    backdrop: Backdrop,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val colors = LocalLiuliColors.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = Space.sm)
+            .clip(GlassShape.squircle(Radius.sm))
+            .background(colors.accent.copy(alpha = 0.12f))
+            .padding(start = Space.md, end = Space.sm, top = Space.sm, bottom = Space.sm)
     ) {
         BasicText(
-            text = label,
-            style = TextStyle(color = colors.textSecondary, fontSize = 11.sp)
+            text = "切到「${target.label}」后，滚动这类动作不再逐次确认；点击、填写与表单提交仍需你点头。",
+            // 用次要正文而不是 10sp 的角标字号：
+            // 角标字号读一整句话太吃力，而这句话是安全边界说明，
+            // 恰恰是用户最该看清的一行。
+            style = Type.bodySmall.copy(color = colors.textSecondary)
+        )
+        Spacer(Modifier.height(Space.sm))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 两个按钮都用现成的组件：它们各自会震一次，
+            // 这里不再手动补触感，否则同一次点击会震两下。
+            ActionButton(label = "取消", accent = false, onClick = onCancel)
+            Spacer(Modifier.width(Space.xs))
+            GlassPillButton(
+                label = "开启",
+                onClick = onConfirm,
+                backdrop = backdrop,
+                accent = true
+            )
+        }
+    }
+}
+
+/**
+ * 能力条上的一格：一个维度名 + 当前档位。
+ *
+ * 点一下换到下一档，所以格子里必须始终写着当前档位——
+ * 用户要能一眼看出"现在是什么"，而不是靠试。
+ */
+@Composable
+private fun CapabilityDial(
+    title: String,
+    value: String,
+    emphasis: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = LocalLiuliColors.current
+    val interaction = remember { MutableInteractionSource() }
+    val tint = if (emphasis) colors.accent else colors.textSecondary
+    Row(
+        Modifier
+            .clip(GlassShape.capsule())
+            .background(
+                if (emphasis) {
+                    colors.accent.copy(alpha = 0.14f)
+                } else {
+                    colors.textPrimary.copy(alpha = 0.06f)
+                }
+            )
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onClickLabel = "$title：$value，点一下换档",
+                onClick = onClick
+            )
+            .pressScale(pressedScale = 0.92f, interactionSource = interaction)
+            .padding(horizontal = Space.md, vertical = Space.sm),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        BasicText(
+            text = title,
+            style = Type.label.copy(color = colors.textTertiary)
+        )
+        Spacer(Modifier.width(Space.xs))
+        BasicText(
+            text = value,
+            style = Type.label.copy(
+                color = tint,
+                fontWeight = FontWeight.SemiBold
+            )
         )
     }
 }
 
+/**
+ * 上下文占用与压缩状态。
+ *
+ * 数字是**估算值**，所以文案里写"约"：
+ * 本机没有分词器，报一个精确到个位的 token 数反而会误导人。
+ *
+ * 压缩状态必须露出来：压缩之后早期的对话细节没了，
+ * 用户若看不见"已压缩"这几个字，只会觉得 Agent 突然变傻了。
+ */
 @Composable
-private fun EmptyState(tabTitle: String, modifier: Modifier = Modifier) {
+private fun AgentContextMeter(
+    tokens: Int,
+    status: AgentCompactStatus,
+    compactedCount: Int,
+    threshold: Int,
+    onCompactNow: () -> Unit
+) {
     val colors = LocalLiuliColors.current
+    val haptics = LocalHapticFeedback.current
+    val statusText = when (status) {
+        AgentCompactStatus.Idle -> null
+        AgentCompactStatus.Running -> "正在压缩…"
+        AgentCompactStatus.Completed -> "已压缩 $compactedCount 条早期消息"
+        AgentCompactStatus.Failed -> "压缩失败"
+    }
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        BasicText(
+            text = "上下文：约 ${formatTokenCount(tokens)}",
+            style = Type.caption.copy(color = colors.textTertiary)
+        )
+        if (statusText != null) {
+            Spacer(Modifier.width(Space.sm))
+            BasicText(
+                text = statusText,
+                style = Type.caption.copy(
+                    color = if (status == AgentCompactStatus.Failed) colors.danger else colors.accent
+                )
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        // 压缩是用户能直接触发的动作，但只在长对话里才有意义：
+        // 短对话点了无事发生，按钮就成了一直在骗人的摆设。
+        if (tokens >= threshold) {
+            val interaction = remember { MutableInteractionSource() }
+            Box(
+                Modifier
+                    .clip(GlassShape.capsule())
+                    .background(colors.accent.copy(alpha = 0.14f))
+                    .clickable(
+                        interactionSource = interaction,
+                        indication = null,
+                        role = Role.Button,
+                        onClickLabel = "立即压缩上下文",
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onCompactNow()
+                        }
+                    )
+                    .pressScale(pressedScale = 0.90f, interactionSource = interaction)
+                    .padding(horizontal = Space.md, vertical = Space.xs),
+                contentAlignment = Alignment.Center
+            ) {
+                BasicText(
+                    text = "立即压缩",
+                    style = Type.label.copy(
+                        color = colors.accent,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                )
+            }
+        }
+    }
+}
+
+/** token 数太长了读着别扭：按千分位缩一档。 */
+private fun formatTokenCount(tokens: Int): String = when {
+    tokens >= 10_000 -> "${tokens / 1000}k"
+    else -> tokens.toString()
+}
+
+@Composable
+private fun AgentEmptyState(
+    tabTitle: String,
+    onQuickAsk: (String) -> Unit,
+    onQuickFind: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalLiuliColors.current
+    // 面板打开时内容淡入上移，避免"啪"地一下出现。
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+    val emptyAlpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = MotionSpec.value(Motion.Slow),
+        label = "agent-empty-alpha"
+    )
     Column(
-        modifier,
+        modifier.graphicsLayer {
+            alpha = emptyAlpha
+            translationY = (1f - emptyAlpha) * 12.dp.toPx()
+        },
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
-            Modifier
-                .size(56.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            colors.accent.copy(alpha = 0.20f),
-                            colors.accentSecondary.copy(alpha = 0.12f)
-                        )
-                    )
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            GlyphIcon(Glyph.Sparkle, colors.accent, size = 26.dp)
-        }
-        Spacer(Modifier.height(10.dp))
-        BasicText(
-            text = "向当前页面提问",
-            style = TextStyle(
-                color = colors.textPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold
-            )
+        // 与其它空状态共用一套外观：底座尺寸、配色与标题层级都一致，
+        // 面板内外看着才像同一个产品。
+        EmptyState(
+            glyph = Glyph.Sparkle,
+            title = "向当前页面提问",
+            message = tabTitle.take(48).ifBlank { "当前页面" },
+            modifier = Modifier.fillMaxWidth(),
+            // 可直接点的下一步：空状态最怕"只有介绍没有入口"，
+            // 用户站在这里不知道该按哪里。
+            footer = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Space.sm),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    QuickChip("总结此页") { onQuickAsk("总结此页") }
+                    QuickChip("页内查找", onClick = onQuickFind)
+                }
+            }
         )
-        Spacer(Modifier.height(4.dp))
-        BasicText(
-            text = tabTitle.take(48).ifBlank { "当前页面" },
-            style = TextStyle(color = colors.textTertiary, fontSize = 11.sp),
-            maxLines = 1
-        )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(Space.md))
         BasicText(
             text = "速览、查找与问答默认在本机完成。\n也可以让我滚动、点击或填写，每次都会先确认。",
-            style = TextStyle(
+            style = Type.bodySmall.copy(
                 color = colors.textTertiary,
-                fontSize = 11.sp,
-                lineHeight = 17.sp
-            )
+                textAlign = TextAlign.Center
+            ),
+            modifier = Modifier.fillMaxWidth()
         )
+    }
+}
+
+/**
+ * 卡片头部的小图标圆。
+ *
+ * 卡片本身已经整体缩放入场，图标再从 0.82 长出来一点，
+ * 两层错开，卡片才像"落位"而不是被"贴"上去。
+ *
+ * [entranceKey] 用来记住入场状态：卡片滑出屏幕再滑回来时不重播动画。
+ */
+@Composable
+private fun CardHeaderIcon(
+    glyph: Glyph,
+    tint: Color,
+    entranceKey: Any
+) {
+    var entered by rememberSaveable(entranceKey) { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (entered) 1f else 0.82f,
+        animationSpec = MotionSpec.pageSpring(),
+        label = "card-icon-scale"
+    )
+    LaunchedEffect(entranceKey) { entered = true }
+    Box(
+        Modifier
+            .size(26.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(CircleShape)
+            .background(tint.copy(alpha = 0.18f)),
+        contentAlignment = Alignment.Center
+    ) {
+        GlyphIcon(glyph, tint, size = 14.dp)
     }
 }
 
 @Composable
 private fun PlanCard(
     plan: AgentPlan,
+    backdrop: Backdrop,
     onCommand: (AgentPlanCommand) -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    val reduced = reduceMotion
     val statusLabel = when (plan.status) {
         AgentPlanStatus.Pending -> "待批准"
         AgentPlanStatus.Running -> "执行中"
@@ -611,60 +1638,93 @@ private fun PlanCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(GlassShape.squircle(Radius.md))
             .background(colors.accent.copy(alpha = if (colors.isDark) 0.12f else 0.07f))
-            .padding(12.dp)
+            // 待批准时描一圈主色：这份计划正等着用户点头，
+            // 卡片本身要主动从一长串回答里"探出头"来。
+            .border(
+                width = 1.dp,
+                color = if (plan.status == AgentPlanStatus.Pending) {
+                    colors.accent.copy(alpha = 0.45f)
+                } else {
+                    Color.Transparent
+                },
+                shape = GlassShape.squircle(Radius.md)
+            )
+            .padding(Space.md)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .background(colors.accent.copy(alpha = 0.18f)),
-                contentAlignment = Alignment.Center
-            ) {
-                GlyphIcon(Glyph.Sparkle, colors.accent, size = 14.dp)
-            }
-            Spacer(Modifier.width(8.dp))
+            CardHeaderIcon(Glyph.Sparkle, colors.accent, entranceKey = plan.goal)
+            Spacer(Modifier.width(Space.sm))
             Column(Modifier.weight(1f)) {
                 BasicText(
                     text = "任务计划",
-                    style = TextStyle(
-                        color = colors.textPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    style = Type.sectionTitle.copy(color = colors.textPrimary)
                 )
                 BasicText(
                     text = "${plan.steps.size} 步 · " +
                         "${if (plan.source == AgentMode.Cloud) "云端规划" else "本地规划"}",
-                    style = TextStyle(color = colors.textTertiary, fontSize = 9.sp)
+                    // 卡片副信息走 caption 档：micro 是留给角标数字的，
+                    // 9sp 排一行元信息几乎读不出来。
+                    style = Type.caption.copy(color = colors.textTertiary)
                 )
             }
+            // 状态徽标：待批准→执行中→已完成，颜色交叉过渡而不是瞬时换色。
+            val badgeTint by animateColorAsState(
+                targetValue = statusTint,
+                animationSpec = MotionSpec.color(),
+                label = "plan-status-tint"
+            )
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(statusTint.copy(alpha = 0.14f))
-                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                    .clip(GlassShape.capsule())
+                    .background(badgeTint.copy(alpha = 0.14f))
+                    .padding(horizontal = Space.sm, vertical = Space.xs)
             ) {
-                BasicText(
-                    text = statusLabel,
-                    style = TextStyle(
-                        color = statusTint,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Medium
+                // 状态文案与颜色同步交叉过渡，换状态时徽标是"化"过去的。
+                AnimatedContent(
+                    targetState = statusLabel,
+                    transitionSpec = {
+                        fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick))
+                            .togetherWith(fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)))
+                    },
+                    label = "plan-status-label"
+                ) { label ->
+                    BasicText(
+                        text = label,
+                        style = Type.micro.copy(color = badgeTint)
                     )
-                )
+                }
             }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(Space.sm))
+        // 目标：用户批准前要判断的正是这一句，
+        // 压成 caption 档几乎读不出来，等于没写。
         BasicText(
             text = plan.goal,
-            style = TextStyle(color = colors.textTertiary, fontSize = 10.sp, lineHeight = 15.sp),
-            maxLines = 2,
+            style = Type.body.copy(color = colors.textPrimary),
+            maxLines = 3,
             overflow = TextOverflow.Ellipsis
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(Space.sm))
+        // 执行进度：步骤列表只能看出"哪些做完了"，
+        // 看不出"现在走到第几步"，执行中需要后者。
+        Visibility(
+            visible = plan.status == AgentPlanStatus.Running ||
+                plan.status == AgentPlanStatus.Paused,
+            enter = fadeIn(animationSpec = MotionSpec.enter(Motion.Quick)) +
+                expandVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick)),
+            exit = fadeOut(animationSpec = MotionSpec.exit(Motion.Quick)) +
+                shrinkVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick))
+        ) {
+            PlanProgress(
+                done = plan.currentStep.coerceIn(0, plan.steps.size),
+                total = plan.steps.size,
+                current = (plan.currentStep + 1).coerceAtMost(plan.steps.size.coerceAtLeast(1)),
+                tint = statusTint
+            )
+        }
+        Spacer(Modifier.height(Space.sm))
         plan.steps.forEachIndexed { index, step ->
             val completed = index < plan.currentStep
             val current = index == plan.currentStep &&
@@ -676,88 +1736,254 @@ private fun PlanCard(
                 current -> colors.accent
                 else -> colors.textTertiary
             }
+            // 步骤状态在"待办→执行中→已完成"之间流转，颜色交叉过渡而不是瞬时跳变。
+            val tint by animateColorAsState(
+                targetValue = stepTint,
+                animationSpec = MotionSpec.color(),
+                label = "plan-step-tint"
+            )
+            // 当前步骤的箭头轻轻脉动，提示"卡在这里"。
+            val markerScale by animateFloatAsState(
+                targetValue = if (current) 1f else 0f,
+                animationSpec = MotionSpec.pageSpring(),
+                label = "plan-step-marker"
+            )
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 2.dp),
+                    .clip(GlassShape.squircle(Radius.xs))
+                    // 当前步整行提亮：只靠一个箭头，用户得在十几行步骤里
+                    // 一行行找，漏看就等于不知道它停在哪。
+                    .background(
+                        if (current) colors.accent.copy(alpha = 0.10f) else Color.Transparent
+                    )
+                    .padding(horizontal = Space.xs, vertical = Space.xxs),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
                     Modifier
                         .size(18.dp)
                         .clip(CircleShape)
-                        .background(stepTint.copy(alpha = 0.14f)),
+                        .background(tint.copy(alpha = if (completed) 0.20f else 0.14f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    BasicText(
-                        text = "${index + 1}",
-                        style = TextStyle(
-                            color = stepTint,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.SemiBold
+                    // 已完成的步骤换成对勾：绿底绿字上的数字，
+                    // 要和"未开始"读起来一样费劲；对勾不需要解释。
+                    if (completed) {
+                        GlyphIcon(Glyph.Check, colors.success, size = 11.dp)
+                    } else {
+                        BasicText(
+                            text = "${index + 1}",
+                            style = Type.micro.copy(
+                                color = tint,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         )
-                    )
+                    }
                 }
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(Space.xs))
+                // 步骤类型单独一列：滚动、点击、输入的风险完全不同，
+                // 批准之前必须一眼看出哪几步会点页面、哪几步会打字。
+                // 宽度只给下限不给上限：大字号时这一列自己变宽，
+                // 硬写成固定宽度会把"滚动"挤成两行。
+                BasicText(
+                    text = step.kind.label(),
+                    style = Type.caption.copy(
+                        color = if (completed) colors.textTertiary.copy(alpha = 0.7f)
+                        else colors.textTertiary
+                    ),
+                    modifier = Modifier.widthIn(min = 26.dp),
+                    maxLines = 1
+                )
+                Spacer(Modifier.width(Space.xs))
                 BasicText(
                     text = step.description,
-                    style = TextStyle(
-                        color = if (completed) colors.textTertiary else colors.textSecondary,
+                    style = Type.bodySmall.copy(
+                        // 三档亮度把三种状态分开：当前步最亮，
+                        // 待办最暗，完成的介于中间。
+                        color = when {
+                            completed -> colors.textTertiary
+                            current -> colors.textPrimary
+                            else -> colors.textTertiary.copy(alpha = 0.8f)
+                        },
                         fontSize = 11.sp
                     ),
                     modifier = Modifier.weight(1f),
-                    maxLines = 1,
+                    // 一步的描述常常是半句话，截成一行就只剩动作名，
+                    // 看不出要点在哪个元素上。
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 when {
                     completed -> GlyphIcon(Glyph.Check, colors.success, size = 12.dp)
                     failed -> GlyphIcon(Glyph.Info, colors.danger, size = 12.dp)
-                    current -> GlyphIcon(Glyph.ChevronRight, colors.accent, size = 12.dp)
+                    current -> GlyphIcon(
+                        glyph = Glyph.ChevronRight,
+                        tint = colors.accent,
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = markerScale
+                            scaleY = markerScale
+                        },
+                        size = 12.dp
+                    )
                     else -> Unit
                 }
             }
         }
         if (!plan.failure.isNullOrBlank()) {
-            Spacer(Modifier.height(5.dp))
+            Spacer(Modifier.height(Space.xs))
             BasicText(
                 text = plan.failure,
-                style = TextStyle(color = colors.danger, fontSize = 10.sp, lineHeight = 15.sp)
+                style = Type.caption.copy(color = colors.danger)
             )
         }
-        Spacer(Modifier.height(8.dp))
-        when (plan.status) {
-            AgentPlanStatus.Pending -> {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton("批准并执行", accent = true) { onCommand(AgentPlanCommand.Approve) }
-                    ActionButton("取消", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+        Spacer(Modifier.height(Space.sm))
+        // 状态推进时按钮组整组交叉淡入淡出，不再"啪"地换掉。
+        AnimatedContent(
+            targetState = plan.status,
+            transitionSpec = {
+                fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick))
+                    .togetherWith(fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)))
+                    .using(SizeTransform(clip = false))
+            },
+            label = "plan-actions"
+        ) { status ->
+            when (status) {
+                AgentPlanStatus.Pending -> {
+                    // 主操作走玻璃胶囊键，次操作保持扁平：
+                    // 两个同样重量的按钮并排时，用户要读一遍文字才知道该按哪个。
+                    // 按钮行可横向滚动：大字号下两个键可能挤出一行，宁可滑也不裁切。
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(Space.sm),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        GlassPillButton(
+                            label = "批准并执行",
+                            onClick = { onCommand(AgentPlanCommand.Approve) },
+                            backdrop = backdrop,
+                            accent = true,
+                            glyph = Glyph.Check
+                        )
+                        ActionButton("取消", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+                    }
+                    Spacer(Modifier.height(Space.xs))
+                    BasicText(
+                        text = "批准后按顺序执行；点击可能跳转或提交表单，填写不会自动提交。",
+                        style = Type.caption.copy(color = colors.textTertiary)
+                    )
                 }
-                Spacer(Modifier.height(5.dp))
-                BasicText(
-                    text = "批准后按顺序执行；点击可能跳转或提交表单，填写不会自动提交。",
-                    style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
-                )
-            }
-            AgentPlanStatus.Running -> {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton("暂停", accent = false) { onCommand(AgentPlanCommand.Pause) }
-                    ActionButton("取消任务", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+                AgentPlanStatus.Running -> {
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(Space.sm)
+                    ) {
+                        ActionButton("暂停", accent = false) { onCommand(AgentPlanCommand.Pause) }
+                        ActionButton("取消任务", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+                    }
                 }
-            }
-            AgentPlanStatus.Paused -> {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton("继续执行", accent = true) { onCommand(AgentPlanCommand.Resume) }
-                    ActionButton("取消任务", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+                AgentPlanStatus.Paused -> {
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(Space.sm),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        GlassPillButton(
+                            label = "继续执行",
+                            onClick = { onCommand(AgentPlanCommand.Resume) },
+                            backdrop = backdrop,
+                            accent = true,
+                            glyph = Glyph.Check
+                        )
+                        ActionButton("取消任务", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+                    }
                 }
-            }
-            AgentPlanStatus.Failed -> {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton("重试", accent = true) { onCommand(AgentPlanCommand.Retry) }
-                    ActionButton("取消", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+                AgentPlanStatus.Failed -> {
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(Space.sm),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        GlassPillButton(
+                            label = "重试",
+                            onClick = { onCommand(AgentPlanCommand.Retry) },
+                            backdrop = backdrop,
+                            accent = true,
+                            glyph = Glyph.Reload
+                        )
+                        ActionButton("取消", accent = false) { onCommand(AgentPlanCommand.Cancel) }
+                    }
                 }
+                AgentPlanStatus.Done, AgentPlanStatus.Cancelled -> Unit
             }
-            AgentPlanStatus.Done, AgentPlanStatus.Cancelled -> Unit
         }
     }
+}
+
+/**
+ * 计划执行进度条。
+ *
+ * 步骤列表只能看出"哪些做完了"，看不出"现在第几步、还剩几步"。
+ * 执行中的多步任务最怕这一点：用户不知道它是在跑还是卡住了。
+ * 这里补一条进度轨与"第 N / M 步"，两者一起回答同一个问题。
+ */
+@Composable
+private fun PlanProgress(
+    done: Int,
+    total: Int,
+    current: Int,
+    tint: Color
+) {
+    val colors = LocalLiuliColors.current
+    val fraction = if (total <= 0) 0f else (done.toFloat() / total).coerceIn(0f, 1f)
+    // 进度是连续量，插值让步与步之间的推进平滑，而不是一跳一跳。
+    val animated by animateFloatAsState(
+        targetValue = fraction,
+        animationSpec = MotionSpec.value(Motion.Slow),
+        label = "plan-progress"
+    )
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            BasicText(
+                text = "第 $current / $total 步",
+                style = Type.caption.copy(color = colors.textSecondary)
+            )
+            Spacer(Modifier.weight(1f))
+            BasicText(
+                text = "已完成 $done 步",
+                style = Type.caption.copy(color = colors.textTertiary)
+            )
+        }
+        Spacer(Modifier.height(Space.xs))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+                .clip(GlassShape.capsule())
+                .background(colors.textPrimary.copy(alpha = 0.08f))
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(animated)
+                    .fillMaxHeight()
+                    .clip(GlassShape.capsule())
+                    .background(tint)
+            )
+        }
+    }
+}
+
+/**
+ * 步骤类型的中文标签。
+ *
+ * 滚动、点击、输入三种动作的风险差别很大：
+ * 滚动几乎无害，点击会跳转，输入会往页面里写字。
+ * 批准之前必须让用户一眼看出这一步属于哪一类。
+ */
+private fun AgentPlanStepKind.label(): String = when (this) {
+    AgentPlanStepKind.Scroll -> "滚动"
+    AgentPlanStepKind.Click -> "点击"
+    AgentPlanStepKind.Type -> "输入"
 }
 
 @Composable
@@ -769,8 +1995,19 @@ private fun ReportCard(
 ) {
     val colors = LocalLiuliColors.current
     val clipboard = LocalClipboardManager.current
+    val reduced = reduceMotion
     var expanded by rememberSaveable(report.createdAt) { mutableStateOf(false) }
-    var copied by rememberSaveable(report.createdAt) { mutableStateOf(false) }
+    // 导出格式折在"更多导出"里：默认只露常用动作。
+    var moreFormats by rememberSaveable(report.createdAt) { mutableStateOf(false) }
+    // 动作按钮的瞬时反馈：点完把文案换成"已复制/已导出"，1.6 秒后复原，
+    // 避免用户误以为状态卡住。
+    var flash by rememberSaveable(report.createdAt) { mutableStateOf("") }
+    LaunchedEffect(flash) {
+        if (flash.isNotEmpty()) {
+            delay(1600)
+            flash = ""
+        }
+    }
     val context = LocalContext.current
     var speaking by rememberSaveable(report.createdAt) { mutableStateOf(false) }
     val speech = remember(context) { TextToSpeech(context.applicationContext) { } }
@@ -784,155 +2021,376 @@ private fun ReportCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(GlassShape.squircle(Radius.md))
             .background(colors.success.copy(alpha = if (colors.isDark) 0.12f else 0.07f))
-            .padding(12.dp)
+            .padding(Space.md)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .background(colors.success.copy(alpha = 0.18f)),
-                contentAlignment = Alignment.Center
-            ) {
-                GlyphIcon(Glyph.History, colors.success, size = 14.dp)
-            }
-            Spacer(Modifier.width(8.dp))
+            CardHeaderIcon(Glyph.History, colors.success, entranceKey = report.createdAt)
+            Spacer(Modifier.width(Space.sm))
             Column(Modifier.weight(1f)) {
                 BasicText(
                     text = "调研报告",
-                    style = TextStyle(
-                        color = colors.textPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    style = Type.sectionTitle.copy(color = colors.textPrimary)
                 )
                 BasicText(
                     text = "${report.sources.size} 个来源 · ${report.mode.label}整理 · 全部带引用",
-                    style = TextStyle(color = colors.textTertiary, fontSize = 9.sp)
+                    style = Type.caption.copy(color = colors.textTertiary)
                 )
             }
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(50))
+                    .clip(GlassShape.capsule())
                     .background(colors.success.copy(alpha = 0.14f))
-                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                    .padding(horizontal = Space.sm, vertical = Space.xs)
             ) {
                 BasicText(
                     text = "只读",
-                    style = TextStyle(
-                        color = colors.success,
-                        fontSize = 9.sp,
+                    style = Type.micro.copy(color = colors.success)
+                )
+            }
+        }
+        Spacer(Modifier.height(Space.sm))
+        BasicText(
+            text = report.goal,
+            // 调研目标是这份报告真正要说的事：卡片标题只能叫"调研报告"，
+            // 目标才是用户扫一眼时要看的那一句，角标字号压不住。
+            style = Type.bodySmall.copy(color = colors.textSecondary),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        if (!report.note.isNullOrBlank()) {
+            Spacer(Modifier.height(Space.xs))
+            BasicText(
+                text = report.note,
+                style = Type.caption.copy(color = colors.textTertiary)
+            )
+        }
+        Spacer(Modifier.height(Space.sm))
+        // 行数用动画插值：展开/收起时正文连续生长，而不是"啪"地跳一下。
+        val maxLines by animateIntAsState(
+            targetValue = if (expanded) 80 else 8,
+            animationSpec = MotionSpec.intValue(Motion.Slow),
+            label = "report-expand"
+        )
+        BasicText(
+            text = report.markdown,
+            style = Type.bodySmall.copy(color = colors.textSecondary, fontSize = 11.sp),
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis
+        )
+        val expandInteraction = remember { MutableInteractionSource() }
+        val haptics = LocalHapticFeedback.current
+        // "展开全文 / 收起全文"切换时交叉淡入淡出，文字不硬切。
+        Box(
+            Modifier
+                .padding(top = Space.xs)
+                .clickable(
+                    interactionSource = expandInteraction,
+                    indication = null,
+                    role = Role.Button,
+                    onClickLabel = if (expanded) "收起全文" else "展开全文"
+                ) {
+                    // 展开/收起是一次明确的内容操作，给一次轻触反馈，
+                    // 折叠本身没有声音，用户容易以为没点上。
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    expanded = !expanded
+                }
+                .pressScale(pressedScale = 0.94f, interactionSource = expandInteraction)
+        ) {
+            AnimatedContent(
+                targetState = expanded,
+                transitionSpec = {
+                    fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick))
+                        .togetherWith(fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)))
+                        .using(SizeTransform(clip = false))
+                },
+                label = "report-expand-label"
+            ) { isExpanded ->
+                BasicText(
+                    text = if (isExpanded) "收起全文" else "展开全文",
+                    style = Type.caption.copy(
+                        color = colors.accent,
                         fontWeight = FontWeight.Medium
                     )
                 )
             }
         }
-        Spacer(Modifier.height(6.dp))
-        BasicText(
-            text = report.goal,
-            style = TextStyle(color = colors.textTertiary, fontSize = 10.sp, lineHeight = 15.sp),
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-        if (!report.note.isNullOrBlank()) {
-            Spacer(Modifier.height(4.dp))
-            BasicText(
-                text = report.note,
-                style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
-            )
-        }
-        Spacer(Modifier.height(7.dp))
-        BasicText(
-            text = report.markdown,
-            style = TextStyle(color = colors.textSecondary, fontSize = 11.sp, lineHeight = 17.sp),
-            maxLines = if (expanded) 80 else 8,
-            overflow = TextOverflow.Ellipsis
-        )
-        BasicText(
-            text = if (expanded) "收起全文" else "展开全文",
-            style = TextStyle(
-                color = colors.accent,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Medium
-            ),
-            modifier = Modifier
-                .padding(top = 4.dp)
-                .clickable(
-                    role = Role.Button,
-                    onClickLabel = if (expanded) "收起全文" else "展开全文"
-                ) { expanded = !expanded }
-        )
-        Spacer(Modifier.height(7.dp))
+        Spacer(Modifier.height(Space.sm))
         report.sources.forEach { source ->
             val credibility = ResearchEngine.assessSource(source.url, source.title, source.charCount)
+            val sourceInteraction = remember { MutableInteractionSource() }
+            // 一行三档颜色：编号最重、标题次之、元信息最轻。
+            // 此前整行同一个三级色，扫过去只看到一串灰字，
+            // 分不清哪一段是标题、哪一段是可信度评分。
+            val label = buildAnnotatedString {
+                withStyle(SpanStyle(color = colors.accent, fontWeight = FontWeight.Medium)) {
+                    append("[${source.id}]")
+                }
+                append(" ")
+                withStyle(SpanStyle(color = colors.textSecondary)) {
+                    append(source.title)
+                }
+                withStyle(SpanStyle(color = colors.textTertiary)) {
+                    append(" · ${source.host}")
+                    append(" · 可信度 ${credibility.label} ${credibility.score}")
+                    if (source.isPrivate) append(" · 隐私")
+                }
+            }
             BasicText(
-                text = "[${source.id}] ${source.title} · ${source.host}" +
-                    " · 可信度 ${credibility.label} ${credibility.score}" +
-                    (if (source.isPrivate) " · 隐私" else ""),
-                style = TextStyle(color = colors.textTertiary, fontSize = 9.sp),
+                text = label,
+                style = Type.caption.copy(color = colors.textTertiary),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(GlassShape.squircle(Radius.xs))
                     .clickable(
+                        interactionSource = sourceInteraction,
+                        // 不用系统水波纹：来源行坐在玻璃卡上，
+                        // 水波纹会直接画在折射层上面。
+                        indication = null,
                         role = Role.Button,
                         onClickLabel = "在新标签页打开来源 ${source.id}"
                     ) { onOpenSource(source.url, source.isPrivate) }
-                    .padding(vertical = 2.dp)
+                    // 来源行也是能点的：没有按压反馈，用户不知道手指按到了没有。
+                    .pressScale(pressedScale = 0.97f, interactionSource = sourceInteraction)
+                    .padding(vertical = Space.xxs)
             )
         }
         BasicText(
             text = "点按来源可在新标签页打开；隐私来源保持为隐私标签。",
-            style = TextStyle(color = colors.textTertiary, fontSize = 8.sp, lineHeight = 12.sp),
-            modifier = Modifier.padding(top = 2.dp)
+            style = Type.caption.copy(color = colors.textTertiary),
+            modifier = Modifier.padding(top = Space.xxs)
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(Space.sm))
+        // 导出动作有四种格式，再加朗读、复制、收起共七个按钮，
+        // 一次性铺开既挤又平——用户分不出哪个才是常用的那一个。
+        // 这里收成两档：常用动作留在第一行，其余格式折进"更多导出"。
         Row(
             Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(Space.sm)
         ) {
-            ActionButton("保存 Markdown", accent = true) {
-                onExport(AgentReportFormat.Markdown)
-            }
-            ActionButton("保存 HTML", accent = false) {
-                onExport(AgentReportFormat.Html)
-            }
-            ActionButton("保存来源 CSV", accent = false) {
-                onExport(AgentReportFormat.Csv)
-            }
-            ActionButton("保存 PDF", accent = false) {
-                onExport(AgentReportFormat.Pdf)
-            }
-            ActionButton(if (speaking) "停止朗读" else "朗读", accent = false) {
-                if (speaking) {
-                    speech.stop()
-                    speaking = false
-                } else {
-                    speech.language = Locale.SIMPLIFIED_CHINESE
-                    val spoken = speech.speak(
-                        ResearchEngine.plainText(report.markdown),
-                        TextToSpeech.QUEUE_FLUSH,
-                        null,
-                        "liuli-report"
-                    )
-                    speaking = spoken == TextToSpeech.SUCCESS
-                }
-            }
-            ActionButton(if (copied) "已复制" else "复制", accent = false) {
+            ActionButton(if (flash == "copy") "已复制" else "复制", accent = true) {
                 clipboard.setText(AnnotatedString(report.markdown))
-                copied = true
+                flash = "copy"
+            }
+            ActionButton(if (flash == "md") "已导出" else "保存 Markdown", accent = false) {
+                onExport(AgentReportFormat.Markdown)
+                flash = "md"
+            }
+            ActionButton(if (moreFormats) "收起导出" else "更多导出", accent = false) {
+                moreFormats = !moreFormats
             }
             ActionButton("收起", accent = false, onClick = onDismiss)
         }
-        Spacer(Modifier.height(5.dp))
+        Visibility(
+            visible = moreFormats,
+            enter = fadeIn(animationSpec = MotionSpec.enter(Motion.Quick)) +
+                expandVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick)),
+            exit = fadeOut(animationSpec = MotionSpec.exit(Motion.Quick)) +
+                shrinkVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick))
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = Space.sm)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(Space.sm)
+            ) {
+                ActionButton(if (flash == "html") "已导出" else "保存 HTML", accent = false) {
+                    onExport(AgentReportFormat.Html)
+                    flash = "html"
+                }
+                ActionButton(if (flash == "csv") "已导出" else "保存来源 CSV", accent = false) {
+                    onExport(AgentReportFormat.Csv)
+                    flash = "csv"
+                }
+                ActionButton(if (flash == "pdf") "已导出" else "保存 PDF", accent = false) {
+                    onExport(AgentReportFormat.Pdf)
+                    flash = "pdf"
+                }
+                ActionButton(if (speaking) "停止朗读" else "朗读", accent = false) {
+                    if (speaking) {
+                        speech.stop()
+                        speaking = false
+                    } else {
+                        speech.language = Locale.SIMPLIFIED_CHINESE
+                        val spoken = speech.speak(
+                            ResearchEngine.plainText(report.markdown),
+                            TextToSpeech.QUEUE_FLUSH,
+                            null,
+                            "liuli-report"
+                        )
+                        speaking = spoken == TextToSpeech.SUCCESS
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(Space.xs))
         BasicText(
             text = "报告保存在本机内存，只有你选择保存位置后才会写入文件。",
-            style = TextStyle(color = colors.textTertiary, fontSize = 9.sp, lineHeight = 13.sp)
+            style = Type.caption.copy(color = colors.textTertiary)
+        )
+    }
+}
+
+/** P4.3 创作产物：展示写作/改写/大纲/分享卡片，并提供复制、导出与分享动作。 */
+@Composable
+private fun CreationCard(
+    creation: AgentCreation,
+    onExport: (AgentCreationFormat) -> Unit,
+    onShare: () -> Unit,
+    onShareCard: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val colors = LocalLiuliColors.current
+    val clipboard = LocalClipboardManager.current
+    // 导出格式折在"更多导出"里：默认只露常用动作。
+    var moreFormats by rememberSaveable(creation.createdAt) { mutableStateOf(false) }
+    // 动作按钮的瞬时反馈：点完换成"已复制/已导出/已分享"，1.6 秒后复原。
+    var flash by rememberSaveable(creation.createdAt) { mutableStateOf("") }
+    LaunchedEffect(flash) {
+        if (flash.isNotEmpty()) {
+            delay(1600)
+            flash = ""
+        }
+    }
+    // 正文预览：去掉 Markdown 标记后取前几行。
+    val preview = remember(creation.body) {
+        creation.body.lineSequence()
+            .map { raw ->
+                val line = raw.trim()
+                val content = when {
+                    line.startsWith("#") || line.startsWith(">") -> line.trimStart('#', '>').trim()
+                    line.startsWith("- ") || line.startsWith("* ") || line.startsWith("+ ") ->
+                        line.drop(2).trim()
+                    else -> line
+                }
+                content.replace("**", "").replace("`", "").trim()
+            }
+            .filter { it.isNotBlank() }
+            .take(6)
+            .joinToString("\n")
+    }
+    val kindGlyph = when (creation.kind) {
+        AgentCreationKind.Outline -> Glyph.History
+        AgentCreationKind.Card -> Glyph.Share
+        AgentCreationKind.Write, AgentCreationKind.Rewrite -> Glyph.Edit
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(GlassShape.squircle(Radius.md))
+            .background(colors.accentSecondary.copy(alpha = if (colors.isDark) 0.12f else 0.07f))
+            .padding(Space.md)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CardHeaderIcon(kindGlyph, colors.accentSecondary, entranceKey = creation.createdAt)
+            Spacer(Modifier.width(Space.sm))
+            Column(Modifier.weight(1f)) {
+                BasicText(
+                    // 产物名在前、类型在后：标题栏叫"写作稿"才是用户认得的东西，
+                    // "写作"只是分类，此前两者颠倒，扫一眼看不出这是哪篇稿子。
+                    text = creation.title,
+                    style = Type.sectionTitle.copy(color = colors.textPrimary),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                BasicText(
+                    text = creation.kind.label,
+                    style = Type.caption.copy(color = colors.textTertiary),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Box(
+                Modifier
+                    .clip(GlassShape.capsule())
+                    .background(colors.accentSecondary.copy(alpha = 0.14f))
+                    .padding(horizontal = Space.sm, vertical = Space.xs)
+            ) {
+                BasicText(
+                    text = creation.mode.label,
+                    style = Type.micro.copy(color = colors.accentSecondary)
+                )
+            }
+        }
+        Spacer(Modifier.height(Space.sm))
+        BasicText(
+            text = preview,
+            style = Type.bodySmall.copy(color = colors.textSecondary, fontSize = 11.sp),
+            maxLines = 6,
+            overflow = TextOverflow.Ellipsis
+        )
+        if (!creation.note.isNullOrBlank()) {
+            Spacer(Modifier.height(Space.xs))
+            BasicText(
+                text = creation.note,
+                style = Type.caption.copy(color = colors.textTertiary)
+            )
+        }
+        Spacer(Modifier.height(Space.sm))
+        // 与报告卡同一套收法：常用动作留在一行，其余折进"更多导出"，
+        // 七个按钮平铺时谁都不像重点。
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(Space.sm)
+        ) {
+            ActionButton(if (flash == "copy") "已复制" else "复制", accent = true) {
+                clipboard.setText(AnnotatedString(CreationEngine.plainText(creation)))
+                flash = "copy"
+            }
+            ActionButton(if (flash == "share") "已分享" else "分享", accent = false) {
+                onShare()
+                flash = "share"
+            }
+            ActionButton(if (moreFormats) "收起导出" else "更多导出", accent = false) {
+                moreFormats = !moreFormats
+            }
+            ActionButton("收起", accent = false, onClick = onDismiss)
+        }
+        Visibility(
+            visible = moreFormats,
+            enter = fadeIn(animationSpec = MotionSpec.enter(Motion.Quick)) +
+                expandVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick)),
+            exit = fadeOut(animationSpec = MotionSpec.exit(Motion.Quick)) +
+                shrinkVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick))
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = Space.sm)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(Space.sm)
+            ) {
+                ActionButton(if (flash == "md") "已导出" else "Markdown", accent = false) {
+                    onExport(AgentCreationFormat.Markdown)
+                    flash = "md"
+                }
+                ActionButton(if (flash == "html") "已导出" else "HTML", accent = false) {
+                    onExport(AgentCreationFormat.Html)
+                    flash = "html"
+                }
+                ActionButton(if (flash == "text") "已导出" else "纯文本", accent = false) {
+                    onExport(AgentCreationFormat.Text)
+                    flash = "text"
+                }
+                ActionButton(if (flash == "card") "已生成" else "分享卡片", accent = false) {
+                    onShareCard()
+                    flash = "card"
+                }
+            }
+        }
+        Spacer(Modifier.height(Space.xs))
+        BasicText(
+            text = "创作产物保存在本机内存，导出或分享前不会写入文件。",
+            style = Type.caption.copy(color = colors.textTertiary)
         )
     }
 }
@@ -940,53 +2398,149 @@ private fun ReportCard(
 @Composable
 private fun MessageBubble(
     message: AgentMessage,
+    modeLabel: String,
+    revealText: Boolean,
+    onTextRevealed: () -> Unit,
+    backdrop: Backdrop,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
 ) {
     if (message.action != null) {
-        ActionCard(message, onConfirm, onCancel)
+        ActionCard(message, backdrop, onConfirm, onCancel)
         return
     }
     val colors = LocalLiuliColors.current
     val isUser = message.role == AgentMessageRole.User
+    val reduced = reduceMotion
+    // 气泡标注的淡入规格：比气泡本身晚一点，两层错开。
+    val captionSpec = MotionSpec.enter(Motion.Normal)
+    // 正文逐块显现：控制器那边是一次性把整段回答塞进消息列表的，
+    // 界面不处理的话，长回答就是"啪"地一整块砸下来，读不出节奏。
+    // 这里按固定步数放出来，观感接近流式生成。
+    val fullText = message.text
+    var revealedChars by remember(message.id) {
+        mutableStateOf(if (revealText) 0 else fullText.length)
+    }
+    LaunchedEffect(message.id, revealText) {
+        if (!revealText) {
+            revealedChars = fullText.length
+            return@LaunchedEffect
+        }
+        if (reduced) {
+            // 开了"减少动态效果"就直接给全文：
+            // 逐块显现本身就是装饰，没有它可看。
+            revealedChars = fullText.length
+            onTextRevealed()
+            return@LaunchedEffect
+        }
+        try {
+            // 步数固定而不是按字数：50 字与 2000 字都用半秒左右收尾，
+            // 长报告不会在末尾拖出一条漫长的"打字"过程。
+            val steps = 32
+            val chunk = (fullText.length / steps).coerceAtLeast(1)
+            while (revealedChars < fullText.length) {
+                delay(16L)
+                revealedChars = (revealedChars + chunk).coerceAtMost(fullText.length)
+            }
+        } finally {
+            // 协程被打断时也要把正文补齐：
+            // 否则这条回答会永远停在半截，用户以为面板卡住了。
+            revealedChars = fullText.length
+            onTextRevealed()
+        }
+    }
+    val revealing = revealedChars < fullText.length
+    val shownText = if (revealing) fullText.take(revealedChars) else fullText
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp),
+            .padding(vertical = Space.xxs),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth(if (isUser) 0.88f else 0.96f)
-                .clip(
-                    RoundedCornerShape(
-                        topStart = 16.dp,
-                        topEnd = 16.dp,
-                        bottomStart = if (isUser) 16.dp else 5.dp,
-                        bottomEnd = if (isUser) 5.dp else 16.dp
-                    )
-                )
-                .background(
-                    if (isUser) colors.accent.copy(alpha = 0.16f)
-                    else colors.textPrimary.copy(alpha = 0.05f)
-                )
-                .padding(horizontal = 13.dp, vertical = 9.dp)
-        ) {
-            BasicText(
-                text = message.text,
-                style = TextStyle(
-                    color = colors.textPrimary,
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp
-                )
-            )
+        // 气泡贴着文字收紧：整行铺满会让一句短话变成一条大色块，
+        // 用户与 Agent 的气泡也就看不出差别了。
+        if (message.text.isNotBlank()) {
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                Box(
+                    Modifier
+                        .widthIn(max = maxWidth * if (isUser) 0.86f else 0.94f)
+                        .wrapContentWidth()
+                        .clip(
+                            GlassShape.uneven(
+                                // 气泡主体用小圆角，尾巴那一角再收小一档。
+                                topStart = Radius.sm,
+                                topEnd = Radius.sm,
+                                bottomEnd = if (isUser) Radius.xs else Radius.sm,
+                                bottomStart = if (isUser) Radius.sm else Radius.xs
+                            )
+                        )
+                        .background(
+                            if (isUser) colors.accent.copy(alpha = 0.16f)
+                            else colors.textPrimary.copy(alpha = 0.06f)
+                        )
+                        .padding(horizontal = Space.md, vertical = Space.sm)
+                ) {
+                    // 正文与光标并排：光标贴着最后一行的末尾，
+                    // 给出"还在输出"的实感，而不是文字凭空少一截。
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        BasicText(
+                            text = shownText,
+                            style = Type.body.copy(
+                                color = colors.textPrimary,
+                                fontSize = 13.sp,
+                                lineHeight = 19.sp
+                            )
+                        )
+                        if (revealing) {
+                            Spacer(Modifier.width(Space.xs))
+                            Box(
+                                Modifier
+                                    .width(2.dp)
+                                    .height(13.dp)
+                                    .background(colors.accent.copy(alpha = 0.75f))
+                            )
+                        }
+                    }
+                }
+            }
         }
         if (!isUser) {
-            BasicText(
-                text = "${message.mode.label} · 只读",
-                style = TextStyle(color = colors.textTertiary, fontSize = 9.sp),
-                modifier = Modifier.padding(start = 5.dp, top = 3.dp)
-            )
+            // "本机 · 只读"标注晚于气泡一点点淡入：两层错开，不一次性砸下来。
+            // 用 rememberSaveable 记住是否已经演过，滚出屏幕再回来不重播。
+            var captionVisible by rememberSaveable(message.id) { mutableStateOf(false) }
+            LaunchedEffect(message.id) {
+                // 收尾放在 finally 里：淡入被列表回收打断时，
+                // 这条回答就永远没有"来路"标注了。
+                try {
+                    delay(120L)
+                    captionVisible = true
+                } finally {
+                    captionVisible = true
+                }
+            }
+            AnimatedVisibility(
+                visible = captionVisible,
+                enter = fadeIn(animationSpec = captionSpec)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = Space.xs, top = Space.xxs)
+                ) {
+                    // 一枚小星标把"这是 Agent 说的"与用户气泡彻底分开：
+                    // 光靠左右位置和底色，长回答里很容易看漏是谁在讲。
+                    GlyphIcon(Glyph.Sparkle, colors.accent.copy(alpha = 0.9f), size = 10.dp)
+                    Spacer(Modifier.width(Space.xs))
+                    BasicText(
+                        // 措辞跟右上角徽标同源（"本机"/"云端"/"本地"），
+                        // 但取值看这一条消息自己的来路：
+                        // 云端失败改用本机汇总的那一条必须写"本机"。
+                        text = "$modeLabel · 只读",
+                        // 标注是承诺，不是角标：走 caption 档并用次级色，
+                        // 9sp 的三级色在玻璃上几乎读不出来。
+                        style = Type.caption.copy(color = colors.textSecondary)
+                    )
+                }
+            }
         }
     }
 }
@@ -994,102 +2548,161 @@ private fun MessageBubble(
 @Composable
 private fun ActionCard(
     message: AgentMessage,
+    backdrop: Backdrop,
     onConfirm: () -> Unit,
     onCancel: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
     val proposal = message.action ?: return
+    val pending = message.actionStatus == AgentActionStatus.Pending
+    // 待确认时卡片轻微呼吸：让用户知道"球在用户这边"，别把确认请求漏掉。
+    val breath = rememberBreath(pending)
+    val cardBackground by animateColorAsState(
+        targetValue = colors.accent.copy(
+            alpha = (if (colors.isDark) 0.14f else 0.08f) + 0.05f * breath
+        ),
+        animationSpec = MotionSpec.color(Motion.Normal),
+        label = "action-card-bg"
+    )
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp),
+            .padding(vertical = Space.xxs),
         horizontalAlignment = Alignment.Start
     ) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(colors.accent.copy(alpha = if (colors.isDark) 0.14f else 0.08f))
-                .padding(13.dp)
+                .clip(GlassShape.squircle(Radius.md))
+                .background(cardBackground)
+                .padding(Space.md)
         ) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .background(colors.accent.copy(alpha = 0.18f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        GlyphIcon(Glyph.Sparkle, colors.accent, size = 14.dp)
-                    }
-                    Spacer(Modifier.width(8.dp))
+                    CardHeaderIcon(Glyph.Sparkle, colors.accent, entranceKey = message.id)
+                    Spacer(Modifier.width(Space.sm))
                     BasicText(
                         text = proposal.title,
-                        style = TextStyle(
-                            color = colors.textPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        ),
+                        style = Type.sectionTitle.copy(color = colors.textPrimary),
                         modifier = Modifier.weight(1f)
+                    )
+                    // 风险徽标：入场时先是无色，随后落到对应风险色，
+                    // 底色与字色一起交叉过渡，而不是硬切。
+                    var riskSettled by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) { riskSettled = true }
+                    val riskTint = if (proposal.riskLabel.contains("低风险")) {
+                        colors.success
+                    } else {
+                        colors.accent
+                    }
+                    val riskBadgeTint by animateColorAsState(
+                        targetValue = if (riskSettled) riskTint else colors.textTertiary,
+                        animationSpec = MotionSpec.color(Motion.Normal),
+                        label = "action-risk-tint"
                     )
                     Box(
                         Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(colors.accent.copy(alpha = 0.14f))
-                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                            .clip(GlassShape.capsule())
+                            .background(riskBadgeTint.copy(alpha = 0.14f))
+                            .padding(horizontal = Space.sm, vertical = Space.xs)
                     ) {
                         BasicText(
                             text = proposal.riskLabel,
-                            style = TextStyle(
-                                color = colors.accent,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                            style = Type.micro.copy(color = riskBadgeTint)
                         )
                     }
                 }
-                Spacer(Modifier.height(7.dp))
+                Spacer(Modifier.height(Space.sm))
                 BasicText(
                     text = proposal.detail,
-                    style = TextStyle(
+                    style = Type.bodySmall.copy(
                         color = colors.textSecondary,
                         fontSize = 11.sp,
                         lineHeight = 16.sp
                     )
                 )
-                Spacer(Modifier.height(9.dp))
-                when (message.actionStatus) {
-                    AgentActionStatus.Pending -> {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ActionButton("允许执行", accent = true, onClick = onConfirm)
-                            ActionButton("取消", accent = false, onClick = onCancel)
-                        }
+                Spacer(Modifier.height(Space.sm))
+                // 待确认时给一句明说的话：光有"允许执行/取消"两个按钮，
+                // 用户可能把它当成卡片里的普通选项。
+                // 这一行要回答的是"现在轮到我点头了吗"。
+                AnimatedVisibility(
+                    visible = pending,
+                    enter = fadeIn(animationSpec = MotionSpec.enter(Motion.Quick)) +
+                        expandVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick)),
+                    exit = fadeOut(animationSpec = MotionSpec.exit(Motion.Quick)) +
+                        shrinkVertically(animationSpec = MotionSpec.sizeValue(Motion.Quick))
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(colors.accent)
+                        )
+                        Spacer(Modifier.width(Space.xs))
+                        BasicText(
+                            text = "待你确认后才会执行",
+                            style = Type.label.copy(
+                                color = colors.accent,
+                                fontWeight = FontWeight.Medium
+                            )
+                        )
                     }
-                    AgentActionStatus.Running -> BasicText(
-                        text = "正在执行…",
-                        style = TextStyle(color = colors.accent, fontSize = 11.sp)
+                }
+                // 状态行交叉淡入：执行中→已执行→失败，切换时不是硬切。
+                val statusLabel = when (message.actionStatus) {
+                    AgentActionStatus.Running -> "正在执行这一步…"
+                    AgentActionStatus.Done -> "已执行"
+                    AgentActionStatus.Failed -> "执行失败，请查看下方说明"
+                    AgentActionStatus.Cancelled -> "已取消"
+                    else -> null
+                }
+                val statusTint = when (message.actionStatus) {
+                    AgentActionStatus.Running -> colors.accent
+                    AgentActionStatus.Done -> colors.success
+                    AgentActionStatus.Failed -> colors.danger
+                    else -> colors.textTertiary
+                }
+                AnimatedVisibility(
+                    visible = statusLabel != null,
+                    enter = fadeIn(animationSpec = MotionSpec.enter(Motion.Quick)),
+                    exit = fadeOut(animationSpec = MotionSpec.exit(Motion.Quick))
+                ) {
+                    BasicText(
+                        text = statusLabel.orEmpty(),
+                        style = Type.label.copy(color = statusTint)
                     )
-                    AgentActionStatus.Done -> BasicText(
-                        text = "已执行",
-                        style = TextStyle(color = colors.success, fontSize = 11.sp)
-                    )
-                    AgentActionStatus.Failed -> BasicText(
-                        text = "执行失败，请查看下方说明",
-                        style = TextStyle(color = colors.danger, fontSize = 11.sp)
-                    )
-                    AgentActionStatus.Cancelled -> BasicText(
-                        text = "已取消",
-                        style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
-                    )
-                    AgentActionStatus.None -> Unit
+                }
+                // 确认行出现/消失都带高度过渡：卡片不会硬切一块下去。
+                Visibility(
+                    visible = pending,
+                    enter = fadeIn(animationSpec = MotionSpec.enter(Motion.Quick)) +
+                        expandVertically(animationSpec = MotionSpec.pageSpring(IntSize.Zero)),
+                    exit = fadeOut(animationSpec = MotionSpec.exit(Motion.Quick)) +
+                        shrinkVertically(animationSpec = MotionSpec.pageSpring(IntSize.Zero))
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(Space.sm),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // 主操作走玻璃胶囊键：这一行是整张卡里唯一
+                        // "必须由人点头"的地方，它得比别的按钮先被看到。
+                        GlassPillButton(
+                            label = "允许执行",
+                            onClick = onConfirm,
+                            backdrop = backdrop,
+                            accent = true,
+                            glyph = Glyph.Check
+                        )
+                        ActionButton("取消", accent = false, onClick = onCancel)
+                    }
                 }
             }
         }
         BasicText(
             text = "仅执行此一步，不会自动连续操作",
-            style = TextStyle(color = colors.textTertiary, fontSize = 9.sp),
-            modifier = Modifier.padding(start = 5.dp, top = 3.dp)
+            style = Type.caption.copy(color = colors.textTertiary),
+            modifier = Modifier.padding(start = Space.xs, top = Space.xxs)
         )
     }
 }
@@ -1098,41 +2711,257 @@ private fun ActionCard(
 private fun ActionButton(
     label: String,
     accent: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     val colors = LocalLiuliColors.current
+    val interaction = remember { MutableInteractionSource() }
+    val reduced = reduceMotion
+    // 触感落在"手指按下"这一刻，而不是等抬手：
+    // 按压回缩是按下就发生的，触感晚一两百毫秒才到，手感就散了。
+    // 这与项目里 LiquidButton 的做法一致。
+    val haptics = LocalHapticFeedback.current
+    val pressed by interaction.collectIsPressedAsState()
+    LaunchedEffect(pressed, enabled) {
+        if (pressed && enabled) {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+    }
+    // 禁用态：底色与字色一起褪下去，和可用态一眼分得清。
+    val background by animateColorAsState(
+        targetValue = when {
+            !enabled -> colors.textPrimary.copy(alpha = 0.04f)
+            accent -> colors.accent
+            else -> colors.textPrimary.copy(alpha = 0.08f)
+        },
+        animationSpec = MotionSpec.color(),
+        label = "action-bg"
+    )
+    val tint by animateColorAsState(
+        targetValue = when {
+            !enabled -> colors.textTertiary.copy(alpha = 0.6f)
+            accent -> Color.White
+            else -> colors.textSecondary
+        },
+        animationSpec = MotionSpec.color(),
+        label = "action-tint"
+    )
     Box(
         Modifier
             .heightIn(min = Dimens.minTouch)
-            .clip(RoundedCornerShape(50))
-            .background(if (accent) colors.accent else colors.textPrimary.copy(alpha = 0.08f))
-            .clickable(role = Role.Button, onClickLabel = label, onClick = onClick)
-            .padding(horizontal = 16.dp),
+            .clip(GlassShape.capsule())
+            .background(background)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                enabled = enabled,
+                role = Role.Button,
+                onClickLabel = label,
+                onClick = onClick
+            )
+            // 禁用时 interactionSource 不发按下事件，按压形变自然不出现。
+            .pressScale(pressedScale = 0.92f, interactionSource = interaction)
+            .padding(horizontal = Space.lg),
         contentAlignment = Alignment.Center
     ) {
-        BasicText(
-            text = label,
-            style = TextStyle(
-                color = if (accent) Color.White else colors.textSecondary,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium
+        // 按钮文案会变（"复制"→"已复制"、"朗读"→"停止朗读"），交叉淡入淡出而不是硬切。
+        AnimatedContent(
+            targetState = label,
+            transitionSpec = {
+                fadeIn(animationSpec = MotionSpec.enter(reduced, Motion.Quick))
+                    .togetherWith(fadeOut(animationSpec = MotionSpec.exit(reduced, Motion.Quick)))
+                    .using(SizeTransform(clip = false))
+            },
+            label = "action-label"
+        ) { text ->
+            BasicText(
+                text = text,
+                style = Type.label.copy(color = tint)
             )
-        )
+        }
     }
 }
 
+/**
+ * 思考中的指示器。
+ *
+ * 原来只有一个静态的星形图标，用户看不出 Agent 是否还活着。
+ * 现在用三点依次起伏的波纹表示"正在进行"，并让星形图标轻微呼吸。
+ * "减少动态效果"开启时退化为静态图标。
+ */
 @Composable
-private fun ThinkingRow() {
+private fun ThinkingRow(
+    /** 控制器给出的当前阶段；为空时给一句笼统的提示。 */
+    phase: String?,
+    /** 停止本次请求。 */
+    onStop: () -> Unit
+) {
     val colors = LocalLiuliColors.current
+    val reduced = reduceMotion
+    val haptics = LocalHapticFeedback.current
+    // 三点波纹：用无限循环的相位偏移错开，模拟依次点亮的节奏。
+    val wave = remember { Animatable(0f) }
+    LaunchedEffect(reduced) {
+        if (reduced) {
+            wave.snapTo(0f)
+        } else {
+            while (true) {
+                wave.animateTo(
+                    targetValue = 1f,
+                    // 循环动画走线性：进入曲线是"快起慢收"，
+                    // 用在这里波点会先窜后爬，节奏全乱。
+                    animationSpec = tween(durationMillis = 1100, easing = LinearEasing)
+                )
+                wave.snapTo(0f)
+            }
+        }
+    }
+    val wavePhase = wave.value
+    // 已等待的秒数：这一行是用户等待时唯一盯着的东西，
+    // 只给一句"正在…"的话，分不清它是在跑还是已经卡住了。
+    var seconds by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000L)
+            seconds += 1
+        }
+    }
+
     Row(
-        Modifier.padding(start = 4.dp, top = 6.dp, bottom = 4.dp),
+        Modifier.padding(start = Space.xs, top = Space.sm, bottom = Space.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        GlyphIcon(Glyph.Sparkle, colors.accent, size = 13.dp)
-        Spacer(Modifier.width(6.dp))
-        BasicText(
-            text = "正在读取页面或与页面交互…",
-            style = TextStyle(color = colors.textTertiary, fontSize = 11.sp)
+        GlyphIcon(
+            glyph = Glyph.Sparkle,
+            tint = colors.accent.copy(alpha = 0.55f + 0.45f * wavePhase),
+            size = 13.dp
         )
+        Spacer(Modifier.width(Space.xs))
+        BasicText(
+            // 阶段由控制器给出：它此刻真正在做什么，
+            // 比一句笼统的"正在处理…"更能让人放心。
+            text = phase ?: "正在处理…",
+            style = Type.label.copy(color = colors.textTertiary)
+        )
+        Spacer(Modifier.width(Space.xs))
+        // 秒数走角标档：它是元信息，不该跟主文案抢注意力。
+        BasicText(
+            text = "${seconds}s",
+            style = Type.micro.copy(color = colors.textTertiary)
+        )
+        Spacer(Modifier.width(Space.sm))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(Space.xxs),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            repeat(3) { index ->
+                // 每个点落后前一个 1/3 个周期，形成从左到右的流动感。
+                val offset = (wavePhase - index / 3f).let { if (it < 0f) it + 1f else it }
+                val dotAlpha = 0.25f + 0.75f * (1f - offset)
+                val dotScale = 0.72f + 0.42f * (1f - offset)
+                Box(
+                    Modifier
+                        .size(5.dp)
+                        .graphicsLayer {
+                            alpha = dotAlpha
+                            scaleX = dotScale
+                            scaleY = dotScale
+                        }
+                        .clip(CircleShape)
+                        .background(colors.accent)
+                )
+            }
+        }
+        Spacer(Modifier.width(Space.sm))
+        // 停止：等待时用户唯一需要的就是"我不要它继续了"。
+        // 此前只有"清空整段对话"与"等它跑完"两条路，
+        // 前者代价太大（已生成的回答与引用全没了），后者让人干等。
+        val stopInteraction = remember { MutableInteractionSource() }
+        val stopPressed by stopInteraction.collectIsPressedAsState()
+        val stopTint by animateColorAsState(
+            targetValue = if (stopPressed) colors.textSecondary else colors.textTertiary,
+            animationSpec = MotionSpec.color(Motion.Quick),
+            label = "agent-stop-tint"
+        )
+        Row(
+            Modifier
+                .heightIn(min = Dimens.minTouch)
+                .clip(GlassShape.capsule())
+                .clickable(
+                    interactionSource = stopInteraction,
+                    indication = null,
+                    role = Role.Button,
+                    onClickLabel = "停止本次请求"
+                ) {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onStop()
+                }
+                .pressScale(pressedScale = 0.92f, interactionSource = stopInteraction)
+                .padding(horizontal = Space.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.xxs)
+        ) {
+            GlyphIcon(Glyph.Close, stopTint, size = 11.dp)
+            BasicText(
+                text = "停止",
+                style = Type.micro.copy(color = stopTint)
+            )
+        }
+    }
+}
+
+/**
+ * 呼吸强度：待确认的动作卡片靠它轻轻起伏，提醒用户"该你点头了"。
+ *
+ * 不需要脉动或开启"减少动态效果"时恒为 0，视觉上等价于静止。
+ */
+@Composable
+private fun rememberBreath(active: Boolean): Float {
+    val reduced = reduceMotion
+    val breath = remember { Animatable(0f) }
+    LaunchedEffect(active, reduced) {
+        if (!active || reduced) {
+            breath.snapTo(0f)
+            return@LaunchedEffect
+        }
+        while (true) {
+            breath.animateTo(1f, tween(durationMillis = 900, easing = Motion.Enter))
+            breath.animateTo(0f, tween(durationMillis = 900, easing = Motion.Enter))
+        }
+    }
+    return breath.value
+}
+
+/**
+ * 气泡下方的"来路"标注。
+ *
+ * 面板右上角的徽标按面板整体状态显示（隐私标签一律"本机"），
+ * 气泡则按这一条消息真正的处理位置显示：
+ * 云端规划失败改用本机汇总的那一条，就该写"本机"而不是"云端"。
+ * 两种说法混在一起会让用户分不清哪条消息真的出过本机。
+ */
+private fun bubbleModeLabel(mode: AgentMode, isPrivate: Boolean): String = when {
+    mode == AgentMode.Cloud -> "云端"
+    isPrivate -> "本机"
+    else -> "本地"
+}
+
+/**
+ * 把最新一条贴到视口底部。
+ *
+ * animateScrollToItem 会把条目顶到视口上沿，下面空出一大块；
+ * 对话式列表里新内容应该贴着底部出现，才像"接着往下说"。
+ */
+private suspend fun LazyListState.scrollToLatest(
+    index: Int,
+    spec: FiniteAnimationSpec<Float>
+) {
+    animateScrollToItem(index)
+    val info = layoutInfo
+    val item = info.visibleItemsInfo.firstOrNull { it.index == index } ?: return
+    val viewport = info.viewportEndOffset - info.viewportStartOffset
+    val overflow = viewport - item.size
+    if (overflow > 0) {
+        animateScrollBy(overflow.toFloat(), spec)
     }
 }
